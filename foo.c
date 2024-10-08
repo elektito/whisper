@@ -131,6 +131,8 @@ void read_value(struct reader *reader);
 
 void read_list(struct reader *reader)
 {
+    int reading_tail = 0;
+    int read_tail = 0;
     struct value *list_ptr = NULL;
     struct value *list_tail = NULL;
     int list_len = 0;
@@ -140,6 +142,20 @@ void read_list(struct reader *reader)
          read_token(reader->lexer))
     {
         read_value(reader);
+
+        if (read_tail) {
+            fprintf(stderr, "read error: more than one item after dot\n");
+            exit(1);
+        } else if (reading_tail) {
+            list_tail = malloc(sizeof(struct value));
+            memcpy(list_tail, &reader->value, sizeof(struct value));
+            read_tail = 1;
+            continue;
+        } else if (reader->lexer->cur_tok_type == TOK_ID && reader->lexer->cur_tok_len == 1 && reader->lexer->cur_tok[0] == '.') {
+            reading_tail = 1;
+            continue;
+        }
+
         list_len++;
         list_ptr = realloc(list_ptr, list_len * sizeof(struct value));
         memcpy(list_ptr + list_len - 1, &reader->value, sizeof(struct value));
