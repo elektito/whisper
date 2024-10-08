@@ -90,6 +90,141 @@ read_token(struct lexer *lexer)
     }
 }
 
+/*********************** reader ************************/
+
+enum value_type
+{
+    VAL_LIST,
+    VAL_ID,
+    VAL_NUM,
+};
+
+struct value
+{
+    enum value_type type;
+
+    int tok_start_idx;
+    int tok_len;
+
+    union {
+        struct {
+            struct value *ptr;
+            int length;
+            struct value *tail;
+        } list;
+
+        struct {
+            const char *name;
+            int name_len;
+        } identifier;
+
+        long number;
+    };
+};
+
+struct reader {
+    struct lexer *lexer;
+    struct value value;
+};
+
+void read_value(struct reader *reader);
+
+void read_list(struct reader *reader)
+{
+    struct value *list_ptr = NULL;
+    struct value *list_tail = NULL;
+    int list_len = 0;
+
+    for (read_token(reader->lexer);
+         reader->lexer->cur_tok_type != TOK_RPAR && reader->lexer->cur_tok_type != TOK_EOF;
+         read_token(reader->lexer))
+    {
+        read_value(reader);
+        list_len++;
+        list_ptr = realloc(list_ptr, list_len * sizeof(struct value));
+        memcpy(list_ptr + list_len - 1, &reader->value, sizeof(struct value));
+    }
+
+    if (reader->lexer->cur_tok_type != TOK_RPAR) {
+        fprintf(stderr, "read error: EOF in the middle of a list\n");
+        exit(1);
+    }
+
+    reader->value.type = VAL_LIST;
+    reader->value.list.ptr = list_ptr;
+    reader->value.list.length = list_len;
+    reader->value.list.tail = list_tail;
+
+    /* read past the RPAR */
+    read_token(reader->lexer);
+}
+
+void
+read_value(struct reader *reader)
+{
+    /* this function expects read_token to have been called already */
+
+    reader->value.tok_start_idx = reader->lexer->cur_tok - reader->lexer->program;
+    reader->value.tok_len = reader->lexer->cur_tok_len;
+
+    switch (reader->lexer->cur_tok_type)
+    {
+    case TOK_LPAR:
+        read_list(reader);
+        break;
+    case TOK_NUM:
+        reader->value.type = VAL_NUM;
+        reader->value.number = reader->lexer->cur_tok_num;
+        break;
+    case TOK_ID:
+        reader->value.type = VAL_ID;
+        reader->value.identifier.name = reader->lexer->cur_tok;
+        reader->value.identifier.name_len = reader->lexer->cur_tok_len;
+        break;
+    case TOK_EOF:
+        fprintf(stderr, "internal error: read_value called on EOF\n");
+        exit(1);
+    default:
+        fprintf(stderr, "read error\n");
+        exit(1);
+    }
+
+}
+
+/*********************** printer ************************/
+
+void
+print_value(struct value *value)
+{
+    switch (value->type) {
+    case VAL_NUM:
+        fprintf(stderr, "<number %d>", value->number);
+        break;
+    case VAL_ID:
+        fprintf(stderr, "<id %.*s>", value->identifier.name_len, value->identifier.name);
+        break;
+    case VAL_LIST:
+        fprintf(stderr, "<list (");
+
+        for (int i = 0; i < value->list.length; ++i) {
+            print_value(value->list.ptr + i);
+            if (i < value->list.length - 1) {
+                fprintf(stderr, " ");
+            }
+        }
+
+        if (value->list.tail) {
+            fprintf(stderr, " . ");
+            print_value(value->list.tail);
+        }
+
+        fprintf(stderr, ")>");
+        break;
+    default:
+        fprintf(stderr, "<unknown value>");
+    }
+}
+
 /*********************** main ************************/
 
 int
@@ -113,27 +248,15 @@ main(int argc, char const *argv[])
         .ptr = program,
     };
 
-    for (read_token(&lexer); lexer.cur_tok_type != TOK_EOF; read_token(&lexer)) {
-        const char *type_str;
-        switch (lexer.cur_tok_type) {
-        case TOK_LPAR:
-            type_str = "LPAR";
-            break;
-        case TOK_RPAR:
-            type_str = "RPAR";
-            break;
-        case TOK_NUM:
-            type_str = "NUM";
-            break;
-        case TOK_ID:
-            type_str = "ID";
-            break;
-        case TOK_EOF:
-            type_str = "EOF";
-            break;
-        }
+    struct reader reader = {
+        .lexer = &lexer,
+    };
 
-        printf("%s %.*s\n", type_str, lexer.cur_tok_len, lexer.cur_tok);
+    read_token(&lexer);
+    while (lexer.cur_tok_type != TOK_EOF) {
+        read_value(&reader);
+        print_value(&reader.value);
+        fprintf(stderr, "\n");
     }
 
     return 0;
