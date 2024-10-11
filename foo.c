@@ -138,8 +138,7 @@ void read_list(struct reader *reader)
     int list_len = 0;
 
     for (read_token(reader->lexer);
-         reader->lexer->cur_tok_type != TOK_RPAR && reader->lexer->cur_tok_type != TOK_EOF;
-         read_token(reader->lexer))
+         reader->lexer->cur_tok_type != TOK_RPAR && reader->lexer->cur_tok_type != TOK_EOF;)
     {
         read_value(reader);
 
@@ -170,9 +169,6 @@ void read_list(struct reader *reader)
     reader->value.list.ptr = list_ptr;
     reader->value.list.length = list_len;
     reader->value.list.tail = list_tail;
-
-    /* read past the RPAR */
-    read_token(reader->lexer);
 }
 
 void
@@ -205,6 +201,7 @@ read_value(struct reader *reader)
         exit(1);
     }
 
+    read_token(reader->lexer);
 }
 
 /*********************** printer ************************/
