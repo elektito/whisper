@@ -1,4 +1,6 @@
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +21,7 @@ read_file(const char *filename, long *length)
 }
 
 /*********************** lexer ************************/
+
 enum token_type
 {
     TOK_LPAR,
@@ -38,7 +41,7 @@ struct lexer
     enum token_type cur_tok_type;
     const char *cur_tok;
     int cur_tok_len;
-    long cur_tok_num;
+    int64_t cur_tok_num;
 };
 
 void
@@ -76,13 +79,13 @@ read_token(struct lexer *lexer)
         return;
     }
 
-    while (!isspace(*lexer->ptr) && *lexer->ptr != '(' && *lexer->ptr != ')') {
+    while (!isspace(*lexer->ptr) && *lexer->ptr != '(' && *lexer->ptr != ')' && lexer->ptr < lexer->program + lexer->program_length) {
         lexer->ptr++;
     }
 
     lexer->cur_tok_len = lexer->ptr - lexer->cur_tok;
 
-    lexer->cur_tok_num = strtol(lexer->cur_tok, &endptr, 10);
+    lexer->cur_tok_num = strtoll(lexer->cur_tok, &endptr, 10);
     if (endptr == lexer->ptr) {
         lexer->cur_tok_type = TOK_NUM;
     } else {
@@ -118,7 +121,7 @@ struct value
             int name_len;
         } identifier;
 
-        long number;
+        int64_t number;
     };
 };
 
@@ -204,6 +207,156 @@ read_value(struct reader *reader)
     read_token(reader->lexer);
 }
 
+/*********************** compiler ************************/
+
+struct compiler
+{
+    struct reader *reader;
+    const char *output_filename;
+    FILE *output_file;
+
+    int varnum;
+};
+
+int compile_form(struct compiler *compiler, struct value *form);
+
+void
+gen_code(struct compiler *compiler, const char *fmt, ...)
+{
+    va_list args;
+    char buf[256];
+
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    fprintf(compiler->output_file, "%s", buf);
+}
+
+int
+compile_number(struct compiler *compiler, struct value *form)
+{
+    int varnum = compiler->varnum++;
+    gen_code(compiler, "value x%d = fixnum(%lld);\n", varnum, form->number);
+    return varnum;
+}
+
+int
+compile_identifier(struct compiler *compiler, struct value *form)
+{
+    /*
+    int varnum = compiler->varnum++;
+    const char *mangled_name = mangle_name(form->identifier.name, form->identifier.name_len);
+    gen_code(compiler, "value X%d = %s;\n", varnum, mangled_name);
+    free(mangled_name);
+    return varnum;
+    */
+
+    return 12345;
+}
+
+int compile_car(struct compiler *compiler, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "car expects a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(compiler, &form->list.ptr[0]);
+    int dst_varnum = compiler->varnum++;
+    gen_code(compiler, "value x%d = car(x%d);", dst_varnum, arg_varnum);
+    return dst_varnum;
+}
+
+int compile_add(struct compiler *compiler, struct value *form)
+{
+    int dst_varnum;
+    int arg_varnum;
+
+    if (form->list.length == 1) {
+        dst_varnum = compiler->varnum++;
+        gen_code(compiler, "value x%d = 0;\n", dst_varnum);
+    }
+
+    arg_varnum = compile_form(compiler, &form->list.ptr[1]);
+    dst_varnum = arg_varnum;
+    for (int i = 2; i < form->list.length; ++i) {
+        dst_varnum = compile_form(compiler, &form->list.ptr[i]);
+        gen_code(compiler, "x%d += (int64_t) x%d;\n", dst_varnum, arg_varnum);
+        arg_varnum = dst_varnum;
+    }
+
+    return dst_varnum;
+}
+
+int
+compile_list(struct compiler *compiler, struct value *form)
+{
+    int varnum;
+
+    if (form->list.length == 0) {
+        fprintf(stderr, "the empty list is not a valid form\n");
+        exit(1);
+    }
+
+    struct value *list_car = &form->list.ptr[0];
+    if (list_car->type == VAL_ID &&
+        list_car->identifier.name_len == 3 &&
+        memcmp(list_car->identifier.name, "car", 3) == 0)
+    {
+        varnum = compile_car(compiler, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 1 &&
+               list_car->identifier.name[0] == '+')
+    {
+        varnum = compile_add(compiler, form);
+    }
+
+    return varnum;
+ }
+
+int
+compile_form(struct compiler *compiler, struct value *form)
+{
+    int varnum;
+    if (form->type == VAL_NUM) {
+        varnum = compile_number(compiler, form);
+    } else if (form->type == VAL_ID) {
+        varnum = compile_identifier(compiler, form);
+    } else if (form->type == VAL_LIST) {
+        varnum = compile_list(compiler, form);
+    } else {
+        fprintf(stderr, "unhandled value type\n");
+        exit(1);
+    }
+
+    return varnum;
+}
+
+void
+compile_program(struct compiler *compiler)
+{
+    FILE *fp = fopen(compiler->output_filename, "w");
+    compiler->output_file = fp;
+    fprintf(fp, "#include <stdint.h>\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "typedef void* value;\n");
+    fprintf(fp, "typedef void(*kont)(value v);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)");
+    fprintf(fp, "\n");
+    fprintf(fp, "int main(int argc, const char *argv[]) {\n");
+
+    while (compiler->reader->lexer->cur_tok_type != TOK_EOF) {
+        read_value(compiler->reader);
+        struct value *form = &compiler->reader->value;
+        compile_form(compiler, form);
+    }
+
+    fprintf(fp, "}\n");
+    fclose(fp);
+}
+
 /*********************** printer ************************/
 
 void
@@ -266,11 +419,11 @@ main(int argc, char const *argv[])
     };
 
     read_token(&lexer);
-    while (lexer.cur_tok_type != TOK_EOF) {
-        read_value(&reader);
-        print_value(&reader.value);
-        fprintf(stderr, "\n");
-    }
+    struct compiler compiler = {
+        .reader = &reader,
+        .output_filename = "a.c",
+    };
+    compile_program(&compiler);
 
     return 0;
 }
