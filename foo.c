@@ -314,6 +314,7 @@ struct function
     char *code;
     int code_size;
 
+    /* the counter used for naming variable names inside a function */
     int varnum;
 
     int vars[];
