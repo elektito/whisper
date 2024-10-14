@@ -393,7 +393,8 @@ compile_identifier(struct function *func, struct value *form)
     return 12345;
 }
 
-int compile_car(struct function *func, struct value *form)
+int
+compile_car(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "car expects a single argument\n");
@@ -406,7 +407,8 @@ int compile_car(struct function *func, struct value *form)
     return dst_varnum;
 }
 
-int compile_add(struct function *func, struct value *form)
+int
+compile_add(struct function *func, struct value *form)
 {
     int dst_varnum;
     int arg_varnum;
