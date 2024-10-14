@@ -124,9 +124,106 @@ struct value
 struct reader {
     struct lexer *lexer;
     struct value value;
+
+    int n_interned;
+    char **interned_name;
+    int *interned_name_len;
+    char **interned_mangled;
+    int *interned_mangled_len;
 };
 
 void read_value(struct reader *reader);
+
+char *
+mangle_name(const char *name, int name_len)
+{
+    char buf[1024];
+    char *dst = buf;
+    const char *src = name;
+    char num_buf[16];
+    int num_len;
+    int mangled_len;
+    char *ret_buf;
+
+    while (src < name + name_len) {
+        if (isalnum(*src)) {
+            if (dst - buf >= 1) {
+                fprintf(stderr, "name too long: %.*s\n", name_len, name);
+                exit(1);
+            }
+
+            *dst++ = *src++;
+        } else if (*src == '_') {
+            if (dst - buf >= 2) {
+                fprintf(stderr, "name too long: %.*s\n", name_len, name);
+                exit(1);
+            }
+
+            *dst++ = '_';
+            *dst++ = '_';
+        } else if (*src == '-') {
+            if (dst - buf >= 1) {
+                fprintf(stderr, "name too long: %.*s\n", name_len, name);
+                exit(1);
+            }
+
+            *dst = '_';
+        } else {
+            sprintf(num_buf, "%d", *src);
+            num_len = strlen(num_buf);
+            if (dst - buf > num_len) {
+                fprintf(stderr, "name too long: %.*s\n", name_len, name);
+                exit(1);
+            }
+
+            memcpy(dst, num_buf, num_len);
+            dst += num_len;
+        }
+    }
+
+    if (dst - buf >= 1) {
+        fprintf(stderr, "name too long: %.*s\n", name_len, name);
+        exit(1);
+    }
+
+    *dst = 0;
+
+    mangled_len = strlen(buf);
+    ret_buf = malloc(mangled_len);
+    memcpy(ret_buf, buf, mangled_len + 1);
+
+    return ret_buf;
+}
+
+int
+intern_name(struct reader *reader, const char *name, int name_len)
+{
+    int i;
+
+    for (i = 0; i < reader->n_interned; ++i) {
+        if (name_len == reader->interned_name_len[i] &&
+            memcmp(reader->interned_name[name_len], name, name_len) == 0)
+        {
+            return i;
+        }
+    }
+
+    reader->n_interned++;
+    reader->interned_name = realloc(reader->interned_name, sizeof(const char *) * reader->n_interned);
+    reader->interned_name_len = realloc(reader->interned_name_len, sizeof(const char *) * reader->n_interned);
+    reader->interned_mangled = realloc(reader->interned_mangled, sizeof(const char *) * reader->n_interned);
+    reader->interned_mangled_len = realloc(reader->interned_mangled_len, sizeof(const char *) * reader->n_interned);
+
+    i = reader->n_interned - 1;
+    reader->interned_name_len[i] = name_len;
+    reader->interned_name[i] = malloc(name_len);
+    memcpy(reader->interned_name[i], name, name_len);
+
+    reader->interned_mangled[i] = mangle_name(name, name_len);
+    reader->interned_mangled_len[i] = strlen(reader->interned_mangled[i]);
+
+    return i;
+}
 
 void read_list(struct reader *reader)
 {
@@ -191,6 +288,7 @@ read_value(struct reader *reader)
         reader->value.type = VAL_ID;
         reader->value.identifier.name = reader->lexer->cur_tok;
         reader->value.identifier.name_len = reader->lexer->cur_tok_len;
+        intern_name(reader, reader->lexer->cur_tok, reader->lexer->cur_tok_len);
         break;
     case TOK_EOF:
         fprintf(stderr, "internal error: read_value called on EOF\n");
