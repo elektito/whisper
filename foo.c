@@ -154,7 +154,7 @@ mangle_name(const char *name, int name_len)
 
             *dst++ = *src++;
         } else if (*src == '_') {
-            if (dst - buf >= 2) {
+            if (sizeof(buf) - (dst - buf) < 2) {
                 fprintf(stderr, "name too long: %.*s\n", name_len, name);
                 exit(1);
             }
@@ -162,7 +162,7 @@ mangle_name(const char *name, int name_len)
             *dst++ = '_';
             *dst++ = '_';
         } else if (*src == '-') {
-            if (dst - buf >= 1) {
+            if (sizeof(buf) - (dst - buf) < 1) {
                 fprintf(stderr, "name too long: %.*s\n", name_len, name);
                 exit(1);
             }
@@ -171,17 +171,20 @@ mangle_name(const char *name, int name_len)
         } else {
             sprintf(num_buf, "%d", *src);
             num_len = strlen(num_buf);
-            if (dst - buf > num_len) {
+            if (sizeof(buf) - (dst - buf) < num_len - 1) {
                 fprintf(stderr, "name too long: %.*s\n", name_len, name);
                 exit(1);
             }
 
+            *dst++ = '_';
             memcpy(dst, num_buf, num_len);
             dst += num_len;
         }
+
+        src++;
     }
 
-    if (dst - buf >= 1) {
+    if (sizeof(buf) - (dst - buf) < 1) {
         fprintf(stderr, "name too long: %.*s\n", name_len, name);
         exit(1);
     }
@@ -202,7 +205,7 @@ intern_name(struct reader *reader, const char *name, int name_len)
 
     for (i = 0; i < reader->n_interned; ++i) {
         if (name_len == reader->interned_name_len[i] &&
-            memcmp(reader->interned_name[name_len], name, name_len) == 0)
+            memcmp(reader->interned_name[i], name, name_len) == 0)
         {
             return i;
         }
@@ -303,45 +306,85 @@ read_value(struct reader *reader)
 
 /*********************** compiler ************************/
 
+struct function
+{
+    struct compiler *compiler;
+    char *name;
+
+    char *code;
+    int code_size;
+
+    int varnum;
+
+    int vars[];
+};
+
 struct compiler
 {
     struct reader *reader;
     const char *output_filename;
     FILE *output_file;
 
-    int varnum;
+    int n_functions;
+    struct function **functions;
 };
 
-int compile_form(struct compiler *compiler, struct value *form);
+int compile_form(struct function *func, struct value *form);
 
 void
-gen_code(struct compiler *compiler, const char *fmt, ...)
+gen_code(struct function *func, const char *fmt, ...)
 {
     va_list args;
-    char buf[256];
+    char buf[2048];
+    int len;
 
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    fprintf(compiler->output_file, "%s", buf);
+    len = strlen(buf);
+    func->code = realloc(func->code, func->code_size + len);
+    memcpy(func->code + func->code_size, buf, len);
+    func->code_size += len;
+}
+
+struct function *
+add_function(struct compiler *compiler, int nvars)
+{
+    char name_buf[1024];
+    int name_len;
+
+    struct function *func = calloc(1, sizeof(struct function) + nvars * sizeof(int));
+    func->compiler = compiler;
+    func->code_size = 0;
+    func->code = NULL;
+
+    snprintf(name_buf, sizeof(name_buf), "f%d", compiler->n_functions++);
+    name_len = strlen(name_buf);
+    func->name = malloc(name_len + 1);
+    memcpy(func->name, name_buf, name_len + 1);
+
+    compiler->functions = realloc(compiler->functions, compiler->n_functions);
+    compiler->functions[compiler->n_functions - 1] = func;
+
+    return func;
 }
 
 int
-compile_number(struct compiler *compiler, struct value *form)
+compile_number(struct function *func, struct value *form)
 {
-    int varnum = compiler->varnum++;
-    gen_code(compiler, "value x%d = fixnum(%lld);\n", varnum, form->number);
+    int varnum = func->varnum++;
+    gen_code(func, "    value x%d = fixnum(%lld);\n", varnum, form->number);
     return varnum;
 }
 
 int
-compile_identifier(struct compiler *compiler, struct value *form)
+compile_identifier(struct function *func, struct value *form)
 {
     /*
     int varnum = compiler->varnum++;
     const char *mangled_name = mangle_name(form->identifier.name, form->identifier.name_len);
-    gen_code(compiler, "value X%d = %s;\n", varnum, mangled_name);
+    gen_code(compiler, "    value X%d = %s;\n", varnum, mangled_name);
     free(mangled_name);
     return varnum;
     */
@@ -349,34 +392,34 @@ compile_identifier(struct compiler *compiler, struct value *form)
     return 12345;
 }
 
-int compile_car(struct compiler *compiler, struct value *form)
+int compile_car(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "car expects a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(compiler, &form->list.ptr[0]);
-    int dst_varnum = compiler->varnum++;
-    gen_code(compiler, "value x%d = car(x%d);", dst_varnum, arg_varnum);
+    int arg_varnum = compile_form(func, &form->list.ptr[0]);
+    int dst_varnum = func->varnum++;
+    gen_code(func, "    value x%d = car(x%d);", dst_varnum, arg_varnum);
     return dst_varnum;
 }
 
-int compile_add(struct compiler *compiler, struct value *form)
+int compile_add(struct function *func, struct value *form)
 {
     int dst_varnum;
     int arg_varnum;
 
     if (form->list.length == 1) {
-        dst_varnum = compiler->varnum++;
-        gen_code(compiler, "value x%d = 0;\n", dst_varnum);
+        dst_varnum = func->varnum++;
+        gen_code(func, "    value x%d = 0;\n", dst_varnum);
     }
 
-    arg_varnum = compile_form(compiler, &form->list.ptr[1]);
+    arg_varnum = compile_form(func, &form->list.ptr[1]);
     dst_varnum = arg_varnum;
     for (int i = 2; i < form->list.length; ++i) {
-        dst_varnum = compile_form(compiler, &form->list.ptr[i]);
-        gen_code(compiler, "x%d += (int64_t) x%d;\n", dst_varnum, arg_varnum);
+        dst_varnum = compile_form(func, &form->list.ptr[i]);
+        gen_code(func, "    x%d += (int64_t) x%d;\n", dst_varnum, arg_varnum);
         arg_varnum = dst_varnum;
     }
 
@@ -384,7 +427,7 @@ int compile_add(struct compiler *compiler, struct value *form)
 }
 
 int
-compile_list(struct compiler *compiler, struct value *form)
+compile_list(struct function *func, struct value *form)
 {
     int varnum;
 
@@ -398,27 +441,29 @@ compile_list(struct compiler *compiler, struct value *form)
         list_car->identifier.name_len == 3 &&
         memcmp(list_car->identifier.name, "car", 3) == 0)
     {
-        varnum = compile_car(compiler, form);
+        varnum = compile_car(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 1 &&
                list_car->identifier.name[0] == '+')
     {
-        varnum = compile_add(compiler, form);
+        varnum = compile_add(func, form);
     }
 
     return varnum;
  }
 
+void
+print_value(struct value *value);
 int
-compile_form(struct compiler *compiler, struct value *form)
+compile_form(struct function *func, struct value *form)
 {
     int varnum;
     if (form->type == VAL_NUM) {
-        varnum = compile_number(compiler, form);
+        varnum = compile_number(func, form);
     } else if (form->type == VAL_ID) {
-        varnum = compile_identifier(compiler, form);
+        varnum = compile_identifier(func, form);
     } else if (form->type == VAL_LIST) {
-        varnum = compile_list(compiler, form);
+        varnum = compile_list(func, form);
     } else {
         fprintf(stderr, "unhandled value type\n");
         exit(1);
@@ -430,6 +475,13 @@ compile_form(struct compiler *compiler, struct value *form)
 void
 compile_program(struct compiler *compiler)
 {
+    struct function *startup_func = add_function(compiler, 0);
+    while (compiler->reader->lexer->cur_tok_type != TOK_EOF) {
+        read_value(compiler->reader);
+        compile_form(startup_func, &compiler->reader->value);
+    }
+    gen_code(startup_func, "    return x%d;\n", startup_func->varnum - 1);
+
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
     fprintf(fp, "#include <stdint.h>\n");
@@ -439,14 +491,22 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "\n");
     fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)");
     fprintf(fp, "\n");
-    fprintf(fp, "int main(int argc, const char *argv[]) {\n");
 
-    while (compiler->reader->lexer->cur_tok_type != TOK_EOF) {
-        read_value(compiler->reader);
-        struct value *form = &compiler->reader->value;
-        compile_form(compiler, form);
+    /* add function prototypes */
+    for (int i = 0; i < compiler->n_functions; ++i) {
+        fprintf(fp, "value %s(environment env, int nargs, ...);\n", compiler->functions[i]->name);
     }
 
+    /* add function implementations */
+    for (int i = 0; i < compiler->n_functions; ++i) {
+        fprintf(fp, "value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
+        fwrite(compiler->functions[i]->code, 1, compiler->functions[i]->code_size, fp);
+        fprintf(fp, "}\n");
+    }
+
+    fprintf(fp, "\n");
+    fprintf(fp, "int main(int argc, const char *argv[]) {\n");
+    fprintf(fp, "    %s(NULL, 0);\n", startup_func->name);
     fprintf(fp, "}\n");
     fclose(fp);
 }
@@ -458,7 +518,7 @@ print_value(struct value *value)
 {
     switch (value->type) {
     case VAL_NUM:
-        fprintf(stderr, "<number %d>", value->number);
+        fprintf(stderr, "<number %ld>", value->number);
         break;
     case VAL_ID:
         fprintf(stderr, "<id %.*s>", value->identifier.name_len, value->identifier.name);
