@@ -657,7 +657,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "typedef void(*kont)(value v);\n");
     fprintf(fp, "typedef value(*funcptr)(environment env, int nargs, ...);\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)");
+    fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)\n");
     fprintf(fp, "\n");
     fprintf(fp, "value make_closure(funcptr func, int nargs, int nfreevars, ...) {\n");
     fprintf(fp, "    va_list args;\n");
