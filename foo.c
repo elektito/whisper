@@ -491,7 +491,7 @@ compile_lambda(struct function *func, struct value *form)
     gen_code(new_func, "    va_list args;\n");
     gen_code(new_func, "    va_start(args, nargs);\n");
     for (int i = 0; i < params->list.length; ++i) {
-        gen_code(new_func, "    %.*s = va_arg(args, value);\n",
+        gen_code(new_func, "    value %.*s = va_arg(args, value);\n",
                 func->compiler->reader->interned_mangled_len[params->list.ptr[i].identifier.interned],
                 func->compiler->reader->interned_mangled[params->list.ptr[i].identifier.interned]);
     }
@@ -567,13 +567,9 @@ compile_call(struct function *func, struct value *form)
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, "    _x%d = ((closure) _x%d)->func(", ret_varnum, func_varnum);
+    gen_code(func, "    value x%d = ((closure) x%d)->func(env, %d", ret_varnum, func_varnum, form->list.length - 1);
     for (int i = 0; i < form->list.length - 1; ++i) {
-        if (i == 0) {
-            gen_code(func, "_x%d", arg_varnums[i]);
-        } else {
-            gen_code(func, ", _x%d", arg_varnums[i]);
-        }
+        gen_code(func, ", x%d", arg_varnums[i]);
     }
     gen_code(func, ");\n");
 
@@ -642,14 +638,10 @@ compile_program(struct compiler *compiler)
 
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
+    fprintf(fp, "#include <stdarg.h>\n");
+    fprintf(fp, "#include <stddef.h>\n");
     fprintf(fp, "#include <stdint.h>\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "struct closure {\n");
-    fprintf(fp, "    void (*func)(environment *env, int nargs, ...);\n");
-    fprintf(fp, "    int n_args;\n");
-    fprintf(fp, "    int n_freevars;\n");
-    fprintf(fp, "    int freevars[];\n");
-    fprintf(fp, "}\n");
+    fprintf(fp, "#include <stdlib.h>\n");
     fprintf(fp, "\n");
     fprintf(fp, "typedef void *value;\n");
     fprintf(fp, "typedef value *environment;\n");
@@ -657,11 +649,18 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "typedef void(*kont)(value v);\n");
     fprintf(fp, "typedef value(*funcptr)(environment env, int nargs, ...);\n");
     fprintf(fp, "\n");
+    fprintf(fp, "struct closure {\n");
+    fprintf(fp, "    value (*func)(environment env, int nargs, ...);\n");
+    fprintf(fp, "    int n_args;\n");
+    fprintf(fp, "    int n_freevars;\n");
+    fprintf(fp, "    int freevars[];\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
     fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)\n");
     fprintf(fp, "\n");
-    fprintf(fp, "value make_closure(funcptr func, int nargs, int nfreevars, ...) {\n");
+    fprintf(fp, "static value make_closure(funcptr func, int nargs, int nfreevars, ...) {\n");
     fprintf(fp, "    va_list args;\n");
-    fprintf(fp, "    struct closure *closure = calloc(sizeof(struct closure) + nfreevars * sizeof(int));\n");
+    fprintf(fp, "    struct closure *closure = calloc(1, sizeof(struct closure) + nfreevars * sizeof(int));\n");
     fprintf(fp, "    closure->func = func;\n");
     fprintf(fp, "    closure->n_args = nargs;\n");
     fprintf(fp, "    closure->n_freevars = nfreevars;\n");
@@ -685,7 +684,7 @@ compile_program(struct compiler *compiler)
         fprintf(fp, "static value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
         fwrite(compiler->functions[i]->code, 1, compiler->functions[i]->code_size, fp);
         if (compiler->functions[i]->varnum > 0) {
-            fprintf(fp, "    return _x%d;\n", compiler->functions[i]->varnum - 1);
+            fprintf(fp, "    return x%d;\n", compiler->functions[i]->varnum - 1);
         }
         fprintf(fp, "}\n\n");
     }
