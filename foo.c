@@ -606,6 +606,22 @@ compile_call(struct function *func, struct value *form)
 }
 
 int
+compile_display(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "display expects a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = display(x%d);\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -631,6 +647,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "cons", 4) == 0)
     {
         varnum = compile_cons(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 7 &&
+               memcmp(list_car->identifier.name, "display", 7) == 0)
+    {
+        varnum = compile_display(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 1 &&
                list_car->identifier.name[0] == '+')
@@ -690,6 +711,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#include <stdarg.h>\n");
     fprintf(fp, "#include <stddef.h>\n");
     fprintf(fp, "#include <stdint.h>\n");
+    fprintf(fp, "#include <stdio.h>\n");
     fprintf(fp, "#include <stdlib.h>\n");
     fprintf(fp, "\n");
     fprintf(fp, "typedef void *value;\n");
@@ -711,12 +733,19 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM_TAG 0x0\n");
+    fprintf(fp, "#define FIXNUM_MASK 0x3\n");
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
+    fprintf(fp, "#define VOID_TAG 0x48\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM(v) (value)((int64_t)(v) << 3 | FIXNUM_TAG)\n");
     fprintf(fp, "#define CLOSURE(v) (value)((int64_t)(v) << 3 | CLOSURE_TAG)\n");
     fprintf(fp, "#define PAIR(v) (value)((int64_t)(v) << 3 | PAIR_TAG)\n");
+    fprintf(fp, "#define VOID (value)(VOID_TAG)\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & FIXNUM_MASK) == FIXNUM_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value envget(environment env, int index) {\n");
     fprintf(fp, "    value *vars = env;\n");
@@ -742,6 +771,16 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    pair->car = car;\n");
     fprintf(fp, "    pair->cdr = cdr;\n");
     fprintf(fp, "    return PAIR(pair);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value display(value v) {\n");
+    fprintf(fp, "    if (IS_FIXNUM(v)) {\n");
+    fprintf(fp, "        printf(\"%%ld\", GET_FIXNUM(v));\n");
+    fprintf(fp, "    } else {\n");
+    fprintf(fp, "        printf(\"<object>\");\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    return VOID;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
