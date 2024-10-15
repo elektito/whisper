@@ -596,7 +596,7 @@ compile_call(struct function *func, struct value *form)
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = ((closure) x%d)->func(env, %d", ret_varnum, func_varnum, form->list.length - 1);
+    gen_code(func, "    value x%d = ((closure) x%d)->func(((closure) x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
     for (int i = 0; i < form->list.length - 1; ++i) {
         gen_code(func, ", x%d", arg_varnums[i]);
     }
@@ -702,7 +702,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    value (*func)(environment env, int nargs, ...);\n");
     fprintf(fp, "    int n_args;\n");
     fprintf(fp, "    int n_freevars;\n");
-    fprintf(fp, "    int freevars[];\n");
+    fprintf(fp, "    value freevars[];\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
     fprintf(fp, "struct pair {\n");
@@ -731,7 +731,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    closure->n_freevars = nfreevars;\n");
     fprintf(fp, "    va_start(args, nfreevars);\n");
     fprintf(fp, "    for (int i = 0; i < nfreevars; ++i) {\n");
-    fprintf(fp, "        closure->freevars[i] = va_arg(args, int);\n");
+    fprintf(fp, "        closure->freevars[i] = va_arg(args, value);\n");
     fprintf(fp, "    };\n");
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "    return CLOSURE(closure);\n");
