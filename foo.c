@@ -387,7 +387,7 @@ int
 compile_number(struct function *func, struct value *form)
 {
     int varnum = func->varnum++;
-    gen_code(func, "    value x%d = fixnum(%lld);\n", varnum, form->number);
+    gen_code(func, "    value x%d = FIXNUM(%lld);\n", varnum, form->number);
     return varnum;
 }
 
@@ -413,7 +413,7 @@ compile_identifier(struct function *func, struct value *form)
         for (int j = 0; j < func->n_freevars; ++j) {
             if (func->freevars[j] == form->identifier.interned) {
                 /* it's been used before */
-                gen_code(func, "    value x%d = getenv(env, %d);\n", varnum, j);
+                gen_code(func, "    value x%d = envget(env, %d);\n", varnum, j);
                 found = 1;
                 break;
             }
@@ -423,7 +423,7 @@ compile_identifier(struct function *func, struct value *form)
             func->n_freevars++;
             func->freevars = realloc(func->freevars, func->n_freevars * sizeof(interned_string));
             func->freevars[func->n_freevars - 1] = form->identifier.interned;
-            gen_code(func, "    value x%d = getenv(env, %d);\n", varnum, func->n_freevars - 1);
+            gen_code(func, "    value x%d = envget(env, %d);\n", varnum, func->n_freevars - 1);
         }
     }
 
@@ -441,6 +441,35 @@ compile_car(struct function *func, struct value *form)
     int arg_varnum = compile_form(func, &form->list.ptr[0]);
     int dst_varnum = func->varnum++;
     gen_code(func, "    value x%d = car(x%d);", dst_varnum, arg_varnum);
+    return dst_varnum;
+}
+
+int
+compile_cdr(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "cdr expects a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[0]);
+    int dst_varnum = func->varnum++;
+    gen_code(func, "    value x%d = cdr(x%d);", dst_varnum, arg_varnum);
+    return dst_varnum;
+}
+
+int
+compile_cons(struct function *func, struct value *form)
+{
+    if (form->list.length != 3) {
+        fprintf(stderr, "cons expects a two arguments\n");
+        exit(1);
+    }
+
+    int car_varnum = compile_form(func, &form->list.ptr[1]);
+    int cdr_varnum = compile_form(func, &form->list.ptr[2]);
+    int dst_varnum = func->varnum++;
+    gen_code(func, "    value x%d = make_pair(x%d, x%d);\n", dst_varnum, car_varnum, cdr_varnum);
     return dst_varnum;
 }
 
@@ -526,7 +555,7 @@ compile_lambda(struct function *func, struct value *form)
              * referenced. */
             for (int j = 0; j < func->n_freevars; ++j) {
                 if (new_func->freevars[i] == func->freevars[j]) {
-                    snprintf(buf, sizeof(buf), "getenv(env, %d)", j);
+                    snprintf(buf, sizeof(buf), "envget(env, %d)", j);
                     fvar = buf;
                     fvar_len = strlen(buf);
                 }
@@ -540,7 +569,7 @@ compile_lambda(struct function *func, struct value *form)
             func->freevars = realloc(func->freevars, func->n_freevars);
             func->freevars[func->n_freevars - 1] = new_func->freevars[i];
 
-            snprintf(buf, sizeof(buf), "getenv(env, %d)", func->n_freevars - 1);
+            snprintf(buf, sizeof(buf), "envget(env, %d)", func->n_freevars - 1);
             fvar = buf;
             fvar_len = strlen(buf);
         }
@@ -592,6 +621,16 @@ compile_list(struct function *func, struct value *form)
         memcmp(list_car->identifier.name, "car", 3) == 0)
     {
         varnum = compile_car(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 3 &&
+               memcmp(list_car->identifier.name, "cdr", 3) == 0)
+    {
+        varnum = compile_cdr(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 4 &&
+               memcmp(list_car->identifier.name, "cons", 4) == 0)
+    {
+        varnum = compile_cons(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 1 &&
                list_car->identifier.name[0] == '+')
@@ -656,7 +695,23 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    int freevars[];\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)\n");
+    fprintf(fp, "struct pair {\n");
+    fprintf(fp, "    value car;\n");
+    fprintf(fp, "    value cdr;\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "#define FIXNUM_TAG 0x0\n");
+    fprintf(fp, "#define CLOSURE_TAG 0x02\n");
+    fprintf(fp, "#define PAIR_TAG 0x04\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "#define FIXNUM(v) (value)((int64_t)(v) << 3 | FIXNUM_TAG)\n");
+    fprintf(fp, "#define CLOSURE(v) (value)((int64_t)(v) << 3 | CLOSURE_TAG)\n");
+    fprintf(fp, "#define PAIR(v) (value)((int64_t)(v) << 3 | PAIR_TAG)\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value envget(environment env, int index) {\n");
+    fprintf(fp, "    value *vars = env;\n");
+    fprintf(fp, "    return vars[index];\n");
+    fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value make_closure(funcptr func, int nargs, int nfreevars, ...) {\n");
     fprintf(fp, "    va_list args;\n");
@@ -669,7 +724,14 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        closure->freevars[i] = va_arg(args, int);\n");
     fprintf(fp, "    };\n");
     fprintf(fp, "    va_end(args);\n");
-    fprintf(fp, "    return closure;\n");
+    fprintf(fp, "    return CLOSURE(closure);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value make_pair(value car, value cdr) {\n");
+    fprintf(fp, "    struct pair *pair = malloc(sizeof(struct pair));\n");
+    fprintf(fp, "    pair->car = car;\n");
+    fprintf(fp, "    pair->cdr = cdr;\n");
+    fprintf(fp, "    return PAIR(pair);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
