@@ -91,6 +91,10 @@ read_token(struct lexer *lexer)
 
 /*********************** reader ************************/
 
+/* interned_string is used when we hold an index into the
+ * interned_* arrays in struct reader. */
+typedef int interned_string;
+
 enum value_type
 {
     VAL_LIST,
@@ -115,6 +119,7 @@ struct value
         struct {
             const char *name;
             int name_len;
+            interned_string interned;
         } identifier;
 
         int64_t number;
@@ -145,9 +150,11 @@ mangle_name(const char *name, int name_len)
     int mangled_len;
     char *ret_buf;
 
+    *dst++ = '_';
+
     while (src < name + name_len) {
         if (isalnum(*src)) {
-            if (dst - buf >= 1) {
+            if (sizeof(buf) - (dst - buf) < 1) {
                 fprintf(stderr, "name too long: %.*s\n", name_len, name);
                 exit(1);
             }
@@ -291,7 +298,7 @@ read_value(struct reader *reader)
         reader->value.type = VAL_ID;
         reader->value.identifier.name = reader->lexer->cur_tok;
         reader->value.identifier.name_len = reader->lexer->cur_tok_len;
-        intern_name(reader, reader->lexer->cur_tok, reader->lexer->cur_tok_len);
+        reader->value.identifier.interned = intern_name(reader, reader->lexer->cur_tok, reader->lexer->cur_tok_len);
         break;
     case TOK_EOF:
         fprintf(stderr, "internal error: read_value called on EOF\n");
@@ -317,7 +324,11 @@ struct function
     /* the counter used for naming variable names inside a function */
     int varnum;
 
-    int vars[];
+    int n_freevars;
+    interned_string *freevars;
+
+    int n_params;
+    interned_string params[];
 };
 
 struct compiler
@@ -350,15 +361,16 @@ gen_code(struct function *func, const char *fmt, ...)
 }
 
 struct function *
-add_function(struct compiler *compiler, int nvars)
+add_function(struct compiler *compiler, int nparams)
 {
     char name_buf[1024];
     int name_len;
 
-    struct function *func = calloc(1, sizeof(struct function) + nvars * sizeof(int));
+    struct function *func = calloc(1, sizeof(struct function) + nparams * sizeof(interned_string));
     func->compiler = compiler;
     func->code_size = 0;
     func->code = NULL;
+    func->n_params = nparams;
 
     snprintf(name_buf, sizeof(name_buf), "f%d", compiler->n_functions++);
     name_len = strlen(name_buf);
@@ -382,15 +394,40 @@ compile_number(struct function *func, struct value *form)
 int
 compile_identifier(struct function *func, struct value *form)
 {
-    /*
-    int varnum = compiler->varnum++;
-    const char *mangled_name = mangle_name(form->identifier.name, form->identifier.name_len);
-    gen_code(compiler, "    value X%d = %s;\n", varnum, mangled_name);
-    free(mangled_name);
-    return varnum;
-    */
+    int found = 0;
+    int varnum = func->varnum++;
 
-    return 12345;
+    for (int i = 0; i < func->n_params; ++i) {
+        if (func->params[i] == form->identifier.interned) {
+            gen_code(func, "    value x%d = %.*s;\n",
+                     varnum,
+                     func->compiler->reader->interned_mangled_len[form->identifier.interned],
+                     func->compiler->reader->interned_mangled[form->identifier.interned]);
+            found = 1;
+            break;
+        }
+    }
+
+    if (!found) {
+        /* it's a free variable */
+        for (int j = 0; j < func->n_freevars; ++j) {
+            if (func->freevars[j] == form->identifier.interned) {
+                /* it's been used before */
+                gen_code(func, "    value x%d = getenv(env, %d);\n", varnum, j);
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found) {
+            func->n_freevars++;
+            func->freevars = realloc(func->freevars, func->n_freevars * sizeof(interned_string));
+            func->freevars[func->n_freevars - 1] = form->identifier.interned;
+            gen_code(func, "    value x%d = getenv(env, %d);\n", varnum, func->n_freevars - 1);
+        }
+    }
+
+    return varnum;
 }
 
 int
@@ -430,6 +467,92 @@ compile_add(struct function *func, struct value *form)
 }
 
 int
+compile_lambda(struct function *func, struct value *form)
+{
+    int varnum = func->varnum++;
+
+    if (form->list.length < 3) {
+        fprintf(stderr, "invalid lambda form\n");
+        exit(1);
+    }
+
+    struct value *params = &form->list.ptr[1];
+
+    if (params->type != VAL_LIST || params->list.tail != NULL) {
+        fprintf(stderr, "rest parameters not supported yet\n");
+        exit(1);
+    }
+
+    struct function *new_func = add_function(func->compiler, form->list.ptr[1].list.length);
+    for (int i = 0; i < params->list.length; ++i) {
+        new_func->params[i] = params->list.ptr[i].identifier.interned;
+    }
+
+    gen_code(new_func, "    va_list args;\n");
+    gen_code(new_func, "    va_start(args, nargs);\n");
+    for (int i = 0; i < params->list.length; ++i) {
+        gen_code(new_func, "    %.*s = va_arg(args, value);\n",
+                func->compiler->reader->interned_mangled_len[params->list.ptr[i].identifier.interned],
+                func->compiler->reader->interned_mangled[params->list.ptr[i].identifier.interned]);
+    }
+    gen_code(new_func, "    va_end(args);\n");
+    gen_code(new_func, "\n");
+
+    for (int i = 2; i < form->list.length; ++i) {
+        compile_form(new_func, &form->list.ptr[i]);
+    }
+
+    /* now generate to code for referencing the function */
+    gen_code(func, "    value x%d = make_closure(%s, %d, %d",
+             varnum,
+             new_func->name,
+             params->list.length,
+             new_func->n_freevars);
+    for (int i = 0; i < new_func->n_freevars; ++i) {
+        char buf[64];
+        char *fvar = NULL;
+        int fvar_len;
+
+        for (int j = 0; j < func->n_params; ++j) {
+            if (new_func->freevars[i] == func->params[j]) {
+                fvar = func->compiler->reader->interned_mangled[func->params[j]];
+                fvar_len = func->compiler->reader->interned_mangled_len[func->params[j]];
+            }
+        }
+
+        if (fvar == NULL) {
+            /* not one of the function's parameters; it's a free
+             * variable here too. see if it's already been
+             * referenced. */
+            for (int j = 0; j < func->n_freevars; ++j) {
+                if (new_func->freevars[i] == func->freevars[j]) {
+                    snprintf(buf, sizeof(buf), "getenv(env, %d)", j);
+                    fvar = buf;
+                    fvar_len = strlen(buf);
+                }
+            }
+        }
+
+        if (fvar == NULL) {
+            /* the free variable has not been referenced before; add it
+             * to the list of free variables. */
+            func->n_freevars++;
+            func->freevars = realloc(func->freevars, func->n_freevars);
+            func->freevars[func->n_freevars - 1] = new_func->freevars[i];
+
+            snprintf(buf, sizeof(buf), "getenv(env, %d)", func->n_freevars - 1);
+            fvar = buf;
+            fvar_len = strlen(buf);
+        }
+
+        gen_code(func, ", %.*s", fvar_len, fvar);
+    }
+    gen_code(func, ");\n");
+
+    return varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -450,13 +573,17 @@ compile_list(struct function *func, struct value *form)
                list_car->identifier.name[0] == '+')
     {
         varnum = compile_add(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 6 &&
+               memcmp(list_car->identifier.name, "lambda", 5) == 0)
+    {
+        varnum = compile_lambda(func, form);
+    } else {
     }
 
     return varnum;
  }
 
-void
-print_value(struct value *value);
 int
 compile_form(struct function *func, struct value *form)
 {
@@ -483,28 +610,54 @@ compile_program(struct compiler *compiler)
         read_value(compiler->reader);
         compile_form(startup_func, &compiler->reader->value);
     }
-    gen_code(startup_func, "    return x%d;\n", startup_func->varnum - 1);
 
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
     fprintf(fp, "#include <stdint.h>\n");
     fprintf(fp, "\n");
+    fprintf(fp, "struct closure {\n");
+    fprintf(fp, "    void (*func)(environment *env, int nargs, ...);\n");
+    fprintf(fp, "    int n_args;\n");
+    fprintf(fp, "    int n_freevars;\n");
+    fprintf(fp, "    int freevars[];\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "typedef void* environment;\n");
     fprintf(fp, "typedef void* value;\n");
     fprintf(fp, "typedef void(*kont)(value v);\n");
+    fprintf(fp, "typedef value(*funcptr)(environment env, int nargs, ...);\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define fixnum(v) (value)((int64_t)(v) << 3)");
+    fprintf(fp, "\n");
+    fprintf(fp, "value make_closure(funcptr func, int nargs, int nfreevars, ...) {\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    struct closure *closure = calloc(sizeof(struct closure) + nfreevars * sizeof(int));\n");
+    fprintf(fp, "    closure->func = func;\n");
+    fprintf(fp, "    closure->n_args = nargs;\n");
+    fprintf(fp, "    closure->n_freevars = nfreevars;\n");
+    fprintf(fp, "    va_start(args, nfreevars);\n");
+    fprintf(fp, "    for (int i = 0; i < nfreevars; ++i) {\n");
+    fprintf(fp, "        closure->freevars[i] = va_arg(args, int);\n");
+    fprintf(fp, "    };\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return closure;\n");
+    fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
     /* add function prototypes */
     for (int i = 0; i < compiler->n_functions; ++i) {
-        fprintf(fp, "value %s(environment env, int nargs, ...);\n", compiler->functions[i]->name);
+        fprintf(fp, "static value %s(environment env, int nargs, ...);\n", compiler->functions[i]->name);
     }
+    fprintf(fp, "\n");
 
     /* add function implementations */
     for (int i = 0; i < compiler->n_functions; ++i) {
-        fprintf(fp, "value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
+        fprintf(fp, "static value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
         fwrite(compiler->functions[i]->code, 1, compiler->functions[i]->code_size, fp);
-        fprintf(fp, "}\n");
+        if (compiler->functions[i]->varnum > 0) {
+            fprintf(fp, "    return x%d;\n", compiler->functions[i]->varnum - 1);
+        }
+        fprintf(fp, "}\n\n");
     }
 
     fprintf(fp, "\n");
