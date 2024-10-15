@@ -651,8 +651,8 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    int freevars[];\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "typedef void* environment;\n");
-    fprintf(fp, "typedef void* value;\n");
+    fprintf(fp, "typedef void *value;\n");
+    fprintf(fp, "typedef value *environment;\n");
     fprintf(fp, "typedef struct closure *closure;\n");
     fprintf(fp, "typedef void(*kont)(value v);\n");
     fprintf(fp, "typedef value(*funcptr)(environment env, int nargs, ...);\n");
