@@ -553,6 +553,34 @@ compile_lambda(struct function *func, struct value *form)
 }
 
 int
+compile_call(struct function *func, struct value *form)
+{
+    int ret_varnum;
+    int func_varnum;
+    int *arg_varnums;
+
+    func_varnum = compile_form(func, &form->list.ptr[0]);
+
+    arg_varnums = malloc(sizeof(int) * (form->list.length - 1));
+    for (int i = 1; i < form->list.length; ++i) {
+        arg_varnums[i - 1] = compile_form(func, &form->list.ptr[i]);
+    }
+
+    ret_varnum = func->varnum++;
+    gen_code(func, "    _x%d = ((closure) _x%d)->func(", ret_varnum, func_varnum);
+    for (int i = 0; i < form->list.length - 1; ++i) {
+        if (i == 0) {
+            gen_code(func, "_x%d", arg_varnums[i]);
+        } else {
+            gen_code(func, ", _x%d", arg_varnums[i]);
+        }
+    }
+    gen_code(func, ");\n");
+
+    return ret_varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -579,6 +607,7 @@ compile_list(struct function *func, struct value *form)
     {
         varnum = compile_lambda(func, form);
     } else {
+        varnum = compile_call(func, form);
     }
 
     return varnum;
@@ -624,6 +653,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "\n");
     fprintf(fp, "typedef void* environment;\n");
     fprintf(fp, "typedef void* value;\n");
+    fprintf(fp, "typedef struct closure *closure;\n");
     fprintf(fp, "typedef void(*kont)(value v);\n");
     fprintf(fp, "typedef value(*funcptr)(environment env, int nargs, ...);\n");
     fprintf(fp, "\n");
@@ -655,7 +685,7 @@ compile_program(struct compiler *compiler)
         fprintf(fp, "static value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
         fwrite(compiler->functions[i]->code, 1, compiler->functions[i]->code_size, fp);
         if (compiler->functions[i]->varnum > 0) {
-            fprintf(fp, "    return x%d;\n", compiler->functions[i]->varnum - 1);
+            fprintf(fp, "    return _x%d;\n", compiler->functions[i]->varnum - 1);
         }
         fprintf(fp, "}\n\n");
     }
