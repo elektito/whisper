@@ -675,6 +675,16 @@ compile_program(struct compiler *compiler)
         compile_form(startup_func, &compiler->reader->value);
     }
 
+    if (startup_func->n_freevars > 0) {
+        for (int i = 0; i < startup_func->n_freevars; ++i) {
+            fprintf(stderr, "undefined variable: %.*s\n",
+                    compiler->reader->interned_name_len[startup_func->freevars[i]],
+                    compiler->reader->interned_name[startup_func->freevars[i]]);
+        }
+
+        exit(1);
+    }
+
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
     fprintf(fp, "#include <stdarg.h>\n");
