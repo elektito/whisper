@@ -496,16 +496,12 @@ compile_add(struct function *func, struct value *form)
 }
 
 int
-compile_lambda(struct function *func, struct value *form)
+compile_function(struct function *func, struct value *form,
+                 int params_idx, int body_start_idx)
 {
     int varnum = func->varnum++;
 
-    if (form->list.length < 3) {
-        fprintf(stderr, "invalid lambda form\n");
-        exit(1);
-    }
-
-    struct value *params = &form->list.ptr[1];
+    struct value *params = &form->list.ptr[params_idx];
 
     if (params->type != VAL_LIST || params->list.tail != NULL) {
         fprintf(stderr, "rest parameters not supported yet\n");
@@ -527,7 +523,7 @@ compile_lambda(struct function *func, struct value *form)
     gen_code(new_func, "    va_end(args);\n");
     gen_code(new_func, "\n");
 
-    for (int i = 2; i < form->list.length; ++i) {
+    for (int i = body_start_idx; i < form->list.length; ++i) {
         compile_form(new_func, &form->list.ptr[i]);
     }
 
@@ -582,6 +578,17 @@ compile_lambda(struct function *func, struct value *form)
 }
 
 int
+compile_lambda(struct function *func, struct value *form)
+{
+    if (form->list.length < 3) {
+        fprintf(stderr, "invalid lambda form\n");
+        exit(1);
+    }
+
+    return compile_function(func, form, 1, 2);
+}
+
+int
 compile_call(struct function *func, struct value *form)
 {
     int ret_varnum;
@@ -596,7 +603,7 @@ compile_call(struct function *func, struct value *form)
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = ((closure) x%d)->func(((closure) x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
+    gen_code(func, "    value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
     for (int i = 0; i < form->list.length - 1; ++i) {
         gen_code(func, ", x%d", arg_varnums[i]);
     }
@@ -619,6 +626,51 @@ compile_display(struct function *func, struct value *form)
     gen_code(func, "    value x%d = display(x%d);\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
+}
+
+int
+compile_define(struct function *func, struct value *form)
+{
+    int varnum;
+
+    if (form->list.length < 2) {
+        fprintf(stderr, "malformed define\n");
+        exit(1);
+    }
+
+    if (form->list.ptr[0].type != VAL_ID) {
+        fprintf(stderr, "malformed define\n");
+        exit(1);
+    }
+
+    int var_name = form->list.ptr[1].identifier.interned;
+    int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
+    char *mangled_str = func->compiler->reader->interned_mangled[var_name];
+    func->n_params++;
+    func->params[func->n_params - 1] = var_name;
+
+    if (form->list.length == 2) {
+        /* define the variable with a void initial value */
+        gen_code(func, "    value %.*s = VOID;\n", mangled_len, mangled_str);
+        varnum = func->varnum++;
+        gen_code(func, "    value x%d = %.*s;\n", mangled_len, mangled_str);
+
+        return varnum;
+    }
+
+    if (form->list.length == 3) {
+        varnum = compile_form(func, &form->list.ptr[2]);
+        gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+
+        return varnum;
+    }
+
+    /* compile lambda does not check for the "lambda" symbol at the head
+     * of the list, so it can compile a "define" form as lambda. */
+    varnum = compile_function(func, form, 2, 3);
+    gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+
+    return varnum;
 }
 
 int
@@ -662,6 +714,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "lambda", 5) == 0)
     {
         varnum = compile_lambda(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 6 &&
+               memcmp(list_car->identifier.name, "define", 5) == 0)
+    {
+        varnum = compile_define(func, form);
     } else {
         varnum = compile_call(func, form);
     }
@@ -732,20 +789,23 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    value cdr;\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
+    fprintf(fp, "#define TAG_MASK 0x3\n");
+    fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
+    fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM_TAG 0x0\n");
-    fprintf(fp, "#define FIXNUM_MASK 0x3\n");
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
     fprintf(fp, "#define VOID_TAG 0x48\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define FIXNUM(v) (value)((int64_t)(v) << 3 | FIXNUM_TAG)\n");
-    fprintf(fp, "#define CLOSURE(v) (value)((int64_t)(v) << 3 | CLOSURE_TAG)\n");
-    fprintf(fp, "#define PAIR(v) (value)((int64_t)(v) << 3 | PAIR_TAG)\n");
+    fprintf(fp, "#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)\n");
+    fprintf(fp, "#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)\n");
+    fprintf(fp, "#define PAIR(v) (value)((uint64_t)(v) | PAIR_TAG)\n");
     fprintf(fp, "#define VOID (value)(VOID_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
+    fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & FIXNUM_MASK) == FIXNUM_TAG)\n");
+    fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value envget(environment env, int index) {\n");
     fprintf(fp, "    value *vars = env;\n");
