@@ -100,6 +100,7 @@ enum value_type
     VAL_LIST,
     VAL_ID,
     VAL_NUM,
+    VAL_BOOL,
 };
 
 struct value
@@ -123,6 +124,7 @@ struct value
         } identifier;
 
         int64_t number;
+        int bool;
     };
 };
 
@@ -135,9 +137,27 @@ struct reader {
     int *interned_name_len;
     char **interned_mangled;
     int *interned_mangled_len;
+
+    /* known identifiers */
+    interned_string id_true;
+    interned_string id_false;
 };
 
 void read_value(struct reader *reader);
+int intern_name(struct reader *reader, const char *name, int name_len);
+
+struct reader *
+create_reader(struct lexer *lexer)
+{
+    struct reader *reader = calloc(sizeof(struct reader), 1);
+
+    reader->lexer = lexer;
+
+    reader->id_true = intern_name(reader, "#t", 2);
+    reader->id_false = intern_name(reader, "#f", 2);
+
+    return reader;
+}
 
 char *
 mangle_name(const char *name, int name_len)
@@ -295,10 +315,20 @@ read_value(struct reader *reader)
         reader->value.number = reader->lexer->cur_tok_num;
         break;
     case TOK_ID:
-        reader->value.type = VAL_ID;
         reader->value.identifier.name = reader->lexer->cur_tok;
         reader->value.identifier.name_len = reader->lexer->cur_tok_len;
         reader->value.identifier.interned = intern_name(reader, reader->lexer->cur_tok, reader->lexer->cur_tok_len);
+
+        if (reader->value.identifier.interned == reader->id_true) {
+            reader->value.type = VAL_BOOL;
+            reader->value.bool = 1;
+        } else if (reader->value.identifier.interned == reader->id_false) {
+            reader->value.type = VAL_BOOL;
+            reader->value.bool = 0;
+        } else {
+            reader->value.type = VAL_ID;
+        }
+
         break;
     case TOK_EOF:
         fprintf(stderr, "internal error: read_value called on EOF\n");
@@ -388,6 +418,19 @@ compile_number(struct function *func, struct value *form)
 {
     int varnum = func->varnum++;
     gen_code(func, "    value x%d = FIXNUM(%lld);\n", varnum, form->number);
+    return varnum;
+}
+
+int
+compile_bool(struct function *func, struct value *form)
+{
+    int varnum = func->varnum++;
+    if (form->bool) {
+        gen_code(func, "    value x%d = TRUE;\n", varnum);
+    } else {
+        gen_code(func, "    value x%d = FALSE;\n", varnum);
+    }
+
     return varnum;
 }
 
@@ -734,6 +777,8 @@ compile_form(struct function *func, struct value *form)
         varnum = compile_number(func, form);
     } else if (form->type == VAL_ID) {
         varnum = compile_identifier(func, form);
+    } else if (form->type == VAL_BOOL) {
+        varnum = compile_bool(func, form);
     } else if (form->type == VAL_LIST) {
         varnum = compile_list(func, form);
     } else {
@@ -789,23 +834,31 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    value cdr;\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define TAG_MASK 0x3\n");
-    fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
-    fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM_TAG 0x0\n");
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
-    fprintf(fp, "#define VOID_TAG 0x48\n");
+    fprintf(fp, "#define VOID_TAG 0x15\n");  /*  10_101 */
+    fprintf(fp, "#define BOOL_TAG 0xd\n");   /*   1_101 */
+    fprintf(fp, "#define TRUE_TAG 0x1d\n");  /*  11_101 */
+    fprintf(fp, "#define FALSE_TAG 0x0d\n"); /*  01_101 */
+    fprintf(fp, "\n");
+    fprintf(fp, "#define TAG_MASK 0x3\n");
+    fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
+    fprintf(fp, "#define BOOL_TAG_MASK 0xf\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)\n");
     fprintf(fp, "#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)\n");
     fprintf(fp, "#define PAIR(v) (value)((uint64_t)(v) | PAIR_TAG)\n");
     fprintf(fp, "#define VOID (value)(VOID_TAG)\n");
+    fprintf(fp, "#define TRUE (value)(TRUE_TAG)\n");
+    fprintf(fp, "#define FALSE (value)(FALSE_TAG)\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
+    fprintf(fp, "#define GET_FIXNUM(v) ((uint64_t)(v) >> 3)\n");
     fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
+    fprintf(fp, "#define GET_BOOL(v) ((uint64_t)(v) >> 4)\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)\n");
+    fprintf(fp, "#define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value envget(environment env, int index) {\n");
     fprintf(fp, "    value *vars = env;\n");
@@ -836,8 +889,10 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static value display(value v) {\n");
     fprintf(fp, "    if (IS_FIXNUM(v)) {\n");
     fprintf(fp, "        printf(\"%%ld\", GET_FIXNUM(v));\n");
+    fprintf(fp, "    } else if (IS_BOOL(v)) {\n");
+    fprintf(fp, "        printf(\"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
     fprintf(fp, "    } else {\n");
-    fprintf(fp, "        printf(\"<object>\");\n");
+    fprintf(fp, "        printf(\"<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
     fprintf(fp, "\n");
     fprintf(fp, "    return VOID;\n");
@@ -924,13 +979,11 @@ main(int argc, char const *argv[])
         .ptr = program,
     };
 
-    struct reader reader = {
-        .lexer = &lexer,
-    };
+    struct reader *reader = create_reader(&lexer);
 
     read_token(&lexer);
     struct compiler compiler = {
-        .reader = &reader,
+        .reader = reader,
         .output_filename = "a.c",
     };
     compile_program(&compiler);
