@@ -762,6 +762,22 @@ compile_if(struct function *func, struct value *form)
 }
 
 int
+compile_begin(struct function *func, struct value *form)
+{
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+
+    for (int i = 1; i < form->list.length; ++i) {
+        int arg_varnum = compile_form(func, &form->list.ptr[i]);
+        if (i == form->list.length - 1) {
+            gen_code(func, "    x%d = x%d;\n", ret_varnum, arg_varnum);
+        }
+    }
+
+    return ret_varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -812,6 +828,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "if", 2) == 0)
     {
         varnum = compile_if(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 5 &&
+               memcmp(list_car->identifier.name, "begin", 5) == 0)
+    {
+        varnum = compile_begin(func, form);
     } else {
         varnum = compile_call(func, form);
     }
