@@ -730,6 +730,38 @@ compile_define(struct function *func, struct value *form)
 }
 
 int
+compile_if(struct function *func, struct value *form)
+{
+    if (form->list.length < 3 || form->list.length > 4) {
+        fprintf(stderr, "malformed if\n");
+        exit(1);
+    }
+
+    int cond_varnum = compile_form(func, &form->list.ptr[1]);
+    int then_varnum = compile_form(func, &form->list.ptr[2]);
+    int else_varnum;
+    int ret_varnum;
+    if (form->list.length == 3) {
+        ret_varnum = func->varnum++;
+        gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+        gen_code(func, "    if (GET_BOOL(x%d)) {\n", cond_varnum);
+        gen_code(func, "        x%d = x%d;\n", ret_varnum, then_varnum);
+        gen_code(func, "    }\n");
+    } else {
+        ret_varnum = func->varnum++;
+        gen_code(func, "    value x%d;\n", ret_varnum);
+        gen_code(func, "    if (GET_BOOL(x%d)) {\n", cond_varnum);
+        gen_code(func, "        x%d = x%d;\n", ret_varnum, then_varnum);
+        gen_code(func, "    } else {\n");
+        else_varnum = compile_form(func, &form->list.ptr[3]);
+        gen_code(func, "        x%d = x%d;\n", ret_varnum, else_varnum);
+        gen_code(func, "    }\n");
+    }
+
+    return ret_varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -775,6 +807,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "define", 5) == 0)
     {
         varnum = compile_define(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 2 &&
+               memcmp(list_car->identifier.name, "if", 2) == 0)
+    {
+        varnum = compile_if(func, form);
     } else {
         varnum = compile_call(func, form);
     }
