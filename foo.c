@@ -50,14 +50,27 @@ read_token(struct lexer *lexer)
     char *endptr;
     const char *program_end = lexer->program + lexer->program_length;
 
-    while (isspace(*lexer->ptr) && lexer->ptr < program_end) {
-        lexer->ptr++;
-    }
+    do {
+        while (isspace(*lexer->ptr) && lexer->ptr < program_end) {
+            lexer->ptr++;
+        }
 
-    if (lexer->ptr >= program_end) {
-        lexer->cur_tok_type = TOK_EOF;
-        return;
-    }
+        if (lexer->ptr >= program_end) {
+            lexer->cur_tok_type = TOK_EOF;
+            return;
+        }
+
+        if (*lexer->ptr == ';') {
+            while (*lexer->ptr != '\n' && lexer->ptr < program_end) {
+                lexer->ptr++;
+            }
+        }
+
+        if (lexer->ptr >= program_end) {
+            lexer->cur_tok_type = TOK_EOF;
+            return;
+        }
+    } while (isspace(*lexer->ptr));
 
     lexer->cur_tok = lexer->ptr;
 
