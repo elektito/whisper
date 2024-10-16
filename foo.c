@@ -812,7 +812,7 @@ compile_program(struct compiler *compiler)
 
         if (startup_func->n_freevars > 0) {
             for (int i = 0; i < startup_func->n_freevars; ++i) {
-                fprintf(stderr, "undefined variable: %.*s\n",
+                fprintf(stderr, "unbound identifier: %.*s\n",
                         compiler->reader->interned_name_len[startup_func->freevars[i]],
                         compiler->reader->interned_name[startup_func->freevars[i]]);
             }
