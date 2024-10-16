@@ -858,6 +858,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define TAG_MASK 0x3\n");
     fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
     fprintf(fp, "#define BOOL_TAG_MASK 0xf\n");
+    fprintf(fp, "#define VOID_TAG_MASK 0x1f\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)\n");
     fprintf(fp, "#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)\n");
@@ -872,6 +873,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "\n");
     fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)\n");
     fprintf(fp, "#define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)\n");
+    fprintf(fp, "#define IS_VOID(v) (((uint64_t)(v) & VOID_TAG_MASK) == VOID_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value envget(environment env, int index) {\n");
     fprintf(fp, "    value *vars = env;\n");
@@ -904,8 +906,10 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        printf(\"%%ld\", GET_FIXNUM(v));\n");
     fprintf(fp, "    } else if (IS_BOOL(v)) {\n");
     fprintf(fp, "        printf(\"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
+    fprintf(fp, "    } else if (IS_VOID(v)) {\n");
+    fprintf(fp, "        printf(\"#<void>\");\n");
     fprintf(fp, "    } else {\n");
-    fprintf(fp, "        printf(\"<object-%%p>\", v);\n");
+    fprintf(fp, "        printf(\"#<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
     fprintf(fp, "\n");
     fprintf(fp, "    return VOID;\n");
