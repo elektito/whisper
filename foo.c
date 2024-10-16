@@ -159,7 +159,7 @@ mangle_name(const char *name, int name_len)
                 exit(1);
             }
 
-            *dst++ = *src++;
+            *dst++ = *src;
         } else if (*src == '_') {
             if (sizeof(buf) - (dst - buf) < 2) {
                 fprintf(stderr, "name too long: %.*s\n", name_len, name);
