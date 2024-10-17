@@ -1025,6 +1025,21 @@ compile_quote(struct function *func, struct value *form)
 }
 
 int
+compile_eq(struct function *func, struct value *form)
+{
+    if (form->list.length != 3) {
+        fprintf(stderr, "malformed eq?\n");
+        exit(1);
+    }
+
+    int arg1_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg2_varnum = compile_form(func, &form->list.ptr[2]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = BOOL(x%d == x%d);\n", ret_varnum, arg1_varnum, arg2_varnum);
+    return ret_varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -1055,6 +1070,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "quote", 5) == 0)
     {
         varnum = compile_quote(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 3 &&
+               memcmp(list_car->identifier.name, "eq?", 3) == 0)
+    {
+        varnum = compile_eq(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 7 &&
                memcmp(list_car->identifier.name, "display", 7) == 0)
@@ -1197,6 +1217,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define VOID (value)(VOID_TAG)\n");
     fprintf(fp, "#define TRUE (value)(TRUE_TAG)\n");
     fprintf(fp, "#define FALSE (value)(FALSE_TAG)\n");
+    fprintf(fp, "#define BOOL(v) ((v) ? TRUE : FALSE)\n");
     fprintf(fp, "#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)\n");
     fprintf(fp, "#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)\n");
     fprintf(fp, "\n");
