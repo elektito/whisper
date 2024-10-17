@@ -1187,7 +1187,7 @@ compile_list(struct function *func, struct value *form)
         varnum = compile_quote(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 6 &&
-               memcmp(list_car->identifier.name, "lambda", 5) == 0)
+               memcmp(list_car->identifier.name, "lambda", 6) == 0)
     {
         varnum = compile_lambda(func, form);
     } else if (list_car->type == VAL_ID &&
