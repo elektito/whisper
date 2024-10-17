@@ -1067,6 +1067,34 @@ compile_eq(struct function *func, struct value *form)
     return ret_varnum;
 }
 
+struct {
+    const char *name;
+    int (*compile)(struct function *func, struct value *form);
+} primcalls[] = {
+    { "car", compile_car },
+    { "cdr", compile_cdr },
+    { "cons", compile_cons },
+    { "display", compile_display },
+    { "eq?", compile_eq },
+    { "+", compile_add },
+    { "-", compile_sub },
+};
+
+int
+compile_primcall(struct function *func, struct value *form)
+{
+    for (int i = 0; i < sizeof(primcalls) / sizeof(primcalls[0]); ++i) {
+        int len = strlen(primcalls[i].name);
+        if (form->list.ptr[0].identifier.name_len == len &&
+            memcmp(form->list.ptr[0].identifier.name, primcalls[i].name, len) == 0)
+        {
+            return primcalls[i].compile(func, form);
+        }
+    }
+
+    return -1;
+}
+
 int
 compile_list(struct function *func, struct value *form)
 {
@@ -1078,46 +1106,18 @@ compile_list(struct function *func, struct value *form)
     }
 
     struct value *list_car = &form->list.ptr[0];
+    if (list_car->type == VAL_ID) {
+        varnum = compile_primcall(func, form);
+        if (varnum >= 0) {
+            return varnum;
+        }
+    }
+
     if (list_car->type == VAL_ID &&
-        list_car->identifier.name_len == 3 &&
-        memcmp(list_car->identifier.name, "car", 3) == 0)
-    {
-        varnum = compile_car(func, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 3 &&
-               memcmp(list_car->identifier.name, "cdr", 3) == 0)
-    {
-        varnum = compile_cdr(func, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 4 &&
-               memcmp(list_car->identifier.name, "cons", 4) == 0)
-    {
-        varnum = compile_cons(func, form);
-    } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 5 &&
                memcmp(list_car->identifier.name, "quote", 5) == 0)
     {
         varnum = compile_quote(func, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 3 &&
-               memcmp(list_car->identifier.name, "eq?", 3) == 0)
-    {
-        varnum = compile_eq(func, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 7 &&
-               memcmp(list_car->identifier.name, "display", 7) == 0)
-    {
-        varnum = compile_display(func, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 1 &&
-               list_car->identifier.name[0] == '+')
-    {
-        varnum = compile_add(func, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 1 &&
-               list_car->identifier.name[0] == '-')
-    {
-        varnum = compile_sub(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 6 &&
                memcmp(list_car->identifier.name, "lambda", 5) == 0)
