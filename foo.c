@@ -771,6 +771,34 @@ compile_add(struct function *func, struct value *form)
 }
 
 int
+compile_sub(struct function *func, struct value *form)
+{
+    int dst_varnum;
+    int arg_varnum;
+
+    if (form->list.length == 1) {
+        fprintf(stderr, "subtraction needs at least one argument\n");
+        exit(1);
+    }
+
+    if (form->list.length == 2) {
+        arg_varnum = compile_form(func, &form->list.ptr[1]);
+        dst_varnum = func->varnum++;
+        gen_code(func, "    value x%d = FIXNUM(-GET_FIXNUM(x%d));\n", dst_varnum, arg_varnum);
+        return dst_varnum;
+    }
+
+    dst_varnum = compile_form(func, &form->list.ptr[1]);
+    for (int i = 2; i < form->list.length; ++i) {
+        arg_varnum = compile_form(func, &form->list.ptr[i]);
+        gen_code(func, "    x%d -= (int64_t) x%d;\n", dst_varnum, arg_varnum);
+        arg_varnum = dst_varnum;
+    }
+
+    return dst_varnum;
+}
+
+int
 compile_function(struct function *func, struct value *form,
                  int params_idx, int body_start_idx)
 {
@@ -1086,6 +1114,11 @@ compile_list(struct function *func, struct value *form)
     {
         varnum = compile_add(func, form);
     } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 1 &&
+               list_car->identifier.name[0] == '-')
+    {
+        varnum = compile_sub(func, form);
+    } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 6 &&
                memcmp(list_car->identifier.name, "lambda", 5) == 0)
     {
@@ -1221,7 +1254,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)\n");
     fprintf(fp, "#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)\n");
     fprintf(fp, "\n");
-    fprintf(fp, "#define GET_FIXNUM(v) ((uint64_t)(v) >> 3)\n");
+    fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
     fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "#define GET_BOOL(v) ((uint64_t)(v) >> 4)\n");
     fprintf(fp, "#define GET_STRING(v) ((struct string *)((uint64_t)(v) & VALUE_MASK))\n");
