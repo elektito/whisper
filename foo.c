@@ -1329,6 +1329,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define GET_SYMBOL(v) ((int)((uint64_t)(v) >> 32))\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)\n");
+    fprintf(fp, "#define IS_CLOSURE(v) (((uint64_t)(v) & TAG_MASK) == CLOSURE_TAG)\n");
     fprintf(fp, "#define IS_STRING(v) (((uint64_t)(v) & TAG_MASK) == STRING_TAG)\n");
     fprintf(fp, "#define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)\n");
     fprintf(fp, "#define IS_VOID(v) (((uint64_t)(v) & VOID_TAG_MASK) == VOID_TAG)\n");
@@ -1424,6 +1425,8 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "                printf(\"#\\\\x%%02x\", c);\n");
     fprintf(fp, "            }\n");
     fprintf(fp, "        }\n");
+    fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
+    fprintf(fp, "        printf(\"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
     fprintf(fp, "    } else {\n");
     fprintf(fp, "        printf(\"#<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
