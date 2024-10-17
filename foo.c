@@ -828,6 +828,42 @@ compile_mul(struct function *func, struct value *form)
 }
 
 int
+compile_div(struct function *func, struct value *form)
+{
+    int int_varnum;
+    int arg_varnum;
+    int ret_varnum;
+
+    if (form->list.length == 1) {
+        fprintf(stderr, "malformed division\n");
+        exit(1);
+    }
+
+    if (form->list.length == 2) {
+        arg_varnum = compile_form(func, &form->list.ptr[1]);
+        int_varnum = func->varnum++;
+        gen_code(func, "    int64_t x%d = 1 / GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+        ret_varnum = func->varnum++;
+        gen_code(func, "    value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
+        return ret_varnum;
+    }
+
+    arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int_varnum = func->varnum++;
+    gen_code(func, "    int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+
+    for (int i = 2; i < form->list.length; ++i) {
+        arg_varnum = compile_form(func, &form->list.ptr[i]);
+        gen_code(func, "    x%d /= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+    }
+
+    ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_function(struct function *func, struct value *form,
                  int params_idx, int body_start_idx)
 {
@@ -1108,6 +1144,7 @@ struct {
     { "+", compile_add },
     { "-", compile_sub },
     { "*", compile_mul },
+    { "/", compile_div },
 };
 
 int
