@@ -26,7 +26,9 @@ enum token_type
 {
     TOK_LPAR,
     TOK_RPAR,
+    TOK_QUOTE,
     TOK_NUM,
+    TOK_STR,
     TOK_ID,
     TOK_EOF,
 };
@@ -88,7 +90,38 @@ read_token(struct lexer *lexer)
         return;
     }
 
-    while (!isspace(*lexer->ptr) && *lexer->ptr != '(' && *lexer->ptr != ')' && lexer->ptr < program_end) {
+    if (*lexer->ptr == '\'') {
+        lexer->cur_tok_len = 1;
+        lexer->cur_tok_type = TOK_QUOTE;
+        lexer->ptr++;
+        return;
+    }
+
+    if (*lexer->ptr == '"') {
+        lexer->cur_tok++;
+        lexer->ptr++;
+
+        while (*lexer->ptr != '"' && lexer->ptr < program_end) {
+            lexer->ptr++;
+        }
+
+        if (*lexer->ptr != '"') {
+            fprintf(stderr, "eof in the middle of string\n");
+            exit(1);
+        }
+
+        lexer->cur_tok_len = lexer->ptr - lexer->cur_tok;
+        lexer->cur_tok_type = TOK_STR;
+        lexer->ptr++;
+        return;
+    }
+
+    while (!isspace(*lexer->ptr) &&
+           *lexer->ptr != '(' &&
+           *lexer->ptr != ')' &&
+           *lexer->ptr != '\'' &&
+           lexer->ptr < program_end)
+    {
         lexer->ptr++;
     }
 
@@ -113,7 +146,9 @@ enum value_type
     VAL_LIST,
     VAL_ID,
     VAL_NUM,
+    VAL_STR,
     VAL_BOOL,
+    VAL_CHAR,
 };
 
 struct value
@@ -136,8 +171,14 @@ struct value
             interned_string interned;
         } identifier;
 
+        struct {
+            const char *ptr;
+            int length;
+        } string;
+
         int64_t number;
         int bool;
+        char character;
     };
 };
 
@@ -154,6 +195,15 @@ struct reader {
     /* known identifiers */
     interned_string id_true;
     interned_string id_false;
+    interned_string id_char_alarm;
+    interned_string id_char_backspace;
+    interned_string id_char_delete;
+    interned_string id_char_escape;
+    interned_string id_char_newline;
+    interned_string id_char_null;
+    interned_string id_char_return;
+    interned_string id_char_space;
+    interned_string id_char_tab;
 };
 
 void read_value(struct reader *reader);
@@ -168,6 +218,15 @@ create_reader(struct lexer *lexer)
 
     reader->id_true = intern_name(reader, "#t", 2);
     reader->id_false = intern_name(reader, "#f", 2);
+    reader->id_char_alarm = intern_name(reader, "#\\alarm", 7);
+    reader->id_char_backspace = intern_name(reader, "#\\backspace", 11);
+    reader->id_char_delete = intern_name(reader, "#\\delete", 8);
+    reader->id_char_escape = intern_name(reader, "#\\escape", 8);
+    reader->id_char_newline = intern_name(reader, "#\\newline", 9);
+    reader->id_char_null = intern_name(reader, "#\\null", 6);
+    reader->id_char_return = intern_name(reader, "#\\return", 8);
+    reader->id_char_space = intern_name(reader, "#\\space", 7);
+    reader->id_char_tab = intern_name(reader, "#\\tab", 5);
 
     return reader;
 }
@@ -311,6 +370,28 @@ void read_list(struct reader *reader)
 }
 
 void
+read_quoted_value(struct reader *reader)
+{
+    read_token(reader->lexer);
+
+    struct value *value = calloc(sizeof(struct value), 1);
+    read_value(reader);
+    memcpy(value, &reader->value, sizeof(struct value));
+
+    reader->value.type = VAL_LIST;
+    reader->value.list.length = 2;
+    reader->value.list.tail = NULL;
+    reader->value.list.ptr = calloc(sizeof(struct value), 2);
+
+    reader->value.list.ptr[0].type = VAL_ID;
+    reader->value.list.ptr[0].identifier.name = "quote";
+    reader->value.list.ptr[0].identifier.name_len = 5;
+
+    memcpy(&reader->value.list.ptr[1], value, sizeof(struct value));
+    free(value);
+}
+
+void
 read_value(struct reader *reader)
 {
     /* this function expects read_token to have been called already */
@@ -322,10 +403,21 @@ read_value(struct reader *reader)
     {
     case TOK_LPAR:
         read_list(reader);
+        read_token(reader->lexer);
         break;
     case TOK_NUM:
         reader->value.type = VAL_NUM;
         reader->value.number = reader->lexer->cur_tok_num;
+        read_token(reader->lexer);
+        break;
+    case TOK_STR:
+        reader->value.type = VAL_STR;
+        reader->value.string.ptr = reader->lexer->cur_tok;
+        reader->value.string.length = reader->lexer->cur_tok_len;
+        read_token(reader->lexer);
+        break;
+    case TOK_QUOTE:
+        read_quoted_value(reader);
         break;
     case TOK_ID:
         reader->value.identifier.name = reader->lexer->cur_tok;
@@ -338,9 +430,38 @@ read_value(struct reader *reader)
         } else if (reader->value.identifier.interned == reader->id_false) {
             reader->value.type = VAL_BOOL;
             reader->value.bool = 0;
+        } else if (reader->value.identifier.name_len >= 3 &&
+                   reader->value.identifier.name[0] == '#' &&
+                   reader->value.identifier.name[1] == '\\')
+        {
+            reader->value.type = VAL_CHAR;
+
+            if (reader->value.identifier.name_len == 3) {
+                reader->value.character = reader->value.identifier.name[2];
+            } else if (reader->value.identifier.interned == reader->id_char_alarm) {
+                reader->value.character = '\x07';
+            } else if (reader->value.identifier.interned == reader->id_char_backspace) {
+                reader->value.character = '\b';
+            } else if (reader->value.identifier.interned == reader->id_char_delete) {
+                reader->value.character = '\x7f';
+            } else if (reader->value.identifier.interned == reader->id_char_escape) {
+                reader->value.character = '\x1b';
+            } else if (reader->value.identifier.interned == reader->id_char_newline) {
+                reader->value.character = '\n';
+            } else if (reader->value.identifier.interned == reader->id_char_null) {
+                reader->value.character = '\0';
+            } else if (reader->value.identifier.interned == reader->id_char_return) {
+                reader->value.character = '\r';
+            } else if (reader->value.identifier.interned == reader->id_char_space) {
+                reader->value.character = ' ';
+            } else if (reader->value.identifier.interned == reader->id_char_tab) {
+                reader->value.character = '\t';
+            }
         } else {
             reader->value.type = VAL_ID;
         }
+
+        read_token(reader->lexer);
 
         break;
     case TOK_EOF:
@@ -350,8 +471,6 @@ read_value(struct reader *reader)
         fprintf(stderr, "read error\n");
         exit(1);
     }
-
-    read_token(reader->lexer);
 }
 
 /*********************** compiler ************************/
@@ -382,9 +501,20 @@ struct compiler
 
     int n_functions;
     struct function **functions;
+
+    int n_symbols;
+    interned_string *symbols;
 };
 
 int compile_form(struct function *func, struct value *form);
+
+void
+add_compiled_symbol(struct compiler *compiler, interned_string identifier)
+{
+    compiler->n_symbols++;
+    compiler->symbols = realloc(compiler->symbols, sizeof(interned_string) * compiler->n_symbols);
+    compiler->symbols[compiler->n_symbols - 1] = identifier;
+}
 
 void
 gen_code(struct function *func, const char *fmt, ...)
@@ -483,6 +613,95 @@ compile_identifier(struct function *func, struct value *form)
         }
     }
 
+    return varnum;
+}
+
+int
+compile_string(struct function *func, struct value *form)
+{
+    int varnum = func->varnum++;
+
+    gen_code(func, "    value x%d = make_string(\"", varnum);
+
+    for (int i = 0; i < form->string.length; ++i) {
+        char c = form->string.ptr[i];
+        switch (c) {
+        case '\b':
+            gen_code(func, "\\b");
+            break;
+        case '\n':
+            gen_code(func, "\\n");
+            break;
+        case '\r':
+            gen_code(func, "\\r");
+            break;
+        case '\t':
+            gen_code(func, "\\t");
+            break;
+        case '\\':
+            gen_code(func, "\\\\");
+            break;
+        case '\"':
+            gen_code(func, "\\\"");
+            break;
+        case '\0':
+            gen_code(func, "\\0");
+            break;
+        default:
+            if (c >= 32 && c < 127) {
+                /* printable */
+                gen_code(func, "%c", c);
+            } else {
+                /* use octal form for everything else */
+                gen_code(func, "\\%03o", (unsigned char) c);
+            }
+        }
+    }
+
+    gen_code(func, "\", %d);\n", form->string.length);
+
+    return varnum;
+}
+
+int
+compile_char(struct function *func, struct value *form)
+{
+    int varnum = func->varnum++;
+    char c = form->character;
+
+    gen_code(func, "    value x%d = CHAR('", varnum);
+
+    switch (c) {
+    case '\b':
+        gen_code(func, "\\b");
+        break;
+    case '\n':
+        gen_code(func, "\\n");
+        break;
+    case '\r':
+        gen_code(func, "\\r");
+        break;
+    case '\t':
+        gen_code(func, "\\t");
+        break;
+    case '\\':
+        gen_code(func, "\\\\");
+        break;
+    case '\'':
+        gen_code(func, "\\\'");
+        break;
+    case '\0':
+        gen_code(func, "\0");
+        break;
+    default:
+        if (c >= 32 && c < 127) {
+            gen_code(func, "%c", c);
+        } else {
+            gen_code(func, "\\%03o", (unsigned char) c);
+        }
+    }
+
+    gen_code(func, "');\n");
     return varnum;
 }
 
@@ -778,6 +997,34 @@ compile_begin(struct function *func, struct value *form)
 }
 
 int
+compile_quote(struct function *func, struct value *form)
+{
+    int varnum;
+    struct value *value = &form->list.ptr[1];
+
+    switch (value->type) {
+    case VAL_BOOL:
+    case VAL_NUM:
+    case VAL_CHAR:
+    case VAL_STR:
+        varnum = compile_form(func, value);
+
+    case VAL_ID:
+        varnum = func->varnum++;
+        add_compiled_symbol(func->compiler, value->identifier.interned);
+        gen_code(func, "    value x%d = tok%.*s;\n", varnum,
+                 func->compiler->reader->interned_mangled_len[value->identifier.interned],
+                 func->compiler->reader->interned_mangled[value->identifier.interned]);
+        break;
+    default:
+        fprintf(stderr, "unknown quoted value type\n");
+        exit(1);
+    }
+
+    return varnum;
+}
+
+int
 compile_list(struct function *func, struct value *form)
 {
     int varnum;
@@ -803,6 +1050,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "cons", 4) == 0)
     {
         varnum = compile_cons(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 5 &&
+               memcmp(list_car->identifier.name, "quote", 5) == 0)
+    {
+        varnum = compile_quote(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 7 &&
                memcmp(list_car->identifier.name, "display", 7) == 0)
@@ -848,10 +1100,14 @@ compile_form(struct function *func, struct value *form)
         varnum = compile_number(func, form);
     } else if (form->type == VAL_ID) {
         varnum = compile_identifier(func, form);
+    } else if (form->type == VAL_STR) {
+        varnum = compile_string(func, form);
     } else if (form->type == VAL_BOOL) {
         varnum = compile_bool(func, form);
     } else if (form->type == VAL_LIST) {
         varnum = compile_list(func, form);
+    } else if (form->type == VAL_CHAR) {
+        varnum = compile_char(func, form);
     } else {
         fprintf(stderr, "unhandled value type\n");
         exit(1);
@@ -886,6 +1142,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#include <stdint.h>\n");
     fprintf(fp, "#include <stdio.h>\n");
     fprintf(fp, "#include <stdlib.h>\n");
+    fprintf(fp, "#include <string.h>\n");
     fprintf(fp, "\n");
     fprintf(fp, "typedef void *value;\n");
     fprintf(fp, "typedef value *environment;\n");
@@ -905,34 +1162,69 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    value cdr;\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
+    fprintf(fp, "struct string {\n");
+    fprintf(fp, "    size_t len;\n");
+    fprintf(fp, "    char s[];\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "struct symbol {\n");
+    fprintf(fp, "    size_t name_len;\n");
+    fprintf(fp, "    char *name;\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM_TAG 0x0\n");
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
+    fprintf(fp, "#define STRING_TAG 0x03\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
-    fprintf(fp, "#define VOID_TAG 0x15\n");  /*  10_101 */
-    fprintf(fp, "#define BOOL_TAG 0xd\n");   /*   1_101 */
-    fprintf(fp, "#define TRUE_TAG 0x1d\n");  /*  11_101 */
-    fprintf(fp, "#define FALSE_TAG 0x0d\n"); /*  01_101 */
+    fprintf(fp, "#define VOID_TAG 0x15\n");   /*   10_101 */
+    fprintf(fp, "#define BOOL_TAG 0xd\n");    /*    1_101 */
+    fprintf(fp, "#define TRUE_TAG 0x1d\n");   /*   11_101 */
+    fprintf(fp, "#define FALSE_TAG 0x0d\n");  /*   01_101 */
+    fprintf(fp, "#define CHAR_TAG 0x25\n");   /*  100_101 */
+    fprintf(fp, "#define SYMBOL_TAG 0x25\n"); /* 1000_101 */
     fprintf(fp, "\n");
     fprintf(fp, "#define TAG_MASK 0x3\n");
     fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
     fprintf(fp, "#define BOOL_TAG_MASK 0xf\n");
     fprintf(fp, "#define VOID_TAG_MASK 0x1f\n");
+    fprintf(fp, "#define CHAR_TAG_MASK 0x3f\n");
+    fprintf(fp, "#define SYMBOL_TAG_MASK 0x7f\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)\n");
     fprintf(fp, "#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)\n");
     fprintf(fp, "#define PAIR(v) (value)((uint64_t)(v) | PAIR_TAG)\n");
+    fprintf(fp, "#define STRING(v) (value)((uint64_t)(v) | STRING_TAG)\n");
     fprintf(fp, "#define VOID (value)(VOID_TAG)\n");
     fprintf(fp, "#define TRUE (value)(TRUE_TAG)\n");
     fprintf(fp, "#define FALSE (value)(FALSE_TAG)\n");
+    fprintf(fp, "#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)\n");
+    fprintf(fp, "#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define GET_FIXNUM(v) ((uint64_t)(v) >> 3)\n");
     fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "#define GET_BOOL(v) ((uint64_t)(v) >> 4)\n");
+    fprintf(fp, "#define GET_STRING(v) ((struct string *)((uint64_t)(v) & VALUE_MASK))\n");
+    fprintf(fp, "#define GET_CHAR(v) ((char)((uint64_t)(v) >> 32))\n");
+    fprintf(fp, "#define GET_SYMBOL(v) ((int)((uint64_t)(v) >> 32))\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)\n");
+    fprintf(fp, "#define IS_STRING(v) (((uint64_t)(v) & TAG_MASK) == STRING_TAG)\n");
     fprintf(fp, "#define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)\n");
     fprintf(fp, "#define IS_VOID(v) (((uint64_t)(v) & VOID_TAG_MASK) == VOID_TAG)\n");
+    fprintf(fp, "#define IS_CHAR(v) (((uint64_t)(v) & CHAR_TAG_MASK) == CHAR_TAG)\n");
+    fprintf(fp, "#define IS_SYMBOL(v) (((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG)\n");
     fprintf(fp, "\n");
+
+    fprintf(fp, "static struct symbol *symbols = NULL;\n");
+    fprintf(fp, "\n");
+    for (int i = 0; i < compiler->n_symbols; ++i) {
+        fprintf(fp, "#define tok%.*s SYMBOL(%d)\n",
+                compiler->reader->interned_mangled_len[compiler->symbols[i]],
+                compiler->reader->interned_mangled[compiler->symbols[i]],
+                i);
+    }
+    fprintf(fp, "\n");
+
     fprintf(fp, "static value envget(environment env, int index) {\n");
     fprintf(fp, "    value *vars = env;\n");
     fprintf(fp, "    return vars[index];\n");
@@ -959,13 +1251,58 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return PAIR(pair);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value make_string(const char *s, size_t len) {\n");
+    fprintf(fp, "    struct string *p = malloc(sizeof(struct string) + len);\n");
+    fprintf(fp, "    p->len = len;\n");
+    fprintf(fp, "    memcpy(p->s, s, len);\n");
+    fprintf(fp, "    return STRING(p);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value display(value v) {\n");
     fprintf(fp, "    if (IS_FIXNUM(v)) {\n");
     fprintf(fp, "        printf(\"%%ld\", GET_FIXNUM(v));\n");
+    fprintf(fp, "    } else if (IS_STRING(v)) {\n");
+    fprintf(fp, "        printf(\"%%.*s\", (int) GET_STRING(v)->len, GET_STRING(v)->s);\n");
+    fprintf(fp, "    } else if (IS_SYMBOL(v)) {\n");
+    fprintf(fp, "        printf(\"%%.*s\", symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);\n");
     fprintf(fp, "    } else if (IS_BOOL(v)) {\n");
     fprintf(fp, "        printf(\"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
     fprintf(fp, "    } else if (IS_VOID(v)) {\n");
     fprintf(fp, "        printf(\"#<void>\");\n");
+    fprintf(fp, "    } else if (IS_CHAR(v)) {\n");
+    fprintf(fp, "        char c = GET_CHAR(v);\n");
+    fprintf(fp, "        switch (c) {\n");
+    fprintf(fp, "        case '\\x07':\n");
+    fprintf(fp, "            printf(\"#\\\\alarm\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\b':\n");
+    fprintf(fp, "            printf(\"#\\\\backspace\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\x7f':\n");
+    fprintf(fp, "            printf(\"#\\\\delete\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\x1b':\n");
+    fprintf(fp, "            printf(\"#\\\\escape\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\n':\n");
+    fprintf(fp, "            printf(\"#\\\\newline\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\0':\n");
+    fprintf(fp, "            printf(\"#\\\\null\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\r':\n");
+    fprintf(fp, "            printf(\"#\\\\return\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\t':\n");
+    fprintf(fp, "            printf(\"#\\\\tab\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        default:\n");
+    fprintf(fp, "            if (c >= 32 || c < 127) {\n");
+    fprintf(fp, "                printf(\"%%c\", c);\n");
+    fprintf(fp, "            } else {\n");
+    fprintf(fp, "                printf(\"#\\\\x%%02x\", c);\n");
+    fprintf(fp, "            }\n");
+    fprintf(fp, "        }\n");
     fprintf(fp, "    } else {\n");
     fprintf(fp, "        printf(\"#<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
@@ -992,6 +1329,16 @@ compile_program(struct compiler *compiler)
 
     fprintf(fp, "\n");
     fprintf(fp, "int main(int argc, const char *argv[]) {\n");
+
+    fprintf(fp, "    symbols = malloc(sizeof(struct symbol) * %d);\n", compiler->n_symbols);
+    for (int i = 0; i < compiler->n_symbols; ++i) {
+        fprintf(fp, "    symbols[%d].name = \"%.*s\";\n", i,
+                compiler->reader->interned_name_len[compiler->symbols[i]],
+                compiler->reader->interned_name[compiler->symbols[i]]);
+        fprintf(fp, "    symbols[%d].name_len = %d;\n", i, compiler->reader->interned_name_len[compiler->symbols[i]]);
+    }
+    fprintf(fp, "\n");
+
     fprintf(fp, "    %s(NULL, 0);\n", startup_func->name);
     fprintf(fp, "}\n");
     fclose(fp);
