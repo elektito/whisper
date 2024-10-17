@@ -756,7 +756,8 @@ compile_add(struct function *func, struct value *form)
 
     if (form->list.length == 1) {
         dst_varnum = func->varnum++;
-        gen_code(func, "    value x%d = 0;\n", dst_varnum);
+        gen_code(func, "    value x%d = FIXNUM(0);\n", dst_varnum);
+        return dst_varnum;
     }
 
     arg_varnum = compile_form(func, &form->list.ptr[1]);
@@ -796,6 +797,34 @@ compile_sub(struct function *func, struct value *form)
     }
 
     return dst_varnum;
+}
+
+int
+compile_mul(struct function *func, struct value *form)
+{
+    int int_varnum;
+    int arg_varnum;
+    int ret_varnum;
+
+    if (form->list.length == 1) {
+        ret_varnum = func->varnum++;
+        gen_code(func, "    value x%d = FIXNUM(1);\n", ret_varnum);
+        return ret_varnum;
+    }
+
+    arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int_varnum = func->varnum++;
+    gen_code(func, "    int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+
+    for (int i = 2; i < form->list.length; ++i) {
+        arg_varnum = compile_form(func, &form->list.ptr[i]);
+        gen_code(func, "    x%d *= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+    }
+
+    ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
+
+    return ret_varnum;
 }
 
 int
@@ -1078,6 +1107,7 @@ struct {
     { "eq?", compile_eq },
     { "+", compile_add },
     { "-", compile_sub },
+    { "*", compile_mul },
 };
 
 int
