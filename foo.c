@@ -1385,7 +1385,7 @@ int
 compile_input_port_q(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
-        fprintf(stderr, "port? needs a single argument\n");
+        fprintf(stderr, "input-port? needs a single argument\n");
         exit(1);
     }
 
