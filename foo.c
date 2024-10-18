@@ -1236,6 +1236,7 @@ int
 compile_quote(struct function *func, struct value *form)
 {
     int varnum;
+    int car_varnum;
     struct value *value = &form->list.ptr[1];
 
     switch (value->type) {
@@ -1252,6 +1253,27 @@ compile_quote(struct function *func, struct value *form)
                  func->compiler->reader->interned_mangled_len[value->identifier.interned],
                  func->compiler->reader->interned_mangled[value->identifier.interned]);
         break;
+
+    case VAL_LIST:
+        if (value->list.length == 0) {
+            varnum = func->varnum++;
+            gen_code(func, "    value x%d = NIL;\n", varnum);
+        } else {
+            if (value->list.tail == NULL) {
+                varnum = func->varnum++;
+                gen_code(func, "    value x%d = NIL;\n", varnum);
+            } else {
+                varnum = compile_form(func, value->list.tail);
+            }
+
+            for (int i = value->list.length - 1; i >= 0; --i) {
+                car_varnum = compile_form(func, &value->list.ptr[i]);
+                gen_code(func, "    x%d = make_pair(x%d, x%d);\n", varnum, car_varnum, varnum);
+            }
+        }
+
+        break;
+
     default:
         fprintf(stderr, "unknown quoted value type\n");
         exit(1);
@@ -1444,14 +1466,15 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
     fprintf(fp, "#define STRING_TAG 0x03\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
-    fprintf(fp, "#define VOID_TAG 0x15\n");   /*   10_101 */
-    fprintf(fp, "#define BOOL_TAG 0xd\n");    /*    1_101 */
-    fprintf(fp, "#define TRUE_TAG 0x1d\n");   /*   11_101 */
-    fprintf(fp, "#define FALSE_TAG 0x0d\n");  /*   01_101 */
-    fprintf(fp, "#define CHAR_TAG 0x25\n");   /*  100_101 */
-    fprintf(fp, "#define SYMBOL_TAG 0x45\n"); /* 1000_101 */
+    fprintf(fp, "#define VOID_TAG 0x15\n");   /*    10_101 */
+    fprintf(fp, "#define BOOL_TAG 0xd\n");    /*     1_101 */
+    fprintf(fp, "#define TRUE_TAG 0x1d\n");   /*    11_101 */
+    fprintf(fp, "#define FALSE_TAG 0x0d\n");  /*    01_101 */
+    fprintf(fp, "#define CHAR_TAG 0x25\n");   /*   100_101 */
+    fprintf(fp, "#define SYMBOL_TAG 0x45\n"); /*  1000_101 */
+    fprintf(fp, "#define NIL_TAG 0x85\n");    /* 10000_101 */
     fprintf(fp, "\n");
-    fprintf(fp, "#define TAG_MASK 0x3\n");
+    fprintf(fp, "#define TAG_MASK 0x7\n");
     fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
     fprintf(fp, "#define BOOL_TAG_MASK 0xf\n");
     fprintf(fp, "#define VOID_TAG_MASK 0x1f\n");
@@ -1468,6 +1491,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define BOOL(v) ((v) ? TRUE : FALSE)\n");
     fprintf(fp, "#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)\n");
     fprintf(fp, "#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)\n");
+    fprintf(fp, "#define NIL (value)(NIL_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
     fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
@@ -1483,6 +1507,8 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define IS_VOID(v) (((uint64_t)(v) & VOID_TAG_MASK) == VOID_TAG)\n");
     fprintf(fp, "#define IS_CHAR(v) (((uint64_t)(v) & CHAR_TAG_MASK) == CHAR_TAG)\n");
     fprintf(fp, "#define IS_SYMBOL(v) (((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG)\n");
+    fprintf(fp, "#define IS_NIL(v) ((uint64_t)(v) == NIL_TAG)\n");
+    fprintf(fp, "#define IS_PAIR(v) (((uint64_t)(v) & TAG_MASK) == PAIR_TAG)\n");
     fprintf(fp, "\n");
 
     fprintf(fp, "static struct symbol *symbols = NULL;\n");
@@ -1541,6 +1567,10 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        printf(\"#<void>\");\n");
     fprintf(fp, "    } else if (IS_CHAR(v)) {\n");
     fprintf(fp, "        printf(\"%%c\", GET_CHAR(v));\n");
+    fprintf(fp, "    } else if (IS_NIL(v)) {\n");
+    fprintf(fp, "        printf(\"()\");\n");
+    fprintf(fp, "    } else if (IS_PAIR(v)) {\n");
+    fprintf(fp, "        printf(\"#<pair>\");\n");
     fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
     fprintf(fp, "        printf(\"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
     fprintf(fp, "    } else {\n");
