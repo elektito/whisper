@@ -1297,15 +1297,87 @@ compile_eq(struct function *func, struct value *form)
     return ret_varnum;
 }
 
+int
+compile_open_input_file(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "open-input-file needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    gen_code(func, "    if (!IS_STRING(x%d)) { RAISE(\"open-input-file argument must be string\"); }\n", arg_varnum);
+    int filename_varnum = func->varnum++;
+    gen_code(func, "    char *x%d = GET_STRING(x%d)->s;\n", filename_varnum, arg_varnum);
+    int fileobj_varnum = func->varnum++;
+    gen_code(func, "    FILE *x%d = fopen(x%d, \"r\");\n", fileobj_varnum, filename_varnum);
+    gen_code(func, "    if (!x%d) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n", fileobj_varnum);
+    int port_varnum = func->varnum++;
+    gen_code(func, "    struct object *x%d = calloc(sizeof(struct object), 1);\n", port_varnum);
+    gen_code(func, "    x%d->type = OBJ_PORT;\n", port_varnum);
+    gen_code(func, "    x%d->port.input = 1;\n", port_varnum);
+    gen_code(func, "    x%d->port.fp = x%d;\n", port_varnum, fileobj_varnum);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = OBJECT(x%d);\n", ret_varnum, port_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_close_port(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "close-port needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int port_varnum = func->varnum++;
+    gen_code(func, "    struct object *x%d = GET_OBJECT(x%d);\n", port_varnum, arg_varnum);
+    int close_varnum = func->varnum++;
+    gen_code(func, "    int x%d = fclose(x%d->port.fp);\n", close_varnum, port_varnum);
+    gen_code(func, "    if (x%d) { RAISE(\"failed to close the port\"); }\n", close_varnum);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_read_line(struct function *func, struct value *form)
+{
+    if (form->list.length == 1) {
+        fprintf(stderr, "no-argument form of read-line not yet supported\n");
+        exit(1);
+    }
+
+    if (form->list.length != 2) {
+        fprintf(stderr, "read-port needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    gen_code(func, "    if (!IS_PORT(x%d)) { RAISE(\"read-line argument not a port\"); }\n", arg_varnum);
+    int fileobj_varnum = func->varnum++;
+    gen_code(func, "    FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = read_line(x%d);\n", ret_varnum, fileobj_varnum);
+
+    return ret_varnum;
+}
+
 struct {
     const char *name;
     int (*compile)(struct function *func, struct value *form);
 } primcalls[] = {
     { "car", compile_car },
     { "cdr", compile_cdr },
+    { "close-port", compile_close_port },
     { "cons", compile_cons },
     { "display", compile_display },
     { "eq?", compile_eq },
+    { "open-input-file", compile_open_input_file },
+    { "read-line", compile_read_line },
     { "+", compile_add },
     { "-", compile_sub },
     { "*", compile_mul },
@@ -1427,6 +1499,7 @@ compile_program(struct compiler *compiler)
 
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
+    fprintf(fp, "#include <errno.h>\n");
     fprintf(fp, "#include <stdarg.h>\n");
     fprintf(fp, "#include <stddef.h>\n");
     fprintf(fp, "#include <stdint.h>\n");
@@ -1462,7 +1535,23 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    char *name;\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
+    fprintf(fp, "enum object_type {\n");
+    fprintf(fp, "    OBJ_PORT,\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "struct object {\n");
+    fprintf(fp, "    enum object_type type;\n");
+    fprintf(fp, "    union {\n");
+    fprintf(fp, "        struct {\n");
+    fprintf(fp, "            int input;\n");
+    fprintf(fp, "            int output;\n");
+    fprintf(fp, "            FILE *fp;\n");
+    fprintf(fp, "        } port;\n");
+    fprintf(fp, "    };\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM_TAG 0x0\n");
+    fprintf(fp, "#define OBJECT_TAG 0x01\n");
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
     fprintf(fp, "#define STRING_TAG 0x03\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
@@ -1492,6 +1581,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)\n");
     fprintf(fp, "#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)\n");
     fprintf(fp, "#define NIL (value)(NIL_TAG)\n");
+    fprintf(fp, "#define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
     fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
@@ -1499,6 +1589,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define GET_STRING(v) ((struct string *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "#define GET_CHAR(v) ((char)((uint64_t)(v) >> 32))\n");
     fprintf(fp, "#define GET_SYMBOL(v) ((int)((uint64_t)(v) >> 32))\n");
+    fprintf(fp, "#define GET_OBJECT(v) ((struct object *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)\n");
     fprintf(fp, "#define IS_CLOSURE(v) (((uint64_t)(v) & TAG_MASK) == CLOSURE_TAG)\n");
@@ -1509,6 +1600,10 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define IS_SYMBOL(v) (((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG)\n");
     fprintf(fp, "#define IS_NIL(v) ((uint64_t)(v) == NIL_TAG)\n");
     fprintf(fp, "#define IS_PAIR(v) (((uint64_t)(v) & TAG_MASK) == PAIR_TAG)\n");
+    fprintf(fp, "#define IS_OBJECT(v) (((uint64_t)(v) & TAG_MASK) == OBJECT_TAG)\n");
+    fprintf(fp, "#define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "#define RAISE(...) { fprintf(stderr, \"exception: \" __VA_ARGS__); fprintf(stderr, \"\\n\"); cleanup(); exit(1); }\n");
     fprintf(fp, "\n");
 
     fprintf(fp, "static struct symbol *symbols = NULL;\n");
@@ -1521,6 +1616,8 @@ compile_program(struct compiler *compiler)
     }
     fprintf(fp, "\n");
 
+    fprintf(fp, "static void cleanup(void) {}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value envget(environment env, int index) {\n");
     fprintf(fp, "    value *vars = env;\n");
     fprintf(fp, "    return vars[index];\n");
@@ -1552,7 +1649,33 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    p->s = malloc(len + 1);\n");
     fprintf(fp, "    p->len = len;\n");
     fprintf(fp, "    memcpy(p->s, s, len);\n");
+    fprintf(fp, "    p->s[len] = 0;\n");
     fprintf(fp, "    return STRING(p);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value read_line(FILE *fp) {\n");
+    fprintf(fp, "    char buf[256];\n");
+    fprintf(fp, "    char *r = fgets(buf, sizeof(buf), fp);\n");
+    fprintf(fp, "    if (!r) {\n");
+    fprintf(fp, "        RAISE(\"cannot read from file: %%s\", strerror(errno));\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, " \n");
+    fprintf(fp, "    size_t len = strlen(buf);\n");
+    fprintf(fp, "    struct string *str = GET_STRING(make_string(buf, len));\n");
+    fprintf(fp, " \n");
+    fprintf(fp, "    while (len == sizeof(buf) - 1) {\n");
+    fprintf(fp, "        r = fgets(buf, sizeof(buf), fp);\n");
+    fprintf(fp, "        if (!r) {\n");
+    fprintf(fp, "            RAISE(\"cannot read from file: %%s\", strerror(errno));\n");
+    fprintf(fp, "        }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "        len = strlen(buf);\n");
+    fprintf(fp, "        str->s = realloc(str->s, str->len + len + 1);\n");
+    fprintf(fp, "        memcpy(str->s + str->len, buf, len + 1);\n");
+    fprintf(fp, "        str->len += len;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    return STRING(str);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value display(value v) {\n");
