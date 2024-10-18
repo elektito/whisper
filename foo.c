@@ -1454,7 +1454,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "\n");
     fprintf(fp, "struct string {\n");
     fprintf(fp, "    size_t len;\n");
-    fprintf(fp, "    char s[];\n");
+    fprintf(fp, "    char *s;\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
     fprintf(fp, "struct symbol {\n");
@@ -1548,7 +1548,8 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value make_string(const char *s, size_t len) {\n");
-    fprintf(fp, "    struct string *p = malloc(sizeof(struct string) + len);\n");
+    fprintf(fp, "    struct string *p = malloc(sizeof(struct string));\n");
+    fprintf(fp, "    p->s = malloc(len + 1);\n");
     fprintf(fp, "    p->len = len;\n");
     fprintf(fp, "    memcpy(p->s, s, len);\n");
     fprintf(fp, "    return STRING(p);\n");
