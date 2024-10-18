@@ -1396,6 +1396,21 @@ compile_input_port_q(struct function *func, struct value *form)
     return ret_varnum;
 }
 
+int
+compile_eof_object_q(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "eof-object? needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = BOOL(IS_EOFOBJ(x%d));\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
 struct {
     const char *name;
     int (*compile)(struct function *func, struct value *form);
@@ -1405,6 +1420,7 @@ struct {
     { "close-port", compile_close_port },
     { "cons", compile_cons },
     { "display", compile_display },
+    { "eof-object?", compile_eof_object_q },
     { "eq?", compile_eq_q },
     { "input-port?", compile_input_port_q },
     { "open-input-file", compile_open_input_file },
@@ -1587,13 +1603,14 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define CLOSURE_TAG 0x02\n");
     fprintf(fp, "#define STRING_TAG 0x03\n");
     fprintf(fp, "#define PAIR_TAG 0x04\n");
-    fprintf(fp, "#define VOID_TAG 0x15\n");   /*    10_101 */
-    fprintf(fp, "#define BOOL_TAG 0xd\n");    /*     1_101 */
-    fprintf(fp, "#define TRUE_TAG 0x1d\n");   /*    11_101 */
-    fprintf(fp, "#define FALSE_TAG 0x0d\n");  /*    01_101 */
-    fprintf(fp, "#define CHAR_TAG 0x25\n");   /*   100_101 */
-    fprintf(fp, "#define SYMBOL_TAG 0x45\n"); /*  1000_101 */
-    fprintf(fp, "#define NIL_TAG 0x85\n");    /* 10000_101 */
+    fprintf(fp, "#define VOID_TAG 0x15\n");   /*      10_101 */
+    fprintf(fp, "#define BOOL_TAG 0xd\n");    /*       1_101 */
+    fprintf(fp, "#define TRUE_TAG 0x1d\n");   /*      11_101 */
+    fprintf(fp, "#define FALSE_TAG 0x0d\n");  /*      01_101 */
+    fprintf(fp, "#define CHAR_TAG 0x25\n");   /*     100_101 */
+    fprintf(fp, "#define SYMBOL_TAG 0x45\n"); /*    1000_101 */
+    fprintf(fp, "#define NIL_TAG 0x85\n");    /*   10000_101 */
+    fprintf(fp, "#define EOFOBJ_TAG 0x105\n"); /* 100000_101 */
     fprintf(fp, "\n");
     fprintf(fp, "#define TAG_MASK 0x7\n");
     fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
@@ -1601,6 +1618,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define VOID_TAG_MASK 0x1f\n");
     fprintf(fp, "#define CHAR_TAG_MASK 0x3f\n");
     fprintf(fp, "#define SYMBOL_TAG_MASK 0x7f\n");
+    fprintf(fp, "#define EOFOBJ_TAG_MASK 0x1ff\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)\n");
     fprintf(fp, "#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)\n");
@@ -1613,6 +1631,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)\n");
     fprintf(fp, "#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)\n");
     fprintf(fp, "#define NIL (value)(NIL_TAG)\n");
+    fprintf(fp, "#define EOFOBJ (value)(EOFOBJ_TAG)\n");
     fprintf(fp, "#define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)\n");
     fprintf(fp, "\n");
     fprintf(fp, "#define GET_FIXNUM(v) ((int64_t)(v) >> 3)\n");
@@ -1632,6 +1651,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define IS_SYMBOL(v) (((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG)\n");
     fprintf(fp, "#define IS_NIL(v) ((uint64_t)(v) == NIL_TAG)\n");
     fprintf(fp, "#define IS_PAIR(v) (((uint64_t)(v) & TAG_MASK) == PAIR_TAG)\n");
+    fprintf(fp, "#define IS_EOFOBJ(v) ((uint64_t)(v) == EOFOBJ_TAG)\n");
     fprintf(fp, "#define IS_OBJECT(v) (((uint64_t)(v) & TAG_MASK) == OBJECT_TAG)\n");
     fprintf(fp, "#define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)\n");
     fprintf(fp, "\n");
@@ -1689,16 +1709,17 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    char buf[256];\n");
     fprintf(fp, "    char *r = fgets(buf, sizeof(buf), fp);\n");
     fprintf(fp, "    if (!r) {\n");
+    fprintf(fp, "        if (feof(fp)) { return EOFOBJ; };\n");
     fprintf(fp, "        RAISE(\"cannot read from file: %%s\", strerror(errno));\n");
     fprintf(fp, "    }\n");
     fprintf(fp, "\n");
     fprintf(fp, "    size_t len = strlen(buf);\n");
     fprintf(fp, "    if (buf[len-1] == '\\n') len--;\n");
     fprintf(fp, "    struct string *str = GET_STRING(make_string(buf, len));\n");
-    fprintf(fp, " \n");
+    fprintf(fp, "\n");
     fprintf(fp, "    while (len == sizeof(buf) - 1) {\n");
     fprintf(fp, "        r = fgets(buf, sizeof(buf), fp);\n");
-    fprintf(fp, "        if (!r) {\n");
+    fprintf(fp, "        if (!r && !feof(fp)) {\n");
     fprintf(fp, "            RAISE(\"cannot read from file: %%s\", strerror(errno));\n");
     fprintf(fp, "        }\n");
     fprintf(fp, "\n");
