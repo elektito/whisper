@@ -1691,8 +1691,9 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (!r) {\n");
     fprintf(fp, "        RAISE(\"cannot read from file: %%s\", strerror(errno));\n");
     fprintf(fp, "    }\n");
-    fprintf(fp, " \n");
+    fprintf(fp, "\n");
     fprintf(fp, "    size_t len = strlen(buf);\n");
+    fprintf(fp, "    if (buf[len-1] == '\\n') len--;\n");
     fprintf(fp, "    struct string *str = GET_STRING(make_string(buf, len));\n");
     fprintf(fp, " \n");
     fprintf(fp, "    while (len == sizeof(buf) - 1) {\n");
@@ -1702,6 +1703,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        }\n");
     fprintf(fp, "\n");
     fprintf(fp, "        len = strlen(buf);\n");
+    fprintf(fp, "        if (buf[len-1] == '\\n') len--;\n");
     fprintf(fp, "        str->s = realloc(str->s, str->len + len + 1);\n");
     fprintf(fp, "        memcpy(str->s + str->len, buf, len + 1);\n");
     fprintf(fp, "        str->len += len;\n");
