@@ -957,6 +957,143 @@ compile_lambda(struct function *func, struct value *form)
 }
 
 int
+compile_let(struct function *func, struct value *form)
+{
+    if (form->list.length < 3) {
+        fprintf(stderr, "malformed let\n");
+        exit(1);
+    }
+
+    int bindings_idx = 1;
+    int self_ref_identifier = -1;
+    if (form->list.ptr[bindings_idx].type == VAL_ID) {
+        self_ref_identifier = form->list.ptr[bindings_idx].identifier.interned;
+        bindings_idx = 2;
+    }
+
+    struct value *bindings = &form->list.ptr[bindings_idx];
+    if (bindings->type != VAL_LIST) {
+        fprintf(stderr, "malformed let\n");
+        exit(1);
+    }
+
+    int n_params = bindings->list.length;
+    struct function *new_func = add_function(func->compiler, n_params);
+
+    gen_code(new_func, "    va_list args;\n");
+    gen_code(new_func, "    va_start(args, nargs);\n");
+
+    /* add binding variables as parameters */
+    for (int i = 0; i < form->list.ptr[bindings_idx].list.length; ++i) {
+        struct value *binding = &bindings->list.ptr[i];
+        if (binding->type != VAL_LIST || binding->list.length != 2) {
+            fprintf(stderr, "bad let binding\n");
+            exit(1);
+        }
+
+        if (binding->list.ptr[0].type != VAL_ID) {
+            fprintf(stderr, "bad let variable\n");
+            exit(1);
+        }
+
+        new_func->params[i] = binding->list.ptr[0].identifier.interned;
+        gen_code(new_func, "    value %.*s = va_arg(args, value);\n",
+                 func->compiler->reader->interned_mangled_len[binding->list.ptr[0].identifier.interned],
+                 func->compiler->reader->interned_mangled[binding->list.ptr[0].identifier.interned]);
+    }
+
+    gen_code(new_func, "    va_end(args);\n");
+    gen_code(new_func, "\n");
+
+    /* compile body */
+    for (int i = bindings_idx + 1; i < form->list.length; ++i) {
+        compile_form(new_func, &form->list.ptr[i]);
+    }
+
+    /* now generate to code for referencing the function */
+    int func_varnum = func->varnum++;
+    gen_code(func, "    value x%d = make_closure(%s, %d, %d",
+             func_varnum,
+             new_func->name,
+             bindings->list.length,
+             new_func->n_freevars);
+
+    /* resolve free variables (including self-reference) */
+    int self_ref_env_idx = -1;
+    for (int i = 0; i < new_func->n_freevars; ++i) {
+        char buf[64];
+        char *fvar = NULL;
+        int fvar_len;
+
+        /* see if its a self-reference. */
+        if (new_func->freevars[i] == self_ref_identifier) {
+            /* pass zero for now, since we can't access it yet; we'll set it after the
+               closure is created. */
+            fvar = "(value) 0";
+            fvar_len = 9;
+            self_ref_env_idx = i;
+        }
+
+        for (int j = 0; j < func->n_params; ++j) {
+            if (new_func->freevars[i] == func->params[j]) {
+                fvar = func->compiler->reader->interned_mangled[func->params[j]];
+                fvar_len = func->compiler->reader->interned_mangled_len[func->params[j]];
+            }
+        }
+
+        if (fvar == NULL) {
+            /* not one of the function's parameters; it's a free
+             * variable here too. see if it's already been
+             * referenced. */
+            for (int j = 0; j < func->n_freevars; ++j) {
+                if (new_func->freevars[i] == func->freevars[j]) {
+                    snprintf(buf, sizeof(buf), "envget(env, %d)", j);
+                    fvar = buf;
+                    fvar_len = strlen(buf);
+                }
+            }
+        }
+
+        if (fvar == NULL) {
+            /* the free variable has not been referenced before; add it
+             * to the list of free variables. */
+            func->n_freevars++;
+            func->freevars = realloc(func->freevars, func->n_freevars);
+            func->freevars[func->n_freevars - 1] = new_func->freevars[i];
+
+            snprintf(buf, sizeof(buf), "envget(env, %d)", func->n_freevars - 1);
+            fvar = buf;
+            fvar_len = strlen(buf);
+        }
+
+        gen_code(func, ", %.*s", fvar_len, fvar);
+    }
+
+    gen_code(func, ");\n");
+
+    /* now set the self-reference environment variable, if needed. */
+    if (self_ref_env_idx >= 0) {
+        gen_code(func, "    GET_CLOSURE(x%d)->freevars[%d] = x%d;\n", func_varnum, self_ref_env_idx, func_varnum);
+    }
+
+    /* now compile the binding values */
+    int *arg_varnums = malloc(sizeof(int) * bindings->list.length);
+    for (int i = 0; i < bindings->list.length; ++i) {
+        arg_varnums[i] = compile_form(func, &bindings->list.ptr[i].list.ptr[1]);
+    }
+
+    /* create a call to the function we just created, passing binding values as arguments*/
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, bindings->list.length);
+    for (int i = 0; i < bindings->list.length; ++i) {
+        gen_code(func, ", x%d", arg_varnums[i]);
+    }
+    gen_code(func, ");\n");
+
+    return ret_varnum;
+}
+
+int
 compile_call(struct function *func, struct value *form)
 {
     int ret_varnum;
@@ -1186,6 +1323,11 @@ compile_list(struct function *func, struct value *form)
     {
         varnum = compile_quote(func, form);
     } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 3 &&
+               memcmp(list_car->identifier.name, "let", 3) == 0)
+    {
+        varnum = compile_let(func, form);
+    } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 6 &&
                memcmp(list_car->identifier.name, "lambda", 6) == 0)
     {
@@ -1301,7 +1443,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define TRUE_TAG 0x1d\n");   /*   11_101 */
     fprintf(fp, "#define FALSE_TAG 0x0d\n");  /*   01_101 */
     fprintf(fp, "#define CHAR_TAG 0x25\n");   /*  100_101 */
-    fprintf(fp, "#define SYMBOL_TAG 0x25\n"); /* 1000_101 */
+    fprintf(fp, "#define SYMBOL_TAG 0x45\n"); /* 1000_101 */
     fprintf(fp, "\n");
     fprintf(fp, "#define TAG_MASK 0x3\n");
     fprintf(fp, "#define VALUE_MASK 0xfffffffffffffff8\n");
@@ -1386,45 +1528,13 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    } else if (IS_STRING(v)) {\n");
     fprintf(fp, "        printf(\"%%.*s\", (int) GET_STRING(v)->len, GET_STRING(v)->s);\n");
     fprintf(fp, "    } else if (IS_SYMBOL(v)) {\n");
-    fprintf(fp, "        printf(\"%%.*s\", symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);\n");
+    fprintf(fp, "        printf(\"%%.*s\", (int) symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);\n");
     fprintf(fp, "    } else if (IS_BOOL(v)) {\n");
     fprintf(fp, "        printf(\"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
     fprintf(fp, "    } else if (IS_VOID(v)) {\n");
     fprintf(fp, "        printf(\"#<void>\");\n");
     fprintf(fp, "    } else if (IS_CHAR(v)) {\n");
-    fprintf(fp, "        char c = GET_CHAR(v);\n");
-    fprintf(fp, "        switch (c) {\n");
-    fprintf(fp, "        case '\\x07':\n");
-    fprintf(fp, "            printf(\"#\\\\alarm\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\b':\n");
-    fprintf(fp, "            printf(\"#\\\\backspace\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\x7f':\n");
-    fprintf(fp, "            printf(\"#\\\\delete\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\x1b':\n");
-    fprintf(fp, "            printf(\"#\\\\escape\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\n':\n");
-    fprintf(fp, "            printf(\"#\\\\newline\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\0':\n");
-    fprintf(fp, "            printf(\"#\\\\null\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\r':\n");
-    fprintf(fp, "            printf(\"#\\\\return\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        case '\\t':\n");
-    fprintf(fp, "            printf(\"#\\\\tab\");\n");
-    fprintf(fp, "            break;\n");
-    fprintf(fp, "        default:\n");
-    fprintf(fp, "            if (c >= 32 || c < 127) {\n");
-    fprintf(fp, "                printf(\"%%c\", c);\n");
-    fprintf(fp, "            } else {\n");
-    fprintf(fp, "                printf(\"#\\\\x%%02x\", c);\n");
-    fprintf(fp, "            }\n");
-    fprintf(fp, "        }\n");
+    fprintf(fp, "        printf(\"%%c\", GET_CHAR(v));\n");
     fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
     fprintf(fp, "        printf(\"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
     fprintf(fp, "    } else {\n");
