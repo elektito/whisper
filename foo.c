@@ -1248,7 +1248,7 @@ compile_quote(struct function *func, struct value *form)
     case VAL_ID:
         varnum = func->varnum++;
         add_compiled_symbol(func->compiler, value->identifier.interned);
-        gen_code(func, "    value x%d = tok%.*s;\n", varnum,
+        gen_code(func, "    value x%d = sym%.*s;\n", varnum,
                  func->compiler->reader->interned_mangled_len[value->identifier.interned],
                  func->compiler->reader->interned_mangled[value->identifier.interned]);
         break;
@@ -1488,7 +1488,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static struct symbol *symbols = NULL;\n");
     fprintf(fp, "\n");
     for (int i = 0; i < compiler->n_symbols; ++i) {
-        fprintf(fp, "#define tok%.*s SYMBOL(%d)\n",
+        fprintf(fp, "#define sym%.*s SYMBOL(%d)\n",
                 compiler->reader->interned_mangled_len[compiler->symbols[i]],
                 compiler->reader->interned_mangled[compiler->symbols[i]],
                 i);
