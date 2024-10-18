@@ -891,9 +891,12 @@ compile_function(struct function *func, struct value *form,
     gen_code(new_func, "    va_end(args);\n");
     gen_code(new_func, "\n");
 
+    int new_varnum = -1;
     for (int i = body_start_idx; i < form->list.length; ++i) {
-        compile_form(new_func, &form->list.ptr[i]);
+        new_varnum = compile_form(new_func, &form->list.ptr[i]);
     }
+
+    gen_code(new_func, "    return x%d;\n", new_varnum);
 
     /* now generate to code for referencing the function */
     gen_code(func, "    value x%d = make_closure(%s, %d, %d",
@@ -1006,9 +1009,12 @@ compile_let(struct function *func, struct value *form)
     gen_code(new_func, "\n");
 
     /* compile body */
+    int new_ret_varnum;
     for (int i = bindings_idx + 1; i < form->list.length; ++i) {
-        compile_form(new_func, &form->list.ptr[i]);
+        new_ret_varnum = compile_form(new_func, &form->list.ptr[i]);
     }
+
+    gen_code(new_func, "    return x%d;\n", new_ret_varnum);
 
     /* now generate to code for referencing the function */
     int func_varnum = func->varnum++;
@@ -1555,9 +1561,6 @@ compile_program(struct compiler *compiler)
     for (int i = 0; i < compiler->n_functions; ++i) {
         fprintf(fp, "static value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
         fwrite(compiler->functions[i]->code, 1, compiler->functions[i]->code_size, fp);
-        if (compiler->functions[i]->varnum > 0) {
-            fprintf(fp, "    return x%d;\n", compiler->functions[i]->varnum - 1);
-        }
         fprintf(fp, "}\n\n");
     }
 
