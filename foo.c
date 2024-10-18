@@ -1366,6 +1366,36 @@ compile_read_line(struct function *func, struct value *form)
     return ret_varnum;
 }
 
+int
+compile_port(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "port? needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = BOOL(IS_PORT(x%d));\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_input_port(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "port? needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = BOOL(IS_PORT(x%d) && GET_OBJECT(x%d)->port.input);\n", ret_varnum, arg_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
 struct {
     const char *name;
     int (*compile)(struct function *func, struct value *form);
@@ -1376,7 +1406,9 @@ struct {
     { "cons", compile_cons },
     { "display", compile_display },
     { "eq?", compile_eq },
+    { "input-port?", compile_input_port },
     { "open-input-file", compile_open_input_file },
+    { "port?", compile_port },
     { "read-line", compile_read_line },
     { "+", compile_add },
     { "-", compile_sub },
