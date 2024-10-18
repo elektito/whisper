@@ -1283,7 +1283,7 @@ compile_quote(struct function *func, struct value *form)
 }
 
 int
-compile_eq(struct function *func, struct value *form)
+compile_eq_q(struct function *func, struct value *form)
 {
     if (form->list.length != 3) {
         fprintf(stderr, "malformed eq?\n");
@@ -1367,7 +1367,7 @@ compile_read_line(struct function *func, struct value *form)
 }
 
 int
-compile_port(struct function *func, struct value *form)
+compile_port_q(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "port? needs a single argument\n");
@@ -1382,7 +1382,7 @@ compile_port(struct function *func, struct value *form)
 }
 
 int
-compile_input_port(struct function *func, struct value *form)
+compile_input_port_q(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "port? needs a single argument\n");
@@ -1405,10 +1405,10 @@ struct {
     { "close-port", compile_close_port },
     { "cons", compile_cons },
     { "display", compile_display },
-    { "eq?", compile_eq },
-    { "input-port?", compile_input_port },
+    { "eq?", compile_eq_q },
+    { "input-port?", compile_input_port_q },
     { "open-input-file", compile_open_input_file },
-    { "port?", compile_port },
+    { "port?", compile_port_q },
     { "read-line", compile_read_line },
     { "+", compile_add },
     { "-", compile_sub },
