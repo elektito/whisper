@@ -291,7 +291,7 @@ mangle_name(const char *name, int name_len)
     *dst = 0;
 
     mangled_len = strlen(buf);
-    ret_buf = malloc(mangled_len);
+    ret_buf = malloc(mangled_len + 1);
     memcpy(ret_buf, buf, mangled_len + 1);
 
     return ret_buf;
@@ -550,7 +550,7 @@ add_function(struct compiler *compiler, int nparams)
     func->name = malloc(name_len + 1);
     memcpy(func->name, name_buf, name_len + 1);
 
-    compiler->functions = realloc(compiler->functions, compiler->n_functions);
+    compiler->functions = realloc(compiler->functions, compiler->n_functions * sizeof(struct function *));
     compiler->functions[compiler->n_functions - 1] = func;
 
     return func;
