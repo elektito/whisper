@@ -1568,6 +1568,7 @@ compile_program(struct compiler *compiler)
             exit(1);
         }
     }
+    gen_code(startup_func, "    return VOID;\n");
 
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
