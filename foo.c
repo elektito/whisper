@@ -865,25 +865,30 @@ compile_div(struct function *func, struct value *form)
 
 int
 compile_function(struct function *func, struct value *form,
-                 int params_idx, int body_start_idx)
+                 int is_define)
 {
     int varnum = func->varnum++;
 
-    struct value *params = &form->list.ptr[params_idx];
+    struct value *params = &form->list.ptr[1];
+    int params_start_idx = is_define ? 1 : 0;
+    int n_params = params->list.length;
+    if (is_define) {
+        n_params--;
+    }
 
     if (params->type != VAL_LIST || params->list.tail != NULL) {
         fprintf(stderr, "rest parameters not supported yet\n");
         exit(1);
     }
 
-    struct function *new_func = add_function(func->compiler, form->list.ptr[1].list.length);
-    for (int i = 0; i < params->list.length; ++i) {
-        new_func->params[i] = params->list.ptr[i].identifier.interned;
+    struct function *new_func = add_function(func->compiler, n_params);
+    for (int i = params_start_idx; i < params->list.length; ++i) {
+        new_func->params[i - params_start_idx] = params->list.ptr[i].identifier.interned;
     }
 
     gen_code(new_func, "    va_list args;\n");
     gen_code(new_func, "    va_start(args, nargs);\n");
-    for (int i = 0; i < params->list.length; ++i) {
+    for (int i = params_start_idx; i < params->list.length; ++i) {
         gen_code(new_func, "    value %.*s = va_arg(args, value);\n",
                 func->compiler->reader->interned_mangled_len[params->list.ptr[i].identifier.interned],
                 func->compiler->reader->interned_mangled[params->list.ptr[i].identifier.interned]);
@@ -892,7 +897,7 @@ compile_function(struct function *func, struct value *form,
     gen_code(new_func, "\n");
 
     int new_varnum = -1;
-    for (int i = body_start_idx; i < form->list.length; ++i) {
+    for (int i = 2; i < form->list.length; ++i) {
         new_varnum = compile_form(new_func, &form->list.ptr[i]);
     }
 
@@ -902,7 +907,7 @@ compile_function(struct function *func, struct value *form,
     gen_code(func, "    value x%d = make_closure(%s, %d, %d",
              varnum,
              new_func->name,
-             params->list.length,
+             n_params,
              new_func->n_freevars);
     for (int i = 0; i < new_func->n_freevars; ++i) {
         char buf[64];
@@ -956,7 +961,7 @@ compile_lambda(struct function *func, struct value *form)
         exit(1);
     }
 
-    return compile_function(func, form, 1, 2);
+    return compile_function(func, form, 0);
 }
 
 int
@@ -1149,36 +1154,55 @@ compile_define(struct function *func, struct value *form)
         exit(1);
     }
 
-    if (form->list.ptr[0].type != VAL_ID) {
-        fprintf(stderr, "malformed define\n");
-        exit(1);
-    }
+    if (form->list.ptr[1].type == VAL_ID) {
+        int var_name = form->list.ptr[1].identifier.interned;
+        int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
+        char *mangled_str = func->compiler->reader->interned_mangled[var_name];
+        func->n_params++;
+        func->params[func->n_params - 1] = var_name;
 
-    int var_name = form->list.ptr[1].identifier.interned;
-    int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
-    char *mangled_str = func->compiler->reader->interned_mangled[var_name];
-    func->n_params++;
-    func->params[func->n_params - 1] = var_name;
+        if (form->list.length == 2) {
+            /* define the variable with a void initial value */
+            gen_code(func, "    value %.*s = VOID;\n", mangled_len, mangled_str);
+            varnum = func->varnum++;
+            gen_code(func, "    value x%d = %.*s;\n", mangled_len, mangled_str);
 
-    if (form->list.length == 2) {
-        /* define the variable with a void initial value */
-        gen_code(func, "    value %.*s = VOID;\n", mangled_len, mangled_str);
-        varnum = func->varnum++;
-        gen_code(func, "    value x%d = %.*s;\n", mangled_len, mangled_str);
+            return varnum;
+        }
 
-        return varnum;
-    }
+        if (form->list.length != 3) {
+            fprintf(stderr, "malformed define\n");
+            exit(1);
+        }
 
-    if (form->list.length == 3) {
+        /* define variable with initial value */
         varnum = compile_form(func, &form->list.ptr[2]);
         gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
 
         return varnum;
     }
 
-    /* compile lambda does not check for the "lambda" symbol at the head
-     * of the list, so it can compile a "define" form as lambda. */
-    varnum = compile_function(func, form, 2, 3);
+    /* define function */
+
+    if (form->list.ptr[1].type != VAL_LIST ||
+        form->list.ptr[1].list.length == 0)
+    {
+        fprintf(stderr, "malformed define");
+        exit(1);
+    }
+
+    if (form->list.ptr[1].list.tail != NULL) {
+        fprintf(stderr, "rest parameters not yet supported");
+        exit(1);
+    }
+
+    int var_name = form->list.ptr[1].list.ptr[0].identifier.interned;
+    int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
+    char *mangled_str = func->compiler->reader->interned_mangled[var_name];
+    func->n_params++;
+    func->params[func->n_params - 1] = var_name;
+
+    varnum = compile_function(func, form, 1);
     gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
 
     return varnum;
