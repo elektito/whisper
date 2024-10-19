@@ -479,6 +479,7 @@ struct function
 {
     struct compiler *compiler;
     char *name;
+    struct function *parent;
 
     char *code;
     int code_size;
@@ -534,12 +535,13 @@ gen_code(struct function *func, const char *fmt, ...)
 }
 
 struct function *
-add_function(struct compiler *compiler, int nparams)
+add_function(struct function *parent, struct compiler *compiler, int nparams)
 {
     char name_buf[1024];
     int name_len;
 
     struct function *func = calloc(1, sizeof(struct function) + nparams * sizeof(interned_string));
+    func->parent = parent;
     func->compiler = compiler;
     func->code_size = 0;
     func->code = NULL;
@@ -595,7 +597,34 @@ compile_identifier(struct function *func, struct value *form)
     }
 
     if (!found) {
+        /* check parent params to see if it's a global variable or not */
+        struct function *parent = func->parent;
+        found = 0;
+        while (parent) {
+            for (int i = 0; i < parent->n_params; ++i) {
+                if (parent->params[i] == form->identifier.interned) {
+                    found = 1;
+                    break;
+                }
+            }
+
+            if (found) {
+                break;
+            }
+
+            parent = parent->parent;
+        }
+
+        if (!found) {
+            /* it's a global variable */
+            gen_code(func, "    value x%d = %.*s;\n", varnum,
+                     func->compiler->reader->interned_mangled_len[form->identifier.interned],
+                     func->compiler->reader->interned_mangled[form->identifier.interned]);
+            return varnum;
+        }
+
         /* it's a free variable */
+        found = 0;
         for (int j = 0; j < func->n_freevars; ++j) {
             if (func->freevars[j] == form->identifier.interned) {
                 /* it's been used before */
@@ -881,7 +910,7 @@ compile_function(struct function *func, struct value *form,
         exit(1);
     }
 
-    struct function *new_func = add_function(func->compiler, n_params);
+    struct function *new_func = add_function(func, func->compiler, n_params);
     for (int i = params_start_idx; i < params->list.length; ++i) {
         new_func->params[i - params_start_idx] = params->list.ptr[i].identifier.interned;
     }
@@ -986,7 +1015,7 @@ compile_let(struct function *func, struct value *form)
     }
 
     int n_params = bindings->list.length;
-    struct function *new_func = add_function(func->compiler, n_params);
+    struct function *new_func = add_function(func, func->compiler, n_params);
 
     gen_code(new_func, "    va_list args;\n");
     gen_code(new_func, "    va_start(args, nargs);\n");
@@ -1177,7 +1206,14 @@ compile_define(struct function *func, struct value *form)
 
         /* define variable with initial value */
         varnum = compile_form(func, &form->list.ptr[2]);
-        gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+
+        if (func->parent == NULL) {
+            /* the variable is only set here, not declared, because it will
+             * later be declared as a global variable. */
+            gen_code(func, "    %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+        } else {
+            gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+        }
 
         return varnum;
     }
@@ -1203,7 +1239,13 @@ compile_define(struct function *func, struct value *form)
     func->params[func->n_params - 1] = var_name;
 
     varnum = compile_function(func, form, 1);
-    gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+
+    if (func->parent == NULL) {
+        /* we are setting a global variable, so no new variable is defined here. */
+        gen_code(func, "    %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+    } else {
+        gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+    }
 
     return varnum;
 }
@@ -1553,7 +1595,7 @@ compile_form(struct function *func, struct value *form)
 void
 compile_program(struct compiler *compiler)
 {
-    struct function *startup_func = add_function(compiler, 0);
+    struct function *startup_func = add_function(NULL, compiler, 0);
     while (compiler->reader->lexer->cur_tok_type != TOK_EOF) {
         read_value(compiler->reader);
         compile_form(startup_func, &compiler->reader->value);
@@ -1788,6 +1830,14 @@ compile_program(struct compiler *compiler)
     /* add function prototypes */
     for (int i = 0; i < compiler->n_functions; ++i) {
         fprintf(fp, "static value %s(environment env, int nargs, ...);\n", compiler->functions[i]->name);
+    }
+    fprintf(fp, "\n");
+
+    /* add startup func variables as globals */
+    for (int i = 0; i < startup_func->n_params; ++i) {
+        fprintf(fp, "static value %.*s;\n",
+                compiler->reader->interned_mangled_len[startup_func->params[i]],
+                compiler->reader->interned_mangled[startup_func->params[i]]);
     }
     fprintf(fp, "\n");
 
