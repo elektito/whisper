@@ -1,3 +1,4 @@
+#include <argp.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -11,6 +12,11 @@ read_file(const char *filename, long *length)
 {
     char *buffer;
     FILE *fp = fopen(filename, "rb");
+    if (fp == NULL) {
+        perror("error opening file");
+        exit(1);
+    }
+
     fseek(fp, 0, SEEK_END);
     *length = ftell(fp);
     fseek(fp, 0, SEEK_SET);
@@ -1928,22 +1934,55 @@ print_value(struct value *value)
 
 /*********************** main ************************/
 
+struct arguments {
+    const char *filename;
+};
+
+static error_t
+parse_opt(int key, char *arg, struct argp_state *state)
+{
+    struct arguments *arguments = state->input;
+
+    switch (key) {
+    case ARGP_KEY_ARG:
+        if (state->arg_num == 0) {
+            arguments->filename = arg;
+        } else {
+            /* too many positional arguments */
+            argp_usage(state);
+        }
+        break;
+
+    case ARGP_KEY_END:
+        if (state->arg_num == 0) {
+            /* filename not passed */
+            argp_usage(state);
+        }
+        break;
+
+    default:
+        return ARGP_ERR_UNKNOWN;
+    }
+
+    return 0;
+}
+
 int
 main(int argc, char const *argv[])
 {
-    const char *filename;
     const char *program;
     long program_length;
 
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s input_file\n", argv[0]);
-        return 1;
-    }
+    struct arguments arguments;
+    struct argp_option options[] = {
+        { 0 },
+    };
+    struct argp argp = { options, parse_opt, "FILENAMME", 0 };
+    argp_parse(&argp, argc, (char**) argv, 0, 0, &arguments);
 
-    filename = argv[1];
-    program = read_file(filename, &program_length);
+    program = read_file(arguments.filename, &program_length);
     struct lexer lexer = {
-        .filename = filename,
+        .filename = arguments.filename,
         .program = program,
         .program_length = program_length,
         .ptr = program,
