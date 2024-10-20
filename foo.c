@@ -505,6 +505,9 @@ struct compiler
 
     int n_symbols;
     interned_string *symbols;
+
+    int n_referenced_vars;
+    interned_string *referenced_vars;
 };
 
 int compile_form(struct function *func, struct value *form);
@@ -556,6 +559,20 @@ add_function(struct function *parent, struct compiler *compiler, int nparams)
     compiler->functions[compiler->n_functions - 1] = func;
 
     return func;
+}
+
+void
+add_referenced_global_var(struct compiler *compiler, interned_string var)
+{
+    for (int i = 0; i < compiler->n_referenced_vars; ++i) {
+        if (compiler->referenced_vars[i] == var) {
+            return;
+        }
+    }
+
+    compiler->n_referenced_vars++;
+    compiler->referenced_vars = realloc(compiler->referenced_vars, compiler->n_referenced_vars);
+    compiler->referenced_vars[compiler->n_referenced_vars - 1] = var;
 }
 
 int
@@ -620,6 +637,9 @@ compile_identifier(struct function *func, struct value *form)
             gen_code(func, "    value x%d = %.*s;\n", varnum,
                      func->compiler->reader->interned_mangled_len[form->identifier.interned],
                      func->compiler->reader->interned_mangled[form->identifier.interned]);
+
+            add_referenced_global_var(func->compiler, form->identifier.interned);
+
             return varnum;
         }
 
@@ -1599,18 +1619,25 @@ compile_program(struct compiler *compiler)
     while (compiler->reader->lexer->cur_tok_type != TOK_EOF) {
         read_value(compiler->reader);
         compile_form(startup_func, &compiler->reader->value);
+    }
+    gen_code(startup_func, "    return VOID;\n");
 
-        if (startup_func->n_freevars > 0) {
-            for (int i = 0; i < startup_func->n_freevars; ++i) {
-                fprintf(stderr, "unbound identifier: %.*s\n",
-                        compiler->reader->interned_name_len[startup_func->freevars[i]],
-                        compiler->reader->interned_name[startup_func->freevars[i]]);
+    for (int i = 0; i < compiler->n_referenced_vars; ++i) {
+        int found = 0;
+        for (int j = 0; j < startup_func->n_params; ++j) {
+            if (compiler->referenced_vars[i] == startup_func->params[j]) {
+                found = 1;
+                break;
             }
+        }
 
+        if (!found) {
+            fprintf(stderr, "unbound identifier: %.*s\n",
+                    compiler->reader->interned_name_len[compiler->referenced_vars[i]],
+                    compiler->reader->interned_name[compiler->referenced_vars[i]]);
             exit(1);
         }
     }
-    gen_code(startup_func, "    return VOID;\n");
 
     FILE *fp = fopen(compiler->output_filename, "w");
     compiler->output_file = fp;
