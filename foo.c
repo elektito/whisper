@@ -1504,6 +1504,22 @@ compile_eof_object_q(struct function *func, struct value *form)
     return ret_varnum;
 }
 
+int
+compile_string_to_symbol(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "string->symbol needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    gen_code(func, "    if (!IS_STRING(x%d)) { RAISE(\"string->symbol argument not a string\"); };\n", arg_varnum);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = string_to_symbol(x%d);\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
 struct {
     const char *name;
     int (*compile)(struct function *func, struct value *form);
@@ -1519,6 +1535,7 @@ struct {
     { "open-input-file", compile_open_input_file },
     { "port?", compile_port_q },
     { "read-line", compile_read_line },
+    { "string->symbol", compile_string_to_symbol },
     { "+", compile_add },
     { "-", compile_sub },
     { "*", compile_mul },
@@ -1759,6 +1776,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define RAISE(...) { fprintf(stderr, \"exception: \" __VA_ARGS__); fprintf(stderr, \"\\n\"); cleanup(); exit(1); }\n");
     fprintf(fp, "\n");
 
+    fprintf(fp, "static int n_symbols = 0;\n");
     fprintf(fp, "static struct symbol *symbols = NULL;\n");
     fprintf(fp, "\n");
     for (int i = 0; i < compiler->n_symbols; ++i) {
@@ -1860,6 +1878,21 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return VOID;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value string_to_symbol(value v) {\n");
+    fprintf(fp, "    for (int i = 0; i < n_symbols; ++i) {\n");
+    fprintf(fp, "        if (symbols[i].name_len == GET_STRING(v)->len && memcmp(symbols[i].name, GET_STRING(v)->s, symbols[i].name_len) == 0) {\n");
+    fprintf(fp, "            return SYMBOL(i);\n");
+    fprintf(fp, "        }\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    n_symbols++;\n");
+    fprintf(fp, "    symbols = realloc(symbols, n_symbols * sizeof(struct symbol));\n");
+    fprintf(fp, "    symbols[n_symbols - 1].name_len = GET_STRING(v)->len;\n");
+    fprintf(fp, "    symbols[n_symbols - 1].name = malloc(GET_STRING(v)->len);\n");
+    fprintf(fp, "    memcpy(symbols[n_symbols - 1].name, GET_STRING(v)->s, GET_STRING(v)->len);\n");
+    fprintf(fp, "    return SYMBOL(n_symbols - 1);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
 
     /* add function prototypes */
     for (int i = 0; i < compiler->n_functions; ++i) {
@@ -1885,6 +1918,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "\n");
     fprintf(fp, "int main(int argc, const char *argv[]) {\n");
 
+    fprintf(fp, "    n_symbols = %d;\n", compiler->n_symbols);
     fprintf(fp, "    symbols = malloc(sizeof(struct symbol) * %d);\n", compiler->n_symbols);
     for (int i = 0; i < compiler->n_symbols; ++i) {
         fprintf(fp, "    symbols[%d].name = \"%.*s\";\n", i,
