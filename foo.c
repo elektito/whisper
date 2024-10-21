@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /*********************** utils ************************/
 const char *
@@ -1936,6 +1937,7 @@ print_value(struct value *value)
 
 struct arguments {
     const char *filename;
+    int run;
 };
 
 static error_t
@@ -1944,6 +1946,10 @@ parse_opt(int key, char *arg, struct argp_state *state)
     struct arguments *arguments = state->input;
 
     switch (key) {
+    case 'r':
+        arguments->run = 1;
+        break;
+
     case ARGP_KEY_ARG:
         if (state->arg_num == 0) {
             arguments->filename = arg;
@@ -1974,7 +1980,11 @@ main(int argc, char const *argv[])
     long program_length;
 
     struct arguments arguments;
+    arguments.filename = NULL;
+    arguments.run = 0;
+
     struct argp_option options[] = {
+        { "run", 'r', 0, 0, "Compile and run the output C file", },
         { 0 },
     };
     struct argp argp = { options, parse_opt, "FILENAMME", 0 };
@@ -1996,6 +2006,34 @@ main(int argc, char const *argv[])
         .output_filename = "a.c",
     };
     compile_program(&compiler);
+
+    if (arguments.run) {
+        char command[256];
+        char executable_filename[32];
+        char *cc;
+
+        strncpy(executable_filename, "/tmp/whisper.XXXXXX", sizeof(executable_filename));
+        int fd = mkstemp(executable_filename);
+        close(fd);
+
+        cc = getenv("CC");
+        if (!cc) {
+            cc = "gcc";
+        }
+
+        snprintf(command, sizeof(command), "%s -o %s %s",
+                 cc, executable_filename, compiler.output_filename);
+        int ret = system(command);
+        if (ret) {
+            fprintf(stderr, "Error compiling output C file.\n");
+            exit(1);
+        }
+
+        ret = system(executable_filename);
+        unlink(executable_filename);
+
+        return ret;
+    }
 
     return 0;
 }
