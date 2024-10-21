@@ -1520,6 +1520,36 @@ compile_string_to_symbol(struct function *func, struct value *form)
     return ret_varnum;
 }
 
+int
+compile_string_q(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "string? needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = BOOL(IS_STRING(x%d));\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_symbol_q(struct function *func, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "symbol? needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = BOOL(IS_SYMBOL(x%d));\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
 struct {
     const char *name;
     int (*compile)(struct function *func, struct value *form);
@@ -1536,6 +1566,8 @@ struct {
     { "port?", compile_port_q },
     { "read-line", compile_read_line },
     { "string->symbol", compile_string_to_symbol },
+    { "string?", compile_string_q },
+    { "symbol?", compile_symbol_q },
     { "+", compile_add },
     { "-", compile_sub },
     { "*", compile_mul },
