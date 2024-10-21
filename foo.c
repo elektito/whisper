@@ -2053,7 +2053,7 @@ main(int argc, char const *argv[])
         { "run", 'r', 0, 0, "Compile and run the output C file", },
         { 0 },
     };
-    struct argp argp = { options, parse_opt, "FILENAMME", 0 };
+    struct argp argp = { options, parse_opt, "FILENAME", 0 };
     argp_parse(&argp, argc, (char**) argv, 0, 0, &arguments);
 
     program = read_file(arguments.filename, &program_length);
