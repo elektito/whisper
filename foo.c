@@ -504,7 +504,7 @@ struct function
 struct compiler
 {
     struct reader *reader;
-    const char *output_filename;
+    const char *c_filename;
     FILE *output_file;
 
     int n_functions;
@@ -1731,7 +1731,7 @@ compile_program(struct compiler *compiler)
         }
     }
 
-    FILE *fp = fopen(compiler->output_filename, "w");
+    FILE *fp = fopen(compiler->c_filename, "w");
     compiler->output_file = fp;
     fprintf(fp, "#include <errno.h>\n");
     fprintf(fp, "#include <stdarg.h>\n");
@@ -2054,8 +2054,14 @@ print_value(struct value *value)
 /*********************** main ************************/
 
 struct arguments {
-    const char *filename;
+    const char *input_filename;
+    const char *output_filename;
+    int output_c;
     int run;
+
+    const char *c_filename;
+    const char *executable_filename;
+    int delete_executable;
 };
 
 static error_t
@@ -2064,13 +2070,21 @@ parse_opt(int key, char *arg, struct argp_state *state)
     struct arguments *arguments = state->input;
 
     switch (key) {
+    case 'c':
+        arguments->output_c = 1;
+        break;
+
+    case 'o':
+        arguments->output_filename = arg;
+        break;
+
     case 'r':
         arguments->run = 1;
         break;
 
     case ARGP_KEY_ARG:
         if (state->arg_num == 0) {
-            arguments->filename = arg;
+            arguments->input_filename = arg;
         } else {
             /* too many positional arguments */
             argp_usage(state);
@@ -2098,19 +2112,66 @@ main(int argc, char const *argv[])
     long program_length;
 
     struct arguments arguments;
-    arguments.filename = NULL;
+    arguments.input_filename = NULL;
+    arguments.output_filename = NULL;
+    arguments.output_c = 0;
     arguments.run = 0;
 
+    arguments.delete_executable = 0;
+    arguments.c_filename = NULL;
+    arguments.executable_filename = NULL;
+
     struct argp_option options[] = {
-        { "run", 'r', 0, 0, "Compile and run the output C file", },
+        { "run", 'r', 0, 0, "Run the output executable", },
+        { "c", 'c', 0, 0, "Output a C file, not an executable"},
+        { "output", 'o', "FILENAME", 0, "Output filename (C or executable depending on -c). Defaults to b.c or b.out" },
         { 0 },
     };
     struct argp argp = { options, parse_opt, "FILENAME", 0 };
     argp_parse(&argp, argc, (char**) argv, 0, 0, &arguments);
 
-    program = read_file(arguments.filename, &program_length);
+    if (arguments.output_c && arguments.run) {
+        fprintf(stderr, "Cannot use both -r and -c\n");
+        exit(1);
+    }
+
+    if (!arguments.output_filename) {
+        arguments.delete_executable = 1;
+        if (arguments.output_c) {
+            arguments.output_filename = "b.c";
+        } else {
+            if (arguments.run) {
+                /* we don't want to output an executable. create a temporary name. */
+                int len = strlen("/tmp/whisper.XXXXXX");
+                char *filename = malloc(len + 1);
+                strcpy(filename, "/tmp/whisper.XXXXXX");
+                int fd = mkstemp(filename);
+                close(fd);
+
+                arguments.output_filename = filename;
+                arguments.delete_executable = 1;
+            } else {
+                arguments.output_filename = "b.out";
+            }
+        }
+    }
+
+    if (arguments.output_c) {
+        arguments.c_filename = arguments.output_filename;
+    } else {
+        int len = strlen("/tmp/whisper.XXXXXX.c");
+        char *c_filename = malloc(len + 1);
+        strcpy(c_filename, "/tmp/whisper.XXXXXX.c");
+        int fd = mkstemp(c_filename);
+        close(fd);
+        arguments.c_filename = c_filename;
+
+        arguments.executable_filename = arguments.output_filename;
+    }
+
+    program = read_file(arguments.input_filename, &program_length);
     struct lexer lexer = {
-        .filename = arguments.filename,
+        .filename = arguments.input_filename,
         .program = program,
         .program_length = program_length,
         .ptr = program,
@@ -2121,18 +2182,13 @@ main(int argc, char const *argv[])
     read_token(&lexer);
     struct compiler compiler = {
         .reader = reader,
-        .output_filename = "a.c",
+        .c_filename = arguments.c_filename,
     };
     compile_program(&compiler);
 
-    if (arguments.run) {
+    if (!arguments.output_c) {
         char command[256];
-        char executable_filename[32];
         char *cc;
-
-        strncpy(executable_filename, "/tmp/whisper.XXXXXX", sizeof(executable_filename));
-        int fd = mkstemp(executable_filename);
-        close(fd);
 
         cc = getenv("CC");
         if (!cc) {
@@ -2140,15 +2196,27 @@ main(int argc, char const *argv[])
         }
 
         snprintf(command, sizeof(command), "%s -o %s %s",
-                 cc, executable_filename, compiler.output_filename);
+                 cc, arguments.executable_filename, compiler.c_filename);
         int ret = system(command);
         if (ret) {
             fprintf(stderr, "Error compiling output C file.\n");
             exit(1);
         }
 
-        ret = system(executable_filename);
-        unlink(executable_filename);
+        unlink(arguments.c_filename);
+    }
+
+    if (arguments.run) {
+        char command[256];
+
+        /* we do this because if output file is something like b.out, then we can't just ask
+         * shell to execute it, since it's not in the path. */
+        snprintf(command, sizeof(command), "$(realpath %s)", arguments.executable_filename);
+        int ret = system(command);
+
+        if (arguments.delete_executable) {
+            unlink(arguments.executable_filename);
+        }
 
         return ret;
     }
