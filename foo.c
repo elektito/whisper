@@ -355,7 +355,7 @@ void read_list(struct reader *reader)
             memcpy(list_tail, &reader->value, sizeof(struct value));
             read_tail = 1;
             continue;
-        } else if (reader->lexer->cur_tok_type == TOK_ID && reader->lexer->cur_tok_len == 1 && reader->lexer->cur_tok[0] == '.') {
+        } else if (reader->value.type == VAL_ID && reader->value.identifier.name_len == 1 && reader->value.identifier.name[0] == '.') {
             reading_tail = 1;
             continue;
         }
