@@ -1800,6 +1800,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "#define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "#define GET_BOOL(v) ((uint64_t)(v) >> 4)\n");
     fprintf(fp, "#define GET_STRING(v) ((struct string *)((uint64_t)(v) & VALUE_MASK))\n");
+    fprintf(fp, "#define GET_PAIR(v) ((struct pair *)((uint64_t)(v) & VALUE_MASK))\n");
     fprintf(fp, "#define GET_CHAR(v) ((char)((uint64_t)(v) >> 32))\n");
     fprintf(fp, "#define GET_SYMBOL(v) ((int)((uint64_t)(v) >> 32))\n");
     fprintf(fp, "#define GET_OBJECT(v) ((struct object *)((uint64_t)(v) & VALUE_MASK))\n");
@@ -1896,6 +1897,21 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return STRING(str);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value display(value v);\n");
+    fprintf(fp, "static void display_pair(struct pair *v, int in_the_middle) {\n");
+    fprintf(fp, "    if (!in_the_middle) printf(\"(\");\n");
+    fprintf(fp, "    display(v->car);\n");
+    fprintf(fp, "    if (IS_NIL(v->cdr)) {\n");
+    fprintf(fp, "        printf(\")\");\n");
+    fprintf(fp, "    } else if (IS_PAIR(v->cdr)) {\n");
+    fprintf(fp, "        printf(\" \");\n");
+    fprintf(fp, "        display_pair(GET_PAIR(v->cdr), 1);\n");
+    fprintf(fp, "    } else {\n");
+    fprintf(fp, "        printf(\" . \");\n");
+    fprintf(fp, "        display(v->cdr);\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value display(value v) {\n");
     fprintf(fp, "    if (IS_FIXNUM(v)) {\n");
     fprintf(fp, "        printf(\"%%ld\", GET_FIXNUM(v));\n");
@@ -1912,7 +1928,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    } else if (IS_NIL(v)) {\n");
     fprintf(fp, "        printf(\"()\");\n");
     fprintf(fp, "    } else if (IS_PAIR(v)) {\n");
-    fprintf(fp, "        printf(\"#<pair>\");\n");
+    fprintf(fp, "        display_pair(GET_PAIR(v), 0);\n");
     fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
     fprintf(fp, "        printf(\"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
     fprintf(fp, "    } else {\n");
