@@ -1326,41 +1326,41 @@ compile_begin(struct function *func, struct value *form)
 }
 
 int
-compile_quote(struct function *func, struct value *form)
+compile_quoted_item(struct function *func, struct value *form)
 {
     int varnum;
     int car_varnum;
-    struct value *value = &form->list.ptr[1];
 
-    switch (value->type) {
+    switch (form->type) {
     case VAL_BOOL:
     case VAL_NUM:
     case VAL_CHAR:
     case VAL_STR:
-        varnum = compile_form(func, value);
+        varnum = compile_form(func, form);
+        break;
 
     case VAL_ID:
         varnum = func->varnum++;
-        add_compiled_symbol(func->compiler, value->identifier.interned);
+        add_compiled_symbol(func->compiler, form->identifier.interned);
         gen_code(func, "    value x%d = sym%.*s;\n", varnum,
-                 func->compiler->reader->interned_mangled_len[value->identifier.interned],
-                 func->compiler->reader->interned_mangled[value->identifier.interned]);
+                 func->compiler->reader->interned_mangled_len[form->identifier.interned],
+                 func->compiler->reader->interned_mangled[form->identifier.interned]);
         break;
 
     case VAL_LIST:
-        if (value->list.length == 0) {
+        if (form->list.length == 0) {
             varnum = func->varnum++;
             gen_code(func, "    value x%d = NIL;\n", varnum);
         } else {
-            if (value->list.tail == NULL) {
+            if (form->list.tail == NULL) {
                 varnum = func->varnum++;
                 gen_code(func, "    value x%d = NIL;\n", varnum);
             } else {
-                varnum = compile_form(func, value->list.tail);
+                varnum = compile_quoted_item(func, form->list.tail);
             }
 
-            for (int i = value->list.length - 1; i >= 0; --i) {
-                car_varnum = compile_form(func, &value->list.ptr[i]);
+            for (int i = form->list.length - 1; i >= 0; --i) {
+                car_varnum = compile_quoted_item(func, &form->list.ptr[i]);
                 gen_code(func, "    x%d = make_pair(x%d, x%d);\n", varnum, car_varnum, varnum);
             }
         }
@@ -1373,6 +1373,18 @@ compile_quote(struct function *func, struct value *form)
     }
 
     return varnum;
+}
+
+int
+compile_quote(struct function *func, struct value *form)
+{
+    if (form->list.length != 2)
+    {
+        fprintf(stderr, "quote expects a single argument\n");
+        exit(1);
+    }
+
+    return compile_quoted_item(func, &form->list.ptr[1]);
 }
 
 int
