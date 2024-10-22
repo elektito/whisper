@@ -1077,7 +1077,7 @@ compile_let(struct function *func, struct value *form)
 
     gen_code(new_func, "    return x%d;\n", new_ret_varnum);
 
-    /* now generate to code for referencing the function */
+    /* now generate the code for referencing the function */
     int func_varnum = func->varnum++;
     gen_code(func, "    value x%d = make_closure(%s, %d, %d",
              func_varnum,
