@@ -1029,7 +1029,7 @@ compile_let(struct function *func, struct value *form)
     }
 
     int bindings_idx = 1;
-    int self_ref_identifier = -1;
+    interned_string self_ref_identifier = -1;
     if (form->list.ptr[bindings_idx].type == VAL_ID) {
         self_ref_identifier = form->list.ptr[bindings_idx].identifier.interned;
         bindings_idx = 2;
@@ -1069,6 +1069,21 @@ compile_let(struct function *func, struct value *form)
     gen_code(new_func, "    va_end(args);\n");
     gen_code(new_func, "\n");
 
+    /* if we have a self-reference variable add a dummy parent function
+     * (to be removed later) with a single argument: the self-reference
+     * variable. this way, referencing the let variable will be
+     * considered accessing a free variable, and not a global variable
+     * access. */
+    struct function *dummy_parent = NULL;
+    if (self_ref_identifier != -1) {
+        dummy_parent = calloc(1, sizeof(struct function) + sizeof(interned_string) * 1);
+        dummy_parent->name = "dummy";
+        dummy_parent->n_params = 1;
+        dummy_parent->params[0] = self_ref_identifier;
+        dummy_parent->parent = new_func->parent;
+        new_func->parent = dummy_parent;
+    }
+
     /* compile body */
     int new_ret_varnum;
     for (int i = bindings_idx + 1; i < form->list.length; ++i) {
@@ -1076,6 +1091,12 @@ compile_let(struct function *func, struct value *form)
     }
 
     gen_code(new_func, "    return x%d;\n", new_ret_varnum);
+
+    /* remove dummy parent */
+    if (dummy_parent != NULL) {
+        new_func->parent = func;
+        free(dummy_parent);
+    }
 
     /* now generate the code for referencing the function */
     int func_varnum = func->varnum++;
