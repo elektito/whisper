@@ -1178,6 +1178,8 @@ compile_let(struct function *func, struct value *form)
     }
     gen_code(func, ");\n");
 
+    free(arg_varnums);
+
     return ret_varnum;
 }
 
