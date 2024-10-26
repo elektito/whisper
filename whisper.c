@@ -156,6 +156,7 @@ enum value_type
     VAL_STR,
     VAL_BOOL,
     VAL_CHAR,
+    VAL_EOF,
 };
 
 struct value
@@ -193,6 +194,9 @@ struct reader {
     struct lexer *lexer;
     struct value value;
 
+    int n_lexers;
+    struct lexer **lexers;
+
     int n_interned;
     char **interned_name;
     int *interned_name_len;
@@ -222,6 +226,10 @@ create_reader(struct lexer *lexer)
     struct reader *reader = calloc(sizeof(struct reader), 1);
 
     reader->lexer = lexer;
+
+    reader->n_lexers = 1;
+    reader->lexers = malloc(sizeof(struct lexer *));
+    reader->lexers[0] = lexer;
 
     reader->id_true = intern_name(reader, "#t", 2);
     reader->id_false = intern_name(reader, "#f", 2);
@@ -472,8 +480,18 @@ read_value(struct reader *reader)
 
         break;
     case TOK_EOF:
-        fprintf(stderr, "internal error: read_value called on EOF\n");
-        exit(1);
+        if (reader->n_lexers == 1) {
+            reader->value.type = VAL_EOF;
+            return;
+        }
+
+        reader->n_lexers--;
+        reader->lexer = reader->lexers[reader->n_lexers - 1];
+        reader->lexers = realloc(reader->lexers, sizeof(struct lexer *) * reader->n_lexers);
+
+        read_value(reader);
+
+        break;
     default:
         fprintf(stderr, "read error\n");
         exit(1);
@@ -1350,6 +1368,40 @@ compile_begin(struct function *func, struct value *form)
 }
 
 int
+compile_include(struct function *func, struct value *form)
+{
+    if (form->list.length != 2 || form->list.ptr[1].type != VAL_STR) {
+        fprintf(stderr, "malformed include\n");
+        exit(1);
+    }
+
+    char *filename = malloc(form->list.ptr[1].string.length + 1);
+    snprintf(filename, sizeof(filename), "%.*s",
+             form->list.ptr[1].string.length,
+             form->list.ptr[1].string.ptr);
+
+    struct lexer *lexer = calloc(sizeof(struct lexer), 1);
+    lexer->filename = filename;
+
+    long program_length;
+    const char *program = read_file(filename, &program_length);
+    lexer->program = program;
+    lexer->program_length = program_length;
+    lexer->ptr = program;
+
+    func->compiler->reader->n_lexers++;
+    func->compiler->reader->lexers = realloc(func->compiler->reader->lexers, func->compiler->reader->n_lexers * sizeof(struct lexer *));
+    func->compiler->reader->lexers[func->compiler->reader->n_lexers - 1] = lexer;
+
+    func->compiler->reader->lexer = lexer;
+
+    /* proceed to first token */
+    read_token(lexer);
+
+    return -1;
+}
+
+int
 compile_quoted_item(struct function *func, struct value *form)
 {
     int varnum;
@@ -1673,6 +1725,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "begin", 5) == 0)
     {
         varnum = compile_begin(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 7 &&
+               memcmp(list_car->identifier.name, "include", 7) == 0)
+    {
+        varnum = compile_include(func, form);
     } else {
         varnum = compile_call(func, form);
     }
@@ -1696,6 +1753,9 @@ compile_form(struct function *func, struct value *form)
         varnum = compile_list(func, form);
     } else if (form->type == VAL_CHAR) {
         varnum = compile_char(func, form);
+    } else if (form->type == VAL_EOF) {
+        fprintf(stderr, "internal error: trying to compile EOF\n");
+        exit(1);
     } else {
         fprintf(stderr, "unhandled value type\n");
         exit(1);
@@ -1708,8 +1768,10 @@ void
 compile_program(struct compiler *compiler)
 {
     struct function *startup_func = add_function(NULL, compiler, 0);
-    while (compiler->reader->lexer->cur_tok_type != TOK_EOF) {
+    for (;;) {
         read_value(compiler->reader);
+        if (compiler->reader->value.type == VAL_EOF)
+            break;
         compile_form(startup_func, &compiler->reader->value);
     }
     gen_code(startup_func, "    return VOID;\n");
