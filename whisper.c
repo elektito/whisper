@@ -1548,6 +1548,29 @@ compile_read_line(struct function *func, struct value *form)
 }
 
 int
+compile_read_char(struct function *func, struct value *form)
+{
+    if (form->list.length == 1) {
+        fprintf(stderr, "no-argument form of read-char not yet supported\n");
+        exit(1);
+    }
+
+    if (form->list.length != 2) {
+        fprintf(stderr, "read-port needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    gen_code(func, "    if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
+    int fileobj_varnum = func->varnum++;
+    gen_code(func, "    FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = CHAR(getc(x%d));\n", ret_varnum, fileobj_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_port_q(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
@@ -1653,6 +1676,7 @@ struct {
     { "open-input-file", compile_open_input_file },
     { "port?", compile_port_q },
     { "read-line", compile_read_line },
+    { "read-char", compile_read_char },
     { "string->symbol", compile_string_to_symbol },
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
