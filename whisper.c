@@ -515,6 +515,7 @@ struct function
     int n_freevars;
     interned_string *freevars;
 
+    int has_rest;
     int n_params;
     interned_string params[];
 };
@@ -563,10 +564,14 @@ gen_code(struct function *func, const char *fmt, ...)
 }
 
 struct function *
-add_function(struct function *parent, struct compiler *compiler, int nparams)
+add_function(struct function *parent, struct compiler *compiler, int nparams, int has_rest)
 {
     char name_buf[1024];
     int name_len;
+
+    if (has_rest) {
+        nparams++;
+    }
 
     struct function *func = calloc(1, sizeof(struct function) + nparams * sizeof(interned_string));
     func->parent = parent;
@@ -574,6 +579,7 @@ add_function(struct function *parent, struct compiler *compiler, int nparams)
     func->code_size = 0;
     func->code = NULL;
     func->n_params = nparams;
+    func->has_rest = has_rest;
 
     snprintf(name_buf, sizeof(name_buf), "f%d", compiler->n_functions++);
     name_len = strlen(name_buf);
@@ -944,29 +950,81 @@ compile_function(struct function *func, struct value *form,
     int varnum = func->varnum++;
 
     struct value *params = &form->list.ptr[1];
-    int params_start_idx = is_define ? 1 : 0;
-    int n_params = params->list.length;
-    if (is_define) {
-        n_params--;
-    }
-
-    if (params->type != VAL_LIST || params->list.tail != NULL) {
-        fprintf(stderr, "rest parameters not supported yet\n");
+    if (params->type != VAL_LIST && params->type != VAL_ID) {
+        fprintf(stderr, "bad argument list\n");
         exit(1);
     }
 
-    struct function *new_func = add_function(func, func->compiler, n_params);
-    for (int i = params_start_idx; i < params->list.length; ++i) {
-        new_func->params[i - params_start_idx] = params->list.ptr[i].identifier.interned;
+    int has_rest = 0;
+    if (params->list.tail || params->type == VAL_ID) {
+        has_rest = 1;
+    }
+
+    struct value *rest_param;
+    if (params->type == VAL_ID) {
+        rest_param = params;
+    } else {
+        rest_param = params->list.tail;
+    }
+
+    int n_params;
+    if (is_define) {
+        n_params = params->list.length - 1;
+    } else {
+        n_params = params->type == VAL_ID ? 0 : params->list.length;
+    }
+
+    struct function *new_func = add_function(func, func->compiler, n_params, has_rest);
+    if (has_rest) {
+        gen_code(new_func, "    if (nargs < %d) { RAISE(\"too few arguments for function\"); }\n", n_params);
+    } else {
+        gen_code(new_func, "    if (nargs != %d) { RAISE(\"argument count mismatch\"); }\n", n_params);
     }
 
     gen_code(new_func, "    va_list args;\n");
     gen_code(new_func, "    va_start(args, nargs);\n");
-    for (int i = params_start_idx; i < params->list.length; ++i) {
+    for (int i = 0; i < n_params; ++i) {
+        int offset = is_define ? 1 : 0;
+        struct value *param = &params->list.ptr[i + offset];
+        if (param->type != VAL_ID) {
+            fprintf(stderr, "parameter not an identifier\n");
+            exit(1);
+        }
+        new_func->params[i] = param->identifier.interned;
+
         gen_code(new_func, "    value %.*s = va_arg(args, value);\n",
-                func->compiler->reader->interned_mangled_len[params->list.ptr[i].identifier.interned],
-                func->compiler->reader->interned_mangled[params->list.ptr[i].identifier.interned]);
+                func->compiler->reader->interned_mangled_len[param->identifier.interned],
+                func->compiler->reader->interned_mangled[param->identifier.interned]);
     }
+
+    if (has_rest) {
+        new_func->params[n_params] = rest_param->identifier.interned;
+    }
+
+    if (has_rest) {
+        if (rest_param->type != VAL_ID) {
+            fprintf(stderr, "parameter not an identifier\n");
+            exit(1);
+        }
+
+        interned_string rest_idx = rest_param->identifier.interned;
+
+        gen_code(new_func, "    value %.*s = NIL;\n",
+                 func->compiler->reader->interned_mangled_len[rest_idx],
+                 func->compiler->reader->interned_mangled[rest_idx]);
+        gen_code(new_func, "    for (int i = 0; i < nargs - %d; ++i) { value v = va_arg(args, value); %.*s = make_pair(v, %.*s); }\n",
+                 n_params,
+                 func->compiler->reader->interned_mangled_len[rest_idx],
+                 func->compiler->reader->interned_mangled[rest_idx],
+                 func->compiler->reader->interned_mangled_len[rest_idx],
+                 func->compiler->reader->interned_mangled[rest_idx]);
+        gen_code(new_func, "    %.*s = reverse_list(%.*s, NIL);\n",
+                 func->compiler->reader->interned_mangled_len[rest_idx],
+                 func->compiler->reader->interned_mangled[rest_idx],
+                 func->compiler->reader->interned_mangled_len[rest_idx],
+                 func->compiler->reader->interned_mangled[rest_idx]);
+    }
+
     gen_code(new_func, "    va_end(args);\n");
     gen_code(new_func, "\n");
 
@@ -1060,7 +1118,7 @@ compile_let(struct function *func, struct value *form)
     }
 
     int n_params = bindings->list.length;
-    struct function *new_func = add_function(func, func->compiler, n_params);
+    struct function *new_func = add_function(func, func->compiler, n_params, 0);
 
     gen_code(new_func, "    va_list args;\n");
     gen_code(new_func, "    va_start(args, nargs);\n");
@@ -1293,11 +1351,6 @@ compile_define(struct function *func, struct value *form)
         form->list.ptr[1].list.length == 0)
     {
         fprintf(stderr, "malformed define");
-        exit(1);
-    }
-
-    if (form->list.ptr[1].list.tail != NULL) {
-        fprintf(stderr, "rest parameters not yet supported");
         exit(1);
     }
 
@@ -1791,7 +1844,7 @@ compile_form(struct function *func, struct value *form)
 void
 compile_program(struct compiler *compiler)
 {
-    struct function *startup_func = add_function(NULL, compiler, 0);
+    struct function *startup_func = add_function(NULL, compiler, 0, 0);
     for (;;) {
         read_value(compiler->reader);
         if (compiler->reader->value.type == VAL_EOF)
@@ -1969,6 +2022,14 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    pair->cdr = cdr;\n");
     fprintf(fp, "    return PAIR(pair);\n");
     fprintf(fp, "}\n");
+    fprintf(fp, "static value reverse_list(value list, value acc) {\n");
+    fprintf(fp, "    if (list == NIL) {\n");
+    fprintf(fp, "        return acc;\n");
+    fprintf(fp, "    } else {\n");
+    fprintf(fp, "        struct pair *p = GET_PAIR(list);\n");
+    fprintf(fp, "        return reverse_list(p->cdr, make_pair(p->car, acc));\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value make_string(const char *s, size_t len) {\n");
     fprintf(fp, "    struct string *p = malloc(sizeof(struct string));\n");
@@ -2019,6 +2080,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    } else {\n");
     fprintf(fp, "        printf(\" . \");\n");
     fprintf(fp, "        display(v->cdr);\n");
+    fprintf(fp, "        printf(\")\");\n");
     fprintf(fp, "    }\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
