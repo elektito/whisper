@@ -1267,7 +1267,7 @@ compile_call(struct function *func, struct value *form)
     int *arg_varnums;
 
     func_varnum = compile_form(func, &form->list.ptr[0]);
-    gen_code(func, "    if (!IS_CLOSURE(x%d)) { RAISE(\"called object not a procedue\"); }\n", func_varnum);
+    gen_code(func, "    if (!IS_CLOSURE(x%d)) { RAISE(\"called object not a procedure\"); }\n", func_varnum);
 
     arg_varnums = malloc(sizeof(int) * (form->list.length - 1));
     for (int i = 1; i < form->list.length; ++i) {
