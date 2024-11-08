@@ -605,7 +605,7 @@ add_referenced_global_var(struct compiler *compiler, interned_string var)
     }
 
     compiler->n_referenced_vars++;
-    compiler->referenced_vars = realloc(compiler->referenced_vars, compiler->n_referenced_vars);
+    compiler->referenced_vars = realloc(compiler->referenced_vars, compiler->n_referenced_vars * sizeof(interned_string));
     compiler->referenced_vars[compiler->n_referenced_vars - 1] = var;
 }
 
