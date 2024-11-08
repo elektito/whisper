@@ -500,6 +500,8 @@ read_value(struct reader *reader)
 
 /*********************** compiler ************************/
 
+#define INDENT_SIZE 4
+
 struct function
 {
     struct compiler *compiler;
@@ -536,7 +538,7 @@ struct compiler
     interned_string *referenced_vars;
 };
 
-int compile_form(struct function *func, struct value *form);
+int compile_form(struct function *func, int indent, struct value *form);
 
 void
 add_compiled_symbol(struct compiler *compiler, interned_string identifier)
@@ -547,7 +549,7 @@ add_compiled_symbol(struct compiler *compiler, interned_string identifier)
 }
 
 void
-gen_code(struct function *func, const char *fmt, ...)
+gen_code(struct function *func, int indent, const char *fmt, ...)
 {
     va_list args;
     char buf[2048];
@@ -558,9 +560,10 @@ gen_code(struct function *func, const char *fmt, ...)
     va_end(args);
 
     len = strlen(buf);
-    func->code = realloc(func->code, func->code_size + len);
-    memcpy(func->code + func->code_size, buf, len);
-    func->code_size += len;
+    func->code = realloc(func->code, func->code_size + len + indent * INDENT_SIZE);
+    memset(func->code + func->code_size, ' ', indent * INDENT_SIZE);
+    memcpy(func->code + func->code_size + indent * INDENT_SIZE, buf, len);
+    func->code_size += len + indent * INDENT_SIZE;
 }
 
 struct function *
@@ -607,35 +610,35 @@ add_referenced_global_var(struct compiler *compiler, interned_string var)
 }
 
 int
-compile_number(struct function *func, struct value *form)
+compile_number(struct function *func, int indent, struct value *form)
 {
     int varnum = func->varnum++;
-    gen_code(func, "    value x%d = FIXNUM(%lld);\n", varnum, form->number);
+    gen_code(func, indent, "value x%d = FIXNUM(%lld);\n", varnum, form->number);
     return varnum;
 }
 
 int
-compile_bool(struct function *func, struct value *form)
+compile_bool(struct function *func, int indent, struct value *form)
 {
     int varnum = func->varnum++;
     if (form->bool) {
-        gen_code(func, "    value x%d = TRUE;\n", varnum);
+        gen_code(func, indent, "value x%d = TRUE;\n", varnum);
     } else {
-        gen_code(func, "    value x%d = FALSE;\n", varnum);
+        gen_code(func, indent, "value x%d = FALSE;\n", varnum);
     }
 
     return varnum;
 }
 
 int
-compile_identifier(struct function *func, struct value *form)
+compile_identifier(struct function *func, int indent, struct value *form)
 {
     int found = 0;
     int varnum = func->varnum++;
 
     for (int i = 0; i < func->n_params; ++i) {
         if (func->params[i] == form->identifier.interned) {
-            gen_code(func, "    value x%d = %.*s;\n",
+            gen_code(func, indent, "value x%d = %.*s;\n",
                      varnum,
                      func->compiler->reader->interned_mangled_len[form->identifier.interned],
                      func->compiler->reader->interned_mangled[form->identifier.interned]);
@@ -665,7 +668,7 @@ compile_identifier(struct function *func, struct value *form)
 
         if (!found) {
             /* it's a global variable */
-            gen_code(func, "    value x%d = %.*s;\n", varnum,
+            gen_code(func, indent, "value x%d = %.*s;\n", varnum,
                      func->compiler->reader->interned_mangled_len[form->identifier.interned],
                      func->compiler->reader->interned_mangled[form->identifier.interned]);
 
@@ -679,7 +682,7 @@ compile_identifier(struct function *func, struct value *form)
         for (int j = 0; j < func->n_freevars; ++j) {
             if (func->freevars[j] == form->identifier.interned) {
                 /* it's been used before */
-                gen_code(func, "    value x%d = envget(env, %d);\n", varnum, j);
+                gen_code(func, indent, "value x%d = envget(env, %d);\n", varnum, j);
                 found = 1;
                 break;
             }
@@ -689,7 +692,7 @@ compile_identifier(struct function *func, struct value *form)
             func->n_freevars++;
             func->freevars = realloc(func->freevars, func->n_freevars * sizeof(interned_string));
             func->freevars[func->n_freevars - 1] = form->identifier.interned;
-            gen_code(func, "    value x%d = envget(env, %d);\n", varnum, func->n_freevars - 1);
+            gen_code(func, indent, "value x%d = envget(env, %d);\n", varnum, func->n_freevars - 1);
         }
     }
 
@@ -697,154 +700,154 @@ compile_identifier(struct function *func, struct value *form)
 }
 
 int
-compile_string(struct function *func, struct value *form)
+compile_string(struct function *func, int indent, struct value *form)
 {
     int varnum = func->varnum++;
 
-    gen_code(func, "    value x%d = make_string(\"", varnum);
+    gen_code(func, indent, "value x%d = make_string(\"", varnum);
 
     for (int i = 0; i < form->string.length; ++i) {
         char c = form->string.ptr[i];
         switch (c) {
         case '\b':
-            gen_code(func, "\\b");
+            gen_code(func, 0, "\\b");
             break;
         case '\n':
-            gen_code(func, "\\n");
+            gen_code(func, 0, "\\n");
             break;
         case '\r':
-            gen_code(func, "\\r");
+            gen_code(func, 0, "\\r");
             break;
         case '\t':
-            gen_code(func, "\\t");
+            gen_code(func, 0, "\\t");
             break;
         case '\\':
-            gen_code(func, "\\\\");
+            gen_code(func, 0, "\\\\");
             break;
         case '\"':
-            gen_code(func, "\\\"");
+            gen_code(func, 0, "\\\"");
             break;
         case '\0':
-            gen_code(func, "\\0");
+            gen_code(func, 0, "\\0");
             break;
         default:
             if (c >= 32 && c < 127) {
                 /* printable */
-                gen_code(func, "%c", c);
+                gen_code(func, 0, "%c", c);
             } else {
                 /* use octal form for everything else */
-                gen_code(func, "\\%03o", (unsigned char) c);
+                gen_code(func, 0, "\\%03o", (unsigned char) c);
             }
         }
     }
 
-    gen_code(func, "\", %d);\n", form->string.length);
+    gen_code(func, 0, "\", %d);\n", form->string.length);
 
     return varnum;
 }
 
 int
-compile_char(struct function *func, struct value *form)
+compile_char(struct function *func, int indent, struct value *form)
 {
     int varnum = func->varnum++;
     char c = form->character;
 
-    gen_code(func, "    value x%d = CHAR('", varnum);
+    gen_code(func, indent, "value x%d = CHAR('", varnum);
 
     switch (c) {
     case '\b':
-        gen_code(func, "\\b");
+        gen_code(func, 0, "\\b");
         break;
     case '\n':
-        gen_code(func, "\\n");
+        gen_code(func, 0, "\\n");
         break;
     case '\r':
-        gen_code(func, "\\r");
+        gen_code(func, 0, "\\r");
         break;
     case '\t':
-        gen_code(func, "\\t");
+        gen_code(func, 0, "\\t");
         break;
     case '\\':
-        gen_code(func, "\\\\");
+        gen_code(func, 0, "\\\\");
         break;
     case '\'':
-        gen_code(func, "\\\'");
+        gen_code(func, 0, "\\\'");
         break;
     case '\0':
-        gen_code(func, "\0");
+        gen_code(func, 0, "\0");
         break;
     default:
         if (c >= 32 && c < 127) {
-            gen_code(func, "%c", c);
+            gen_code(func, 0, "%c", c);
         } else {
-            gen_code(func, "\\%03o", (unsigned char) c);
+            gen_code(func, 0, "\\%03o", (unsigned char) c);
         }
     }
 
-    gen_code(func, "');\n");
+    gen_code(func, 0, "');\n");
     return varnum;
 }
 
 int
-compile_car(struct function *func, struct value *form)
+compile_car(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "car expects a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[0]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[0]);
     int dst_varnum = func->varnum++;
-    gen_code(func, "    value x%d = car(x%d);", dst_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = car(x%d);", dst_varnum, arg_varnum);
     return dst_varnum;
 }
 
 int
-compile_cdr(struct function *func, struct value *form)
+compile_cdr(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "cdr expects a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[0]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[0]);
     int dst_varnum = func->varnum++;
-    gen_code(func, "    value x%d = cdr(x%d);", dst_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = cdr(x%d);", dst_varnum, arg_varnum);
     return dst_varnum;
 }
 
 int
-compile_cons(struct function *func, struct value *form)
+compile_cons(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 3) {
         fprintf(stderr, "cons expects a two arguments\n");
         exit(1);
     }
 
-    int car_varnum = compile_form(func, &form->list.ptr[1]);
-    int cdr_varnum = compile_form(func, &form->list.ptr[2]);
+    int car_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    int cdr_varnum = compile_form(func, indent, &form->list.ptr[2]);
     int dst_varnum = func->varnum++;
-    gen_code(func, "    value x%d = make_pair(x%d, x%d);\n", dst_varnum, car_varnum, cdr_varnum);
+    gen_code(func, indent, "value x%d = make_pair(x%d, x%d);\n", dst_varnum, car_varnum, cdr_varnum);
     return dst_varnum;
 }
 
 int
-compile_add(struct function *func, struct value *form)
+compile_add(struct function *func, int indent, struct value *form)
 {
     int dst_varnum;
     int arg_varnum;
 
     if (form->list.length == 1) {
         dst_varnum = func->varnum++;
-        gen_code(func, "    value x%d = FIXNUM(0);\n", dst_varnum);
+        gen_code(func, indent, "value x%d = FIXNUM(0);\n", dst_varnum);
         return dst_varnum;
     }
 
-    arg_varnum = compile_form(func, &form->list.ptr[1]);
+    arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     dst_varnum = arg_varnum;
     for (int i = 2; i < form->list.length; ++i) {
-        dst_varnum = compile_form(func, &form->list.ptr[i]);
-        gen_code(func, "    x%d += (int64_t) x%d;\n", dst_varnum, arg_varnum);
+        dst_varnum = compile_form(func, indent, &form->list.ptr[i]);
+        gen_code(func, indent, "x%d += (int64_t) x%d;\n", dst_varnum, arg_varnum);
         arg_varnum = dst_varnum;
     }
 
@@ -852,7 +855,7 @@ compile_add(struct function *func, struct value *form)
 }
 
 int
-compile_sub(struct function *func, struct value *form)
+compile_sub(struct function *func, int indent, struct value *form)
 {
     int dst_varnum;
     int arg_varnum;
@@ -863,16 +866,16 @@ compile_sub(struct function *func, struct value *form)
     }
 
     if (form->list.length == 2) {
-        arg_varnum = compile_form(func, &form->list.ptr[1]);
+        arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
         dst_varnum = func->varnum++;
-        gen_code(func, "    value x%d = FIXNUM(-GET_FIXNUM(x%d));\n", dst_varnum, arg_varnum);
+        gen_code(func, indent, "value x%d = FIXNUM(-GET_FIXNUM(x%d));\n", dst_varnum, arg_varnum);
         return dst_varnum;
     }
 
-    dst_varnum = compile_form(func, &form->list.ptr[1]);
+    dst_varnum = compile_form(func, indent, &form->list.ptr[1]);
     for (int i = 2; i < form->list.length; ++i) {
-        arg_varnum = compile_form(func, &form->list.ptr[i]);
-        gen_code(func, "    x%d -= (int64_t) x%d;\n", dst_varnum, arg_varnum);
+        arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
+        gen_code(func, indent, "x%d -= (int64_t) x%d;\n", dst_varnum, arg_varnum);
         arg_varnum = dst_varnum;
     }
 
@@ -880,7 +883,7 @@ compile_sub(struct function *func, struct value *form)
 }
 
 int
-compile_mul(struct function *func, struct value *form)
+compile_mul(struct function *func, int indent, struct value *form)
 {
     int int_varnum;
     int arg_varnum;
@@ -888,27 +891,27 @@ compile_mul(struct function *func, struct value *form)
 
     if (form->list.length == 1) {
         ret_varnum = func->varnum++;
-        gen_code(func, "    value x%d = FIXNUM(1);\n", ret_varnum);
+        gen_code(func, indent, "value x%d = FIXNUM(1);\n", ret_varnum);
         return ret_varnum;
     }
 
-    arg_varnum = compile_form(func, &form->list.ptr[1]);
+    arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int_varnum = func->varnum++;
-    gen_code(func, "    int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+    gen_code(func, indent, "int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
 
     for (int i = 2; i < form->list.length; ++i) {
-        arg_varnum = compile_form(func, &form->list.ptr[i]);
-        gen_code(func, "    x%d *= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+        arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
+        gen_code(func, indent, "x%d *= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
+    gen_code(func, indent, "value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_div(struct function *func, struct value *form)
+compile_div(struct function *func, int indent, struct value *form)
 {
     int int_varnum;
     int arg_varnum;
@@ -920,31 +923,31 @@ compile_div(struct function *func, struct value *form)
     }
 
     if (form->list.length == 2) {
-        arg_varnum = compile_form(func, &form->list.ptr[1]);
+        arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
         int_varnum = func->varnum++;
-        gen_code(func, "    int64_t x%d = 1 / GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+        gen_code(func, indent, "int64_t x%d = 1 / GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
         ret_varnum = func->varnum++;
-        gen_code(func, "    value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
+        gen_code(func, indent, "value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
         return ret_varnum;
     }
 
-    arg_varnum = compile_form(func, &form->list.ptr[1]);
+    arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int_varnum = func->varnum++;
-    gen_code(func, "    int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+    gen_code(func, indent, "int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
 
     for (int i = 2; i < form->list.length; ++i) {
-        arg_varnum = compile_form(func, &form->list.ptr[i]);
-        gen_code(func, "    x%d /= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
+        arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
+        gen_code(func, indent, "x%d /= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
+    gen_code(func, indent, "value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_function(struct function *func, struct value *form,
+compile_function(struct function *func, int indent, struct value *form,
                  int is_define)
 {
     int varnum = func->varnum++;
@@ -976,13 +979,13 @@ compile_function(struct function *func, struct value *form,
 
     struct function *new_func = add_function(func, func->compiler, n_params, has_rest);
     if (has_rest) {
-        gen_code(new_func, "    if (nargs < %d) { RAISE(\"too few arguments for function\"); }\n", n_params);
+        gen_code(new_func, 1, "if (nargs < %d) { RAISE(\"too few arguments for function\"); }\n", n_params);
     } else {
-        gen_code(new_func, "    if (nargs != %d) { RAISE(\"argument count mismatch\"); }\n", n_params);
+        gen_code(new_func, 1, "if (nargs != %d) { RAISE(\"argument count mismatch\"); }\n", n_params);
     }
 
-    gen_code(new_func, "    va_list args;\n");
-    gen_code(new_func, "    va_start(args, nargs);\n");
+    gen_code(new_func, 1, "va_list args;\n");
+    gen_code(new_func, 1, "va_start(args, nargs);\n");
     for (int i = 0; i < n_params; ++i) {
         int offset = is_define ? 1 : 0;
         struct value *param = &params->list.ptr[i + offset];
@@ -992,7 +995,7 @@ compile_function(struct function *func, struct value *form,
         }
         new_func->params[i] = param->identifier.interned;
 
-        gen_code(new_func, "    value %.*s = va_arg(args, value);\n",
+        gen_code(new_func, 1, "value %.*s = va_arg(args, value);\n",
                 func->compiler->reader->interned_mangled_len[param->identifier.interned],
                 func->compiler->reader->interned_mangled[param->identifier.interned]);
     }
@@ -1009,34 +1012,34 @@ compile_function(struct function *func, struct value *form,
 
         interned_string rest_idx = rest_param->identifier.interned;
 
-        gen_code(new_func, "    value %.*s = NIL;\n",
+        gen_code(new_func, 1, "value %.*s = NIL;\n",
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx]);
-        gen_code(new_func, "    for (int i = 0; i < nargs - %d; ++i) { value v = va_arg(args, value); %.*s = make_pair(v, %.*s); }\n",
+        gen_code(new_func, 1, "for (int i = 0; i < nargs - %d; ++i) { value v = va_arg(args, value); %.*s = make_pair(v, %.*s); }\n",
                  n_params,
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx],
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx]);
-        gen_code(new_func, "    %.*s = reverse_list(%.*s, NIL);\n",
+        gen_code(new_func, 1, "%.*s = reverse_list(%.*s, NIL);\n",
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx],
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx]);
     }
 
-    gen_code(new_func, "    va_end(args);\n");
-    gen_code(new_func, "\n");
+    gen_code(new_func, 1, "va_end(args);\n");
+    gen_code(new_func, 0, "\n");
 
     int new_varnum = -1;
     for (int i = 2; i < form->list.length; ++i) {
-        new_varnum = compile_form(new_func, &form->list.ptr[i]);
+        new_varnum = compile_form(new_func, 1, &form->list.ptr[i]);
     }
 
-    gen_code(new_func, "    return x%d;\n", new_varnum);
+    gen_code(new_func, 1, "return x%d;\n", new_varnum);
 
     /* now generate to code for referencing the function */
-    gen_code(func, "    value x%d = make_closure(%s, %d, %d",
+    gen_code(func, indent, "value x%d = make_closure(%s, %d, %d",
              varnum,
              new_func->name,
              n_params,
@@ -1078,26 +1081,26 @@ compile_function(struct function *func, struct value *form,
             fvar_len = strlen(buf);
         }
 
-        gen_code(func, ", %.*s", fvar_len, fvar);
+        gen_code(func, 0, ", %.*s", fvar_len, fvar);
     }
-    gen_code(func, ");\n");
+    gen_code(func, 0, ");\n");
 
     return varnum;
 }
 
 int
-compile_lambda(struct function *func, struct value *form)
+compile_lambda(struct function *func, int indent, struct value *form)
 {
     if (form->list.length < 3) {
         fprintf(stderr, "invalid lambda form\n");
         exit(1);
     }
 
-    return compile_function(func, form, 0);
+    return compile_function(func, indent, form, 0);
 }
 
 int
-compile_let(struct function *func, struct value *form)
+compile_let(struct function *func, int indent, struct value *form)
 {
     if (form->list.length < 3) {
         fprintf(stderr, "malformed let\n");
@@ -1120,8 +1123,8 @@ compile_let(struct function *func, struct value *form)
     int n_params = bindings->list.length;
     struct function *new_func = add_function(func, func->compiler, n_params, 0);
 
-    gen_code(new_func, "    va_list args;\n");
-    gen_code(new_func, "    va_start(args, nargs);\n");
+    gen_code(new_func, 1, "va_list args;\n");
+    gen_code(new_func, 1, "va_start(args, nargs);\n");
 
     /* add binding variables as parameters */
     for (int i = 0; i < form->list.ptr[bindings_idx].list.length; ++i) {
@@ -1137,13 +1140,13 @@ compile_let(struct function *func, struct value *form)
         }
 
         new_func->params[i] = binding->list.ptr[0].identifier.interned;
-        gen_code(new_func, "    value %.*s = va_arg(args, value);\n",
+        gen_code(new_func, 1, "value %.*s = va_arg(args, value);\n",
                  func->compiler->reader->interned_mangled_len[binding->list.ptr[0].identifier.interned],
                  func->compiler->reader->interned_mangled[binding->list.ptr[0].identifier.interned]);
     }
 
-    gen_code(new_func, "    va_end(args);\n");
-    gen_code(new_func, "\n");
+    gen_code(new_func, 1, "va_end(args);\n");
+    gen_code(new_func, 0, "\n");
 
     /* if we have a self-reference variable add a dummy parent function
      * (to be removed later) with a single argument: the self-reference
@@ -1163,10 +1166,10 @@ compile_let(struct function *func, struct value *form)
     /* compile body */
     int new_ret_varnum;
     for (int i = bindings_idx + 1; i < form->list.length; ++i) {
-        new_ret_varnum = compile_form(new_func, &form->list.ptr[i]);
+        new_ret_varnum = compile_form(new_func, 1, &form->list.ptr[i]);
     }
 
-    gen_code(new_func, "    return x%d;\n", new_ret_varnum);
+    gen_code(new_func, 1, "return x%d;\n", new_ret_varnum);
 
     /* remove dummy parent */
     if (dummy_parent != NULL) {
@@ -1176,7 +1179,7 @@ compile_let(struct function *func, struct value *form)
 
     /* now generate the code for referencing the function */
     int func_varnum = func->varnum++;
-    gen_code(func, "    value x%d = make_closure(%s, %d, %d",
+    gen_code(func, indent, "value x%d = make_closure(%s, %d, %d",
              func_varnum,
              new_func->name,
              bindings->list.length,
@@ -1230,29 +1233,29 @@ compile_let(struct function *func, struct value *form)
             fvar_len = strlen(buf);
         }
 
-        gen_code(func, ", %.*s", fvar_len, fvar);
+        gen_code(func, 0, ", %.*s", fvar_len, fvar);
     }
 
-    gen_code(func, ");\n");
+    gen_code(func, 0, ");\n");
 
     /* now set the self-reference environment variable, if needed. */
     if (self_ref_env_idx >= 0) {
-        gen_code(func, "    GET_CLOSURE(x%d)->freevars[%d] = x%d;\n", func_varnum, self_ref_env_idx, func_varnum);
+        gen_code(func, indent, "GET_CLOSURE(x%d)->freevars[%d] = x%d;\n", func_varnum, self_ref_env_idx, func_varnum);
     }
 
     /* now compile the binding values */
     int *arg_varnums = malloc(sizeof(int) * bindings->list.length);
     for (int i = 0; i < bindings->list.length; ++i) {
-        arg_varnums[i] = compile_form(func, &bindings->list.ptr[i].list.ptr[1]);
+        arg_varnums[i] = compile_form(func, indent, &bindings->list.ptr[i].list.ptr[1]);
     }
 
     /* create a call to the function we just created, passing binding values as arguments*/
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, bindings->list.length);
+    gen_code(func, indent, "value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, bindings->list.length);
     for (int i = 0; i < bindings->list.length; ++i) {
-        gen_code(func, ", x%d", arg_varnums[i]);
+        gen_code(func, 0, ", x%d", arg_varnums[i]);
     }
-    gen_code(func, ");\n");
+    gen_code(func, 0, ");\n");
 
     free(arg_varnums);
 
@@ -1260,48 +1263,48 @@ compile_let(struct function *func, struct value *form)
 }
 
 int
-compile_call(struct function *func, struct value *form)
+compile_call(struct function *func, int indent, struct value *form)
 {
     int ret_varnum;
     int func_varnum;
     int *arg_varnums;
 
-    func_varnum = compile_form(func, &form->list.ptr[0]);
-    gen_code(func, "    if (!IS_CLOSURE(x%d)) { RAISE(\"called object not a procedure\"); }\n", func_varnum);
+    func_varnum = compile_form(func, indent, &form->list.ptr[0]);
+    gen_code(func, indent, "if (!IS_CLOSURE(x%d)) { RAISE(\"called object not a procedure\"); }\n", func_varnum);
 
     arg_varnums = malloc(sizeof(int) * (form->list.length - 1));
     for (int i = 1; i < form->list.length; ++i) {
-        arg_varnums[i - 1] = compile_form(func, &form->list.ptr[i]);
+        arg_varnums[i - 1] = compile_form(func, indent, &form->list.ptr[i]);
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
+    gen_code(func, indent, "value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
     for (int i = 0; i < form->list.length - 1; ++i) {
-        gen_code(func, ", x%d", arg_varnums[i]);
+        gen_code(func, 0, ", x%d", arg_varnums[i]);
     }
-    gen_code(func, ");\n");
+    gen_code(func, 0, ");\n");
 
     return ret_varnum;
 }
 
 int
-compile_display(struct function *func, struct value *form)
+compile_display(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "display expects a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
 
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = display(x%d);\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = display(x%d);\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_define(struct function *func, struct value *form)
+compile_define(struct function *func, int indent, struct value *form)
 {
     int varnum;
 
@@ -1319,9 +1322,9 @@ compile_define(struct function *func, struct value *form)
 
         if (form->list.length == 2) {
             /* define the variable with a void initial value */
-            gen_code(func, "    value %.*s = VOID;\n", mangled_len, mangled_str);
+            gen_code(func, indent, "value %.*s = VOID;\n", mangled_len, mangled_str);
             varnum = func->varnum++;
-            gen_code(func, "    value x%d = %.*s;\n", mangled_len, mangled_str);
+            gen_code(func, indent, "value x%d = %.*s;\n", mangled_len, mangled_str);
 
             return varnum;
         }
@@ -1332,14 +1335,14 @@ compile_define(struct function *func, struct value *form)
         }
 
         /* define variable with initial value */
-        varnum = compile_form(func, &form->list.ptr[2]);
+        varnum = compile_form(func, indent, &form->list.ptr[2]);
 
         if (func->parent == NULL) {
             /* the variable is only set here, not declared, because it will
              * later be declared as a global variable. */
-            gen_code(func, "    %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+            gen_code(func, indent, "%.*s = x%d;\n", mangled_len, mangled_str, varnum);
         } else {
-            gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+            gen_code(func, indent, "value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
         }
 
         return varnum;
@@ -1360,55 +1363,55 @@ compile_define(struct function *func, struct value *form)
     func->n_params++;
     func->params[func->n_params - 1] = var_name;
 
-    varnum = compile_function(func, form, 1);
+    varnum = compile_function(func, indent, form, 1);
 
     if (func->parent == NULL) {
         /* we are setting a global variable, so no new variable is defined here. */
-        gen_code(func, "    %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+        gen_code(func, indent, "%.*s = x%d;\n", mangled_len, mangled_str, varnum);
     } else {
-        gen_code(func, "    value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
+        gen_code(func, indent, "value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
     }
 
     return varnum;
 }
 
 int
-compile_if(struct function *func, struct value *form)
+compile_if(struct function *func, int indent, struct value *form)
 {
     if (form->list.length < 3 || form->list.length > 4) {
         fprintf(stderr, "malformed if\n");
         exit(1);
     }
 
-    int cond_varnum = compile_form(func, &form->list.ptr[1]);
-    int then_varnum = compile_form(func, &form->list.ptr[2]);
+    int cond_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    int then_varnum = compile_form(func, indent, &form->list.ptr[2]);
     int else_varnum;
     int ret_varnum;
     if (form->list.length == 3) {
         ret_varnum = func->varnum++;
-        gen_code(func, "    value x%d = VOID;\n", ret_varnum);
-        gen_code(func, "    if (GET_BOOL(x%d)) {\n", cond_varnum);
-        gen_code(func, "        x%d = x%d;\n", ret_varnum, then_varnum);
-        gen_code(func, "    }\n");
+        gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
+        gen_code(func, indent, "if (GET_BOOL(x%d)) {\n", cond_varnum);
+        gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, then_varnum);
+        gen_code(func, indent, "}\n");
     } else {
         ret_varnum = func->varnum++;
-        gen_code(func, "    value x%d;\n", ret_varnum);
-        gen_code(func, "    if (GET_BOOL(x%d)) {\n", cond_varnum);
-        gen_code(func, "        x%d = x%d;\n", ret_varnum, then_varnum);
-        gen_code(func, "    } else {\n");
-        else_varnum = compile_form(func, &form->list.ptr[3]);
-        gen_code(func, "        x%d = x%d;\n", ret_varnum, else_varnum);
-        gen_code(func, "    }\n");
+        gen_code(func, indent, "value x%d;\n", ret_varnum);
+        gen_code(func, indent, "if (GET_BOOL(x%d)) {\n", cond_varnum);
+        gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, then_varnum);
+        gen_code(func, indent, "} else {\n");
+        else_varnum = compile_form(func, indent + 1, &form->list.ptr[3]);
+        gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, else_varnum);
+        gen_code(func, indent, "}\n");
     }
 
     return ret_varnum;
 }
 
 int
-compile_cond(struct function *func, struct value *form)
+compile_cond(struct function *func, int indent, struct value *form)
 {
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
 
     for (int i = 1; i < form->list.length; ++i) {
         struct value *clause = &form->list.ptr[i];
@@ -1429,40 +1432,40 @@ compile_cond(struct function *func, struct value *form)
 
             int varnum;
             for (int j = 1; j < clause->list.length; ++j) {
-                varnum = compile_form(func, &clause->list.ptr[j]);
+                varnum = compile_form(func, indent + (i - 1), &clause->list.ptr[j]);
             }
-            gen_code(func, "    x%d = x%d;\n", ret_varnum, varnum);
+            gen_code(func, indent + i - 1, "x%d = x%d;\n", ret_varnum, varnum);
         } else {
-            int condition_varnum = compile_form(func, condition);
-            gen_code(func, "    if (GET_BOOL(x%d)) {\n", condition_varnum);
+            int condition_varnum = compile_form(func, indent + (i - 1), condition);
+            gen_code(func, indent + (i - 1), "if (GET_BOOL(x%d)) {\n", condition_varnum);
 
             int varnum;
             for (int j = 1; j < clause->list.length; ++j) {
-                varnum = compile_form(func, &clause->list.ptr[j]);
+                varnum = compile_form(func, indent + i, &clause->list.ptr[j]);
             }
-            gen_code(func, "    x%d = x%d;\n", ret_varnum, varnum);
+            gen_code(func, indent + i, "x%d = x%d;\n", ret_varnum, varnum);
 
-            gen_code(func, "    } else {\n");
+            gen_code(func, indent + (i - 1), "} else {\n");
         }
     }
 
     for (int i = 1; i < form->list.length - 1; ++i) {
-        gen_code(func, "    }\n");
+        gen_code(func, indent + form->list.length - i - 2, "}\n");
     }
 
     return ret_varnum;
 }
 
 int
-compile_begin(struct function *func, struct value *form)
+compile_begin(struct function *func, int indent, struct value *form)
 {
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
 
     for (int i = 1; i < form->list.length; ++i) {
-        int arg_varnum = compile_form(func, &form->list.ptr[i]);
+        int arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
         if (i == form->list.length - 1) {
-            gen_code(func, "    x%d = x%d;\n", ret_varnum, arg_varnum);
+            gen_code(func, indent, "x%d = x%d;\n", ret_varnum, arg_varnum);
         }
     }
 
@@ -1470,7 +1473,7 @@ compile_begin(struct function *func, struct value *form)
 }
 
 int
-compile_include(struct function *func, struct value *form)
+compile_include(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2 || form->list.ptr[1].type != VAL_STR) {
         fprintf(stderr, "malformed include\n");
@@ -1504,7 +1507,7 @@ compile_include(struct function *func, struct value *form)
 }
 
 int
-compile_quoted_item(struct function *func, struct value *form)
+compile_quoted_item(struct function *func, int indent, struct value *form)
 {
     int varnum;
     int car_varnum;
@@ -1514,13 +1517,13 @@ compile_quoted_item(struct function *func, struct value *form)
     case VAL_NUM:
     case VAL_CHAR:
     case VAL_STR:
-        varnum = compile_form(func, form);
+        varnum = compile_form(func, indent, form);
         break;
 
     case VAL_ID:
         varnum = func->varnum++;
         add_compiled_symbol(func->compiler, form->identifier.interned);
-        gen_code(func, "    value x%d = sym%.*s;\n", varnum,
+        gen_code(func, indent, "value x%d = sym%.*s;\n", varnum,
                  func->compiler->reader->interned_mangled_len[form->identifier.interned],
                  func->compiler->reader->interned_mangled[form->identifier.interned]);
         break;
@@ -1528,18 +1531,18 @@ compile_quoted_item(struct function *func, struct value *form)
     case VAL_LIST:
         if (form->list.length == 0) {
             varnum = func->varnum++;
-            gen_code(func, "    value x%d = NIL;\n", varnum);
+            gen_code(func, indent, "value x%d = NIL;\n", varnum);
         } else {
             if (form->list.tail == NULL) {
                 varnum = func->varnum++;
-                gen_code(func, "    value x%d = NIL;\n", varnum);
+                gen_code(func, indent, "value x%d = NIL;\n", varnum);
             } else {
-                varnum = compile_quoted_item(func, form->list.tail);
+                varnum = compile_quoted_item(func, indent, form->list.tail);
             }
 
             for (int i = form->list.length - 1; i >= 0; --i) {
-                car_varnum = compile_quoted_item(func, &form->list.ptr[i]);
-                gen_code(func, "    x%d = make_pair(x%d, x%d);\n", varnum, car_varnum, varnum);
+                car_varnum = compile_quoted_item(func, indent, &form->list.ptr[i]);
+                gen_code(func, indent, "x%d = make_pair(x%d, x%d);\n", varnum, car_varnum, varnum);
             }
         }
 
@@ -1554,7 +1557,7 @@ compile_quoted_item(struct function *func, struct value *form)
 }
 
 int
-compile_quote(struct function *func, struct value *form)
+compile_quote(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2)
     {
@@ -1562,72 +1565,72 @@ compile_quote(struct function *func, struct value *form)
         exit(1);
     }
 
-    return compile_quoted_item(func, &form->list.ptr[1]);
+    return compile_quoted_item(func, indent, &form->list.ptr[1]);
 }
 
 int
-compile_eq_q(struct function *func, struct value *form)
+compile_eq_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 3) {
         fprintf(stderr, "malformed eq?\n");
         exit(1);
     }
 
-    int arg1_varnum = compile_form(func, &form->list.ptr[1]);
-    int arg2_varnum = compile_form(func, &form->list.ptr[2]);
+    int arg1_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    int arg2_varnum = compile_form(func, indent, &form->list.ptr[2]);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = BOOL(x%d == x%d);\n", ret_varnum, arg1_varnum, arg2_varnum);
+    gen_code(func, indent, "value x%d = BOOL(x%d == x%d);\n", ret_varnum, arg1_varnum, arg2_varnum);
     return ret_varnum;
 }
 
 int
-compile_open_input_file(struct function *func, struct value *form)
+compile_open_input_file(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "open-input-file needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
-    gen_code(func, "    if (!IS_STRING(x%d)) { RAISE(\"open-input-file argument must be string\"); }\n", arg_varnum);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"open-input-file argument must be string\"); }\n", arg_varnum);
     int filename_varnum = func->varnum++;
-    gen_code(func, "    char *x%d = GET_STRING(x%d)->s;\n", filename_varnum, arg_varnum);
+    gen_code(func, indent, "char *x%d = GET_STRING(x%d)->s;\n", filename_varnum, arg_varnum);
     int fileobj_varnum = func->varnum++;
-    gen_code(func, "    FILE *x%d = fopen(x%d, \"r\");\n", fileobj_varnum, filename_varnum);
-    gen_code(func, "    if (!x%d) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n", fileobj_varnum);
+    gen_code(func, indent, "FILE *x%d = fopen(x%d, \"r\");\n", fileobj_varnum, filename_varnum);
+    gen_code(func, indent, "if (!x%d) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n", fileobj_varnum);
     int port_varnum = func->varnum++;
-    gen_code(func, "    struct object *x%d = calloc(sizeof(struct object), 1);\n", port_varnum);
-    gen_code(func, "    x%d->type = OBJ_PORT;\n", port_varnum);
-    gen_code(func, "    x%d->port.input = 1;\n", port_varnum);
-    gen_code(func, "    x%d->port.fp = x%d;\n", port_varnum, fileobj_varnum);
+    gen_code(func, indent, "struct object *x%d = calloc(sizeof(struct object), 1);\n", port_varnum);
+    gen_code(func, indent, "x%d->type = OBJ_PORT;\n", port_varnum);
+    gen_code(func, indent, "x%d->port.input = 1;\n", port_varnum);
+    gen_code(func, indent, "x%d->port.fp = x%d;\n", port_varnum, fileobj_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = OBJECT(x%d);\n", ret_varnum, port_varnum);
+    gen_code(func, indent, "value x%d = OBJECT(x%d);\n", ret_varnum, port_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_close_port(struct function *func, struct value *form)
+compile_close_port(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "close-port needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int port_varnum = func->varnum++;
-    gen_code(func, "    struct object *x%d = GET_OBJECT(x%d);\n", port_varnum, arg_varnum);
+    gen_code(func, indent, "struct object *x%d = GET_OBJECT(x%d);\n", port_varnum, arg_varnum);
     int close_varnum = func->varnum++;
-    gen_code(func, "    int x%d = fclose(x%d->port.fp);\n", close_varnum, port_varnum);
-    gen_code(func, "    if (x%d) { RAISE(\"failed to close the port\"); }\n", close_varnum);
+    gen_code(func, indent, "int x%d = fclose(x%d->port.fp);\n", close_varnum, port_varnum);
+    gen_code(func, indent, "if (x%d) { RAISE(\"failed to close the port\"); }\n", close_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_read_line(struct function *func, struct value *form)
+compile_read_line(struct function *func, int indent, struct value *form)
 {
     if (form->list.length == 1) {
         fprintf(stderr, "no-argument form of read-line not yet supported\n");
@@ -1639,18 +1642,18 @@ compile_read_line(struct function *func, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
-    gen_code(func, "    if (!IS_PORT(x%d)) { RAISE(\"read-line argument not a port\"); }\n", arg_varnum);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_PORT(x%d)) { RAISE(\"read-line argument not a port\"); }\n", arg_varnum);
     int fileobj_varnum = func->varnum++;
-    gen_code(func, "    FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    gen_code(func, indent, "FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = read_line(x%d);\n", ret_varnum, fileobj_varnum);
+    gen_code(func, indent, "value x%d = read_line(x%d);\n", ret_varnum, fileobj_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_read_char(struct function *func, struct value *form)
+compile_read_char(struct function *func, int indent, struct value *form)
 {
     if (form->list.length == 1) {
         fprintf(stderr, "no-argument form of read-char not yet supported\n");
@@ -1662,18 +1665,18 @@ compile_read_char(struct function *func, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
-    gen_code(func, "    if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
     int fileobj_varnum = func->varnum++;
-    gen_code(func, "    FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    gen_code(func, indent, "FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = CHAR(getc(x%d));\n", ret_varnum, fileobj_varnum);
+    gen_code(func, indent, "value x%d = CHAR(getc(x%d));\n", ret_varnum, fileobj_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_peek_char(struct function *func, struct value *form)
+compile_peek_char(struct function *func, int indent, struct value *form)
 {
     if (form->list.length == 1) {
         fprintf(stderr, "no-argument form of peek-char not yet supported\n");
@@ -1685,113 +1688,113 @@ compile_peek_char(struct function *func, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
-    gen_code(func, "    if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
     int fileobj_varnum = func->varnum++;
-    gen_code(func, "    FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    gen_code(func, indent, "FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
     int char_varnum = func->varnum++;
-    gen_code(func, "    char x%d = getc(x%d);\n", char_varnum, fileobj_varnum);
+    gen_code(func, indent, "char x%d = getc(x%d);\n", char_varnum, fileobj_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = CHAR(x%d);\n", ret_varnum, char_varnum);
-    gen_code(func, "    ungetc(x%d, x%d);\n", char_varnum, fileobj_varnum);
+    gen_code(func, indent, "value x%d = CHAR(x%d);\n", ret_varnum, char_varnum);
+    gen_code(func, indent, "ungetc(x%d, x%d);\n", char_varnum, fileobj_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_port_q(struct function *func, struct value *form)
+compile_port_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "port? needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = BOOL(IS_PORT(x%d));\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = BOOL(IS_PORT(x%d));\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_input_port_q(struct function *func, struct value *form)
+compile_input_port_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "input-port? needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = BOOL(IS_PORT(x%d) && GET_OBJECT(x%d)->port.input);\n", ret_varnum, arg_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = BOOL(IS_PORT(x%d) && GET_OBJECT(x%d)->port.input);\n", ret_varnum, arg_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_eof_object_q(struct function *func, struct value *form)
+compile_eof_object_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "eof-object? needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = BOOL(IS_EOFOBJ(x%d));\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = BOOL(IS_EOFOBJ(x%d));\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_string_to_symbol(struct function *func, struct value *form)
+compile_string_to_symbol(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "string->symbol needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
-    gen_code(func, "    if (!IS_STRING(x%d)) { RAISE(\"string->symbol argument not a string\"); };\n", arg_varnum);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string->symbol argument not a string\"); };\n", arg_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = string_to_symbol(x%d);\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = string_to_symbol(x%d);\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_string_q(struct function *func, struct value *form)
+compile_string_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "string? needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = BOOL(IS_STRING(x%d));\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = BOOL(IS_STRING(x%d));\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 int
-compile_symbol_q(struct function *func, struct value *form)
+compile_symbol_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
         fprintf(stderr, "symbol? needs a single argument\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, "    value x%d = BOOL(IS_SYMBOL(x%d));\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = BOOL(IS_SYMBOL(x%d));\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
 
 struct {
     const char *name;
-    int (*compile)(struct function *func, struct value *form);
+    int (*compile)(struct function *func, int indent, struct value *form);
 } primcalls[] = {
     { "car", compile_car },
     { "cdr", compile_cdr },
@@ -1816,14 +1819,14 @@ struct {
 };
 
 int
-compile_primcall(struct function *func, struct value *form)
+compile_primcall(struct function *func, int indent, struct value *form)
 {
     for (int i = 0; i < sizeof(primcalls) / sizeof(primcalls[0]); ++i) {
         int len = strlen(primcalls[i].name);
         if (form->list.ptr[0].identifier.name_len == len &&
             memcmp(form->list.ptr[0].identifier.name, primcalls[i].name, len) == 0)
         {
-            return primcalls[i].compile(func, form);
+            return primcalls[i].compile(func, indent, form);
         }
     }
 
@@ -1831,7 +1834,7 @@ compile_primcall(struct function *func, struct value *form)
 }
 
 int
-compile_list(struct function *func, struct value *form)
+compile_list(struct function *func, int indent, struct value *form)
 {
     int varnum;
 
@@ -1842,7 +1845,7 @@ compile_list(struct function *func, struct value *form)
 
     struct value *list_car = &form->list.ptr[0];
     if (list_car->type == VAL_ID) {
-        varnum = compile_primcall(func, form);
+        varnum = compile_primcall(func, indent, form);
         if (varnum >= 0) {
             return varnum;
         }
@@ -1852,65 +1855,65 @@ compile_list(struct function *func, struct value *form)
                list_car->identifier.name_len == 5 &&
                memcmp(list_car->identifier.name, "quote", 5) == 0)
     {
-        varnum = compile_quote(func, form);
+        varnum = compile_quote(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 3 &&
                memcmp(list_car->identifier.name, "let", 3) == 0)
     {
-        varnum = compile_let(func, form);
+        varnum = compile_let(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 6 &&
                memcmp(list_car->identifier.name, "lambda", 6) == 0)
     {
-        varnum = compile_lambda(func, form);
+        varnum = compile_lambda(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 6 &&
                memcmp(list_car->identifier.name, "define", 5) == 0)
     {
-        varnum = compile_define(func, form);
+        varnum = compile_define(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 2 &&
                memcmp(list_car->identifier.name, "if", 2) == 0)
     {
-        varnum = compile_if(func, form);
+        varnum = compile_if(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 5 &&
                memcmp(list_car->identifier.name, "begin", 5) == 0)
     {
-        varnum = compile_begin(func, form);
+        varnum = compile_begin(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 4 &&
                memcmp(list_car->identifier.name, "cond", 4) == 0)
     {
-        varnum = compile_cond(func, form);
+        varnum = compile_cond(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 7 &&
                memcmp(list_car->identifier.name, "include", 7) == 0)
     {
-        varnum = compile_include(func, form);
+        varnum = compile_include(func, indent, form);
     } else {
-        varnum = compile_call(func, form);
+        varnum = compile_call(func, indent, form);
     }
 
     return varnum;
  }
 
 int
-compile_form(struct function *func, struct value *form)
+compile_form(struct function *func, int indent, struct value *form)
 {
     int varnum;
     if (form->type == VAL_NUM) {
-        varnum = compile_number(func, form);
+        varnum = compile_number(func, indent, form);
     } else if (form->type == VAL_ID) {
-        varnum = compile_identifier(func, form);
+        varnum = compile_identifier(func, indent, form);
     } else if (form->type == VAL_STR) {
-        varnum = compile_string(func, form);
+        varnum = compile_string(func, indent, form);
     } else if (form->type == VAL_BOOL) {
-        varnum = compile_bool(func, form);
+        varnum = compile_bool(func, indent, form);
     } else if (form->type == VAL_LIST) {
-        varnum = compile_list(func, form);
+        varnum = compile_list(func, indent, form);
     } else if (form->type == VAL_CHAR) {
-        varnum = compile_char(func, form);
+        varnum = compile_char(func, indent, form);
     } else if (form->type == VAL_EOF) {
         fprintf(stderr, "internal error: trying to compile EOF\n");
         exit(1);
@@ -1930,9 +1933,9 @@ compile_program(struct compiler *compiler)
         read_value(compiler->reader);
         if (compiler->reader->value.type == VAL_EOF)
             break;
-        compile_form(startup_func, &compiler->reader->value);
+        compile_form(startup_func, 1, &compiler->reader->value);
     }
-    gen_code(startup_func, "    return VOID;\n");
+    gen_code(startup_func, 1, "return VOID;\n");
 
     for (int i = 0; i < compiler->n_referenced_vars; ++i) {
         int found = 0;
