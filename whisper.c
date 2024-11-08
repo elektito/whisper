@@ -1624,6 +1624,32 @@ compile_read_char(struct function *func, struct value *form)
 }
 
 int
+compile_peek_char(struct function *func, struct value *form)
+{
+    if (form->list.length == 1) {
+        fprintf(stderr, "no-argument form of peek-char not yet supported\n");
+        exit(1);
+    }
+
+    if (form->list.length != 2) {
+        fprintf(stderr, "peek-port needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, &form->list.ptr[1]);
+    gen_code(func, "    if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
+    int fileobj_varnum = func->varnum++;
+    gen_code(func, "    FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    int char_varnum = func->varnum++;
+    gen_code(func, "    char x%d = getc(x%d);\n", char_varnum, fileobj_varnum);
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = CHAR(x%d);\n", ret_varnum, char_varnum);
+    gen_code(func, "    ungetc(x%d, x%d);\n", char_varnum, fileobj_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_port_q(struct function *func, struct value *form)
 {
     if (form->list.length != 2) {
@@ -1729,6 +1755,7 @@ struct {
     { "open-input-file", compile_open_input_file },
     { "port?", compile_port_q },
     { "read-line", compile_read_line },
+    { "peek-char", compile_peek_char },
     { "read-char", compile_read_char },
     { "string->symbol", compile_string_to_symbol },
     { "string?", compile_string_q },
