@@ -123,6 +123,27 @@ read_token(struct lexer *lexer)
         return;
     }
 
+    if (*lexer->ptr == '#') {
+        lexer->ptr++;
+        if (lexer->ptr >= program_end) {
+            fprintf(stderr, "eof after sharp\n");
+            exit(1);
+        }
+
+        if (*lexer->ptr == '\\') {
+            /* make sure we read at least one character after */
+            lexer->ptr++;
+
+            if (lexer->ptr >= program_end) {
+                fprintf(stderr, "eof in character literal\n");
+                exit(1);
+            }
+
+            /* read the next possible character */
+            lexer->ptr++;
+        }
+    }
+
     while (!isspace(*lexer->ptr) &&
            *lexer->ptr != '(' &&
            *lexer->ptr != ')' &&
