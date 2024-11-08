@@ -1405,6 +1405,55 @@ compile_if(struct function *func, struct value *form)
 }
 
 int
+compile_cond(struct function *func, struct value *form)
+{
+    int ret_varnum = func->varnum++;
+    gen_code(func, "    value x%d = VOID;\n", ret_varnum);
+
+    for (int i = 1; i < form->list.length; ++i) {
+        struct value *clause = &form->list.ptr[i];
+        if (clause->type != VAL_LIST || clause->list.length < 2) {
+            fprintf(stderr, "invalid cond clause\n");
+            exit(1);
+        }
+
+        struct value *condition = &clause->list.ptr[0];
+        if (condition->type == VAL_ID &&
+            condition->identifier.name_len == 4 &&
+            memcmp(condition->identifier.name, "else", 4) == 0)
+        {
+            if (i != form->list.length - 1) {
+                fprintf(stderr, "else not the last cond clause\n");
+                exit(1);
+            }
+
+            int varnum;
+            for (int j = 1; j < clause->list.length; ++j) {
+                varnum = compile_form(func, &clause->list.ptr[j]);
+            }
+            gen_code(func, "    x%d = x%d;\n", ret_varnum, varnum);
+        } else {
+            int condition_varnum = compile_form(func, condition);
+            gen_code(func, "    if (GET_BOOL(x%d)) {\n", condition_varnum);
+
+            int varnum;
+            for (int j = 1; j < clause->list.length; ++j) {
+                varnum = compile_form(func, &clause->list.ptr[j]);
+            }
+            gen_code(func, "    x%d = x%d;\n", ret_varnum, varnum);
+
+            gen_code(func, "    } else {\n");
+        }
+    }
+
+    for (int i = 1; i < form->list.length - 1; ++i) {
+        gen_code(func, "    }\n");
+    }
+
+    return ret_varnum;
+}
+
+int
 compile_begin(struct function *func, struct value *form)
 {
     int ret_varnum = func->varnum++;
@@ -1829,6 +1878,11 @@ compile_list(struct function *func, struct value *form)
                memcmp(list_car->identifier.name, "begin", 5) == 0)
     {
         varnum = compile_begin(func, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 4 &&
+               memcmp(list_car->identifier.name, "cond", 4) == 0)
+    {
+        varnum = compile_cond(func, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 7 &&
                memcmp(list_car->identifier.name, "include", 7) == 0)
