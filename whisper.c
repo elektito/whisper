@@ -1552,6 +1552,7 @@ compile_error(struct function *func, int indent, struct value *form)
     gen_code(func, indent, "printf(\"error: \");\n");
     gen_code(func, indent, "display(x%d);\n", msg_varnum);
     gen_code(func, indent, "printf(\"\\n\");\n");
+    gen_code(func, indent, "exit(1);\n");
 
     int ret_varnum = func->varnum++;
     gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
