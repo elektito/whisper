@@ -1866,6 +1866,36 @@ compile_string_length(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_string_eq_q(struct function *func, int indent, struct value *form)
+{
+    int n_strings = form->list.length - 1;
+    if (n_strings < 2) {
+        fprintf(stderr, "invalid number of arguments for string=?\n");
+        exit(1);
+    }
+
+    int *arg_varnums = malloc(n_strings * sizeof(int));
+    for (int i = 0; i < n_strings; ++i) {
+        arg_varnums[i] = compile_form(func, indent, &form->list.ptr[i + 1]);
+        gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string=? argument is not a string\"); }\n", arg_varnums[i]);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = BOOL(", ret_varnum);
+    for (int i = 0; i < n_strings - 1; ++i) {
+        if (i != 0) {
+            gen_code(func, 0, " && ");
+        }
+
+        gen_code(func, 0, "string_cmp(GET_STRING(x%d), GET_STRING(x%d)) == 0", arg_varnums[i], arg_varnums[i+1]);
+    }
+    gen_code(func, 0, ");\n");
+
+    free(arg_varnums);
+    return ret_varnum;
+}
+
+int
 compile_make_string(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2 && form->list.length != 3) {
@@ -1958,6 +1988,7 @@ struct {
     { "string->symbol", compile_string_to_symbol },
     { "string-append", compile_string_append },
     { "string-length", compile_string_length },
+    { "string=?", compile_string_eq_q },
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
     { "+", compile_add },
@@ -2409,6 +2440,19 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (endptr != str + GET_STRING(s)->len) { free(str); return FALSE; }\n");
     fprintf(fp, "    free(str);\n");
     fprintf(fp, "    return FIXNUM(result);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static int string_cmp(struct string *s1, struct string *s2) {\n");
+    fprintf(fp, "    size_t min_len = s1->len < s2->len ? s1->len : s2->len;\n");
+    fprintf(fp, "    int cmp = memcmp(s1->s, s2->s, min_len);\n");
+    fprintf(fp, "    if (cmp != 0) return cmp;\n");
+    fprintf(fp, "    if (s1->len < s2->len) {\n");
+    fprintf(fp, "        return -1;\n");
+    fprintf(fp, "    } else if (s1->len > s2->len) {\n");
+    fprintf(fp, "        return 1;\n");
+    fprintf(fp, "    } else {\n");
+    fprintf(fp, "        return 0;\n");
+    fprintf(fp, "    }\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
