@@ -2438,9 +2438,12 @@ main(int argc, char const *argv[])
     } else {
         int len = strlen("/tmp/whisper.XXXXXX.c");
         char *c_filename = malloc(len + 1);
-        strcpy(c_filename, "/tmp/whisper.XXXXXX.c");
+        strcpy(c_filename, "/tmp/whisper.XXXXXX");
         int fd = mkstemp(c_filename);
         close(fd);
+        c_filename[strlen("/tmp/whisper.XXXXXX")] = '.';
+        c_filename[strlen("/tmp/whisper.XXXXXX")+1] = 'c';
+        c_filename[strlen("/tmp/whisper.XXXXXX")+2] = 0;
         arguments.c_filename = c_filename;
 
         arguments.executable_filename = arguments.output_filename;
