@@ -1863,7 +1863,7 @@ compile_string_length(struct function *func, int indent, struct value *form)
     gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string-length argument is not a string\"); }\n", str_varnum);
 
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = FIXNUM(GET_STRING(x%d)->len);", ret_varnum, str_varnum);
+    gen_code(func, indent, "value x%d = FIXNUM(GET_STRING(x%d)->len);\n", ret_varnum, str_varnum);
 
     return ret_varnum;
 }
