@@ -302,7 +302,7 @@ mangle_name(const char *name, int name_len)
                 exit(1);
             }
 
-            *dst = '_';
+            *dst++ = '_';
         } else {
             sprintf(num_buf, "%d", *src);
             num_len = strlen(num_buf);
