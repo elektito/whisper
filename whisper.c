@@ -1884,6 +1884,34 @@ compile_make_string(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_string_to_number(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2 && form->list.length != 3) {
+        fprintf(stderr, "invalid number of arguments for string->number");
+        exit(1);
+    }
+
+    int str_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string->number first argument is not a number\"); }\n", str_varnum);
+
+    int base_varnum;
+    if (form->list.length == 2) {
+        base_varnum = func->varnum++;
+        gen_code(func, indent, "int x%d = 10;\n", base_varnum);
+    } else {
+        int temp_varnum = compile_form(func, indent, &form->list.ptr[2]);
+        gen_code(func, indent, "if (!IS_FIXNUM(x%d)) { RAISE(\"string->number second argument is not a number\"); }\n", temp_varnum);
+        base_varnum = func->varnum++;
+        gen_code(func, indent, "int x%d = GET_FIXNUM(x%d);\n", base_varnum, temp_varnum);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = string_to_number(x%d, x%d);\n", ret_varnum, str_varnum, base_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_symbol_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
@@ -1916,6 +1944,7 @@ struct {
     { "read-line", compile_read_line },
     { "peek-char", compile_peek_char },
     { "read-char", compile_read_char },
+    { "string->number", compile_string_to_number },
     { "string->symbol", compile_string_to_symbol },
     { "string-append", compile_string_append },
     { "string-length", compile_string_length },
@@ -2355,6 +2384,21 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "\n");
     fprintf(fp, "    return STRING(concat);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value string_to_number(value s, int base) {\n");
+    fprintf(fp, "    if (GET_STRING(s)->len == 0) return FALSE;\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    /* create a zero terminated version of the string for strtoll */\n");
+    fprintf(fp, "    char *str = malloc(GET_STRING(s)->len + 1);\n");
+    fprintf(fp, "    memcpy(str, GET_STRING(s)->s, GET_STRING(s)->len);\n");
+    fprintf(fp, "    str[GET_STRING(s)->len] = 0;\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    char *endptr;\n");
+    fprintf(fp, "    int64_t result = strtoll(str, &endptr, base);\n");
+    fprintf(fp, "    if (endptr != str + GET_STRING(s)->len) { free(str); return FALSE; }\n");
+    fprintf(fp, "    free(str);\n");
+    fprintf(fp, "    return FIXNUM(result);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
