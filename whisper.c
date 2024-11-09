@@ -1852,7 +1852,7 @@ int
 compile_string_length(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
-        fprintf(stderr, "invalid number of arguments for string-length");
+        fprintf(stderr, "invalid number of arguments for string-length\n");
         exit(1);
     }
 
@@ -1869,7 +1869,7 @@ int
 compile_make_string(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "invalid number of arguments for make-string");
+        fprintf(stderr, "invalid number of arguments for make-string\n");
         exit(1);
     }
 
@@ -1897,7 +1897,7 @@ int
 compile_string_to_number(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "invalid number of arguments for string->number");
+        fprintf(stderr, "invalid number of arguments for string->number\n");
         exit(1);
     }
 
