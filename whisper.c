@@ -564,6 +564,12 @@ int compile_form(struct function *func, int indent, struct value *form);
 void
 add_compiled_symbol(struct compiler *compiler, interned_string identifier)
 {
+    for (int i = 0; i < compiler->n_symbols; ++i) {
+        if (compiler->symbols[i] == identifier) {
+            return;
+        }
+    }
+
     compiler->n_symbols++;
     compiler->symbols = realloc(compiler->symbols, sizeof(interned_string) * compiler->n_symbols);
     compiler->symbols[compiler->n_symbols - 1] = identifier;
