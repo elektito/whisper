@@ -802,7 +802,7 @@ compile_char(struct function *func, int indent, struct value *form)
         gen_code(func, 0, "\\\'");
         break;
     case '\0':
-        gen_code(func, 0, "\0");
+        gen_code(func, 0, "\\0");
         break;
     default:
         if (c >= 32 && c < 127) {
