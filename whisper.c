@@ -2298,7 +2298,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "\n");
     fprintf(fp, "static value make_closure(funcptr func, int nargs, int nfreevars, ...) {\n");
     fprintf(fp, "    va_list args;\n");
-    fprintf(fp, "    struct closure *closure = calloc(1, sizeof(struct closure) + nfreevars * sizeof(int));\n");
+    fprintf(fp, "    struct closure *closure = calloc(1, sizeof(struct closure) + nfreevars * sizeof(value));\n");
     fprintf(fp, "    closure->func = func;\n");
     fprintf(fp, "    closure->n_args = nargs;\n");
     fprintf(fp, "    closure->n_freevars = nfreevars;\n");
