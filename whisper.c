@@ -540,7 +540,7 @@ struct function
 
     int has_rest;
     int n_params;
-    interned_string params[];
+    interned_string *params;
 };
 
 struct compiler
@@ -603,11 +603,12 @@ add_function(struct function *parent, struct compiler *compiler, int nparams, in
         nparams++;
     }
 
-    struct function *func = calloc(1, sizeof(struct function) + nparams * sizeof(interned_string));
+    struct function *func = calloc(sizeof(struct function), 1);
     func->parent = parent;
     func->compiler = compiler;
     func->code_size = 0;
     func->code = NULL;
+    func->params = malloc(nparams * sizeof(interned_string));
     func->n_params = nparams;
     func->has_rest = has_rest;
 
@@ -1189,6 +1190,7 @@ compile_let(struct function *func, int indent, struct value *form)
         dummy_parent = calloc(1, sizeof(struct function) + sizeof(interned_string) * 1);
         dummy_parent->name = "dummy";
         dummy_parent->n_params = 1;
+        dummy_parent->params = malloc(1 * sizeof(interned_string));
         dummy_parent->params[0] = self_ref_identifier;
         dummy_parent->parent = new_func->parent;
         new_func->parent = dummy_parent;
@@ -1392,6 +1394,7 @@ compile_define(struct function *func, int indent, struct value *form)
     int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
     char *mangled_str = func->compiler->reader->interned_mangled[var_name];
     func->n_params++;
+    func->params = realloc(func->params, func->n_params * sizeof(interned_string));
     func->params[func->n_params - 1] = var_name;
 
     varnum = compile_function(func, indent, form, 1);
