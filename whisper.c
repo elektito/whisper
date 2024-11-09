@@ -1839,6 +1839,51 @@ compile_string_append(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_string_length(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "invalid number of arguments for string-length");
+        exit(1);
+    }
+
+    int str_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string-length argument is not a string\"); }\n", str_varnum);
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = FIXNUM(GET_STRING(x%d)->len);", ret_varnum, str_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_make_string(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2 && form->list.length != 3) {
+        fprintf(stderr, "invalid number of arguments for make-string");
+        exit(1);
+    }
+
+    int len_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_FIXNUM(x%d)) { RAISE(\"make-string first argument is not a number\"); }\n", len_varnum);
+
+    int char_varnum;
+    if (form->list.length == 2) {
+        char_varnum = func->varnum++;
+        gen_code(func, indent, "char x%d = 0;\n", char_varnum);
+    } else {
+        int temp_varnum = compile_form(func, indent, &form->list.ptr[2]);
+        gen_code(func, indent, "if (!IS_CHAR(x%d)) { RAISE(\"make-string second argument is not a char\"); }\n", temp_varnum);
+        char_varnum = func->varnum++;
+        gen_code(func, indent, "char x%d = GET_CHAR(x%d);\n", char_varnum, temp_varnum);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = alloc_string(GET_FIXNUM(x%d), x%d);\n", ret_varnum, len_varnum, char_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_symbol_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
@@ -1865,6 +1910,7 @@ struct {
     { "eof-object?", compile_eof_object_q },
     { "eq?", compile_eq_q },
     { "input-port?", compile_input_port_q },
+    { "make-string", compile_make_string },
     { "open-input-file", compile_open_input_file },
     { "port?", compile_port_q },
     { "read-line", compile_read_line },
@@ -1872,6 +1918,7 @@ struct {
     { "read-char", compile_read_char },
     { "string->symbol", compile_string_to_symbol },
     { "string-append", compile_string_append },
+    { "string-length", compile_string_length },
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
     { "+", compile_add },
@@ -2274,6 +2321,14 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    symbols[n_symbols - 1].name = malloc(GET_STRING(v)->len);\n");
     fprintf(fp, "    memcpy(symbols[n_symbols - 1].name, GET_STRING(v)->s, GET_STRING(v)->len);\n");
     fprintf(fp, "    return SYMBOL(n_symbols - 1);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value alloc_string(size_t len, char fill) {\n");
+    fprintf(fp, "    struct string *str = malloc(sizeof(struct string));\n");
+    fprintf(fp, "    str->len = len;\n");
+    fprintf(fp, "    str->s = malloc(len);\n");
+    fprintf(fp, "    memset(str->s, fill, len);\n");
+    fprintf(fp, "    return STRING(str);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value string_append(int n_strings, ...) {\n");
