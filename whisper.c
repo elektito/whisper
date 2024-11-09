@@ -1866,6 +1866,28 @@ compile_string_length(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_string_ref(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 3) {
+        fprintf(stderr, "invalid number of arguments for string-ref\n");
+        exit(1);
+    }
+
+    int str_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string-ref first argument is not a string\"); }\n", str_varnum);
+
+    int idx_varnum = compile_form(func, indent, &form->list.ptr[2]);
+    gen_code(func, indent, "if (!IS_FIXNUM(x%d)) { RAISE(\"string-ref second argument is not a number\"); }\n", idx_varnum);
+
+    gen_code(func, indent, "if (GET_FIXNUM(x%d) < 0 || GET_FIXNUM(x%d) >= GET_STRING(x%d)->len) { RAISE(\"string-ref index is not valid\") }\n", idx_varnum, idx_varnum, str_varnum);
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = CHAR(GET_STRING(x%d)->s[GET_FIXNUM(x%d)]);", ret_varnum, str_varnum, idx_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_string_eq_q(struct function *func, int indent, struct value *form)
 {
     int n_strings = form->list.length - 1;
@@ -1988,6 +2010,7 @@ struct {
     { "string->symbol", compile_string_to_symbol },
     { "string-append", compile_string_append },
     { "string-length", compile_string_length },
+    { "string-ref", compile_string_ref },
     { "string=?", compile_string_eq_q },
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
