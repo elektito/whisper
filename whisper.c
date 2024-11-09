@@ -823,9 +823,11 @@ compile_car(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[0]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_PAIR(x%d)) { RAISE(\"car argument is not a pair\") }\n", arg_varnum);
+
     int dst_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = car(x%d);", dst_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = GET_PAIR(x%d)->car;\n", dst_varnum, arg_varnum);
     return dst_varnum;
 }
 
@@ -837,9 +839,11 @@ compile_cdr(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[0]);
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    gen_code(func, indent, "if (!IS_PAIR(x%d)) { RAISE(\"cdr argument is not a pair\") }\n", arg_varnum);
+
     int dst_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = cdr(x%d);", dst_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = GET_PAIR(x%d)->cdr;\n", dst_varnum, arg_varnum);
     return dst_varnum;
 }
 
