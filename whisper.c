@@ -1491,6 +1491,29 @@ compile_cond(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_or(struct function *func, int indent, struct value *form)
+{
+    int n_values = form->list.length - 1;
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d;\n", ret_varnum);
+
+    for (int i = 0; i < n_values; ++i) {
+        int arg_varnum = compile_form(func, indent + i, &form->list.ptr[i + 1]);
+        gen_code(func, indent + i, "if (x%d != FALSE) {\n", arg_varnum);
+        gen_code(func, indent + i + 1, "x%d = x%d;\n", ret_varnum, arg_varnum);
+        gen_code(func, indent + i, "} else {\n");
+    }
+
+    gen_code(func, indent + n_values, "x%d = FALSE;\n", ret_varnum);
+
+    for (int i = n_values - 1; i >= 0; --i) {
+        gen_code(func, indent + i, "}\n");
+    }
+
+    return ret_varnum;
+}
+
+int
 compile_begin(struct function *func, int indent, struct value *form)
 {
     int ret_varnum = func->varnum++;
@@ -2092,6 +2115,11 @@ compile_list(struct function *func, int indent, struct value *form)
                memcmp(list_car->identifier.name, "cond", 4) == 0)
     {
         varnum = compile_cond(func, indent, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 2 &&
+               memcmp(list_car->identifier.name, "or", 2) == 0)
+    {
+        varnum = compile_or(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 7 &&
                memcmp(list_car->identifier.name, "include", 7) == 0)
