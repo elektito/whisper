@@ -1258,7 +1258,7 @@ compile_let(struct function *func, int indent, struct value *form)
             /* the free variable has not been referenced before; add it
              * to the list of free variables. */
             func->n_freevars++;
-            func->freevars = realloc(func->freevars, func->n_freevars);
+            func->freevars = realloc(func->freevars, func->n_freevars * sizeof(interned_string));
             func->freevars[func->n_freevars - 1] = new_func->freevars[i];
 
             snprintf(buf, sizeof(buf), "envget(env, %d)", func->n_freevars - 1);
