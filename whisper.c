@@ -1818,6 +1818,27 @@ compile_string_q(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_string_append(struct function *func, int indent, struct value *form)
+{
+    int n_strings = form->list.length - 1;
+    int *arg_varnums = malloc(sizeof(int) * n_strings);
+    for (int i = 0; i < n_strings; ++i) {
+        arg_varnums[i] = compile_form(func, indent, &form->list.ptr[i + 1]);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = string_append(%d", ret_varnum, n_strings);
+    for (int i = 0; i < n_strings; ++i) {
+        gen_code(func, 0, ", x%d", arg_varnums[i]);
+    }
+    gen_code(func, 0, ");\n");
+
+    free(arg_varnums);
+
+    return ret_varnum;
+}
+
+int
 compile_symbol_q(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
@@ -1850,6 +1871,7 @@ struct {
     { "peek-char", compile_peek_char },
     { "read-char", compile_read_char },
     { "string->symbol", compile_string_to_symbol },
+    { "string-append", compile_string_append },
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
     { "+", compile_add },
@@ -2252,6 +2274,32 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    symbols[n_symbols - 1].name = malloc(GET_STRING(v)->len);\n");
     fprintf(fp, "    memcpy(symbols[n_symbols - 1].name, GET_STRING(v)->s, GET_STRING(v)->len);\n");
     fprintf(fp, "    return SYMBOL(n_symbols - 1);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value string_append(int n_strings, ...) {\n");
+    fprintf(fp, "    int total_size = 0;\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, n_strings);\n");
+    fprintf(fp, "    for (int i = 0; i < n_strings; ++i) {\n");
+    fprintf(fp, "        struct string *str = GET_STRING(va_arg(args, value));");
+    fprintf(fp, "        total_size += str->len;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    struct string *concat = malloc(sizeof(struct string));\n");
+    fprintf(fp, "    concat->len = total_size;\n");
+    fprintf(fp, "    concat->s = malloc(total_size);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    va_start(args, n_strings);\n");
+    fprintf(fp, "    size_t offset = 0;\n");
+    fprintf(fp, "    for (int i = 0; i < n_strings; ++i) {\n");
+    fprintf(fp, "        struct string *str = GET_STRING(va_arg(args, value));\n");
+    fprintf(fp, "        memcpy(concat->s + offset, str->s, str->len);\n");
+    fprintf(fp, "        offset += str->len;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    return STRING(concat);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
