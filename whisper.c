@@ -1418,19 +1418,20 @@ compile_if(struct function *func, int indent, struct value *form)
     }
 
     int cond_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int then_varnum = compile_form(func, indent, &form->list.ptr[2]);
     int else_varnum;
     int ret_varnum;
     if (form->list.length == 3) {
         ret_varnum = func->varnum++;
         gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
         gen_code(func, indent, "if (GET_BOOL(x%d)) {\n", cond_varnum);
+        int then_varnum = compile_form(func, indent + 1, &form->list.ptr[2]);
         gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, then_varnum);
         gen_code(func, indent, "}\n");
     } else {
         ret_varnum = func->varnum++;
         gen_code(func, indent, "value x%d;\n", ret_varnum);
         gen_code(func, indent, "if (GET_BOOL(x%d)) {\n", cond_varnum);
+        int then_varnum = compile_form(func, indent + 1, &form->list.ptr[2]);
         gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, then_varnum);
         gen_code(func, indent, "} else {\n");
         else_varnum = compile_form(func, indent + 1, &form->list.ptr[3]);
