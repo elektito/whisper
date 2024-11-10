@@ -1743,12 +1743,9 @@ compile_read_char(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
-    int fileobj_varnum = func->varnum++;
-    gen_code(func, indent, "FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = CHAR(getc(x%d));\n", ret_varnum, fileobj_varnum);
+    gen_code(func, indent, "value x%d = read_char(x%d);\n", ret_varnum, port_varnum);
 
     return ret_varnum;
 }
@@ -1766,15 +1763,9 @@ compile_peek_char(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_PORT(x%d)) { RAISE(\"read-char argument not a port\"); }\n", arg_varnum);
-    int fileobj_varnum = func->varnum++;
-    gen_code(func, indent, "FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
-    int char_varnum = func->varnum++;
-    gen_code(func, indent, "char x%d = getc(x%d);\n", char_varnum, fileobj_varnum);
+    int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = CHAR(x%d);\n", ret_varnum, char_varnum);
-    gen_code(func, indent, "ungetc(x%d, x%d);\n", char_varnum, fileobj_varnum);
+    gen_code(func, indent, "value x%d = peek_char(x%d);\n", ret_varnum, port_varnum);
 
     return ret_varnum;
 }
@@ -2390,6 +2381,23 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    }\n");
     fprintf(fp, "\n");
     fprintf(fp, "    return STRING(str);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value read_char(value port) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
+    fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
+    fprintf(fp, "    char ch = getc(fp);\n");
+    fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
+    fprintf(fp, "    return CHAR(ch);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value peek_char(value port) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"peeking non-port\"); }\n");
+    fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
+    fprintf(fp, "    char ch = getc(fp);\n");
+    fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
+    fprintf(fp, "    ungetc(ch, fp);\n");
+    fprintf(fp, "    return CHAR(ch);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value display(value v);\n");
