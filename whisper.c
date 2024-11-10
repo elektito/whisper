@@ -2435,6 +2435,8 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        display_pair(GET_PAIR(v), 0);\n");
     fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
     fprintf(fp, "        printf(\"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
+    fprintf(fp, "    } else if (IS_EOFOBJ(v)) {\n");
+    fprintf(fp, "        printf(\"#<eof-object>\");\n");
     fprintf(fp, "    } else {\n");
     fprintf(fp, "        printf(\"#<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
