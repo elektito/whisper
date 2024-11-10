@@ -694,7 +694,7 @@ compile_identifier(struct function *func, int indent, struct value *form)
             parent = parent->parent;
         }
 
-        if (!found) {
+        if (!found || parent->parent == NULL) {
             /* it's a global variable */
             gen_code(func, indent, "value x%d = %.*s;\n", varnum,
                      func->compiler->reader->interned_mangled_len[form->identifier.interned],
