@@ -1671,18 +1671,22 @@ compile_open_input_file(struct function *func, int indent, struct value *form)
 
     int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"open-input-file argument must be string\"); }\n", arg_varnum);
-    int filename_varnum = func->varnum++;
-    gen_code(func, indent, "char *x%d = GET_STRING(x%d)->s;\n", filename_varnum, arg_varnum);
-    int fileobj_varnum = func->varnum++;
-    gen_code(func, indent, "FILE *x%d = fopen(x%d, \"r\");\n", fileobj_varnum, filename_varnum);
-    gen_code(func, indent, "if (!x%d) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n", fileobj_varnum);
-    int port_varnum = func->varnum++;
-    gen_code(func, indent, "struct object *x%d = calloc(sizeof(struct object), 1);\n", port_varnum);
-    gen_code(func, indent, "x%d->type = OBJ_PORT;\n", port_varnum);
-    gen_code(func, indent, "x%d->port.input = 1;\n", port_varnum);
-    gen_code(func, indent, "x%d->port.fp = x%d;\n", port_varnum, fileobj_varnum);
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = OBJECT(x%d);\n", ret_varnum, port_varnum);
+    gen_code(func, indent, "value x%d = open_input_file(x%d);\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_open_output_string(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "open-output-string accepts no arguments\n");
+        exit(1);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = create_output_string_port();\n", ret_varnum);
 
     return ret_varnum;
 }
@@ -1720,12 +1724,9 @@ compile_read_line(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_PORT(x%d)) { RAISE(\"read-line argument not a port\"); }\n", arg_varnum);
-    int fileobj_varnum = func->varnum++;
-    gen_code(func, indent, "FILE *x%d = GET_OBJECT(x%d)->port.fp;\n", fileobj_varnum, arg_varnum);
+    int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = read_line(x%d);\n", ret_varnum, fileobj_varnum);
+    gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.read_line(x%d);\n", ret_varnum, port_varnum, port_varnum);
 
     return ret_varnum;
 }
@@ -1745,7 +1746,7 @@ compile_read_char(struct function *func, int indent, struct value *form)
 
     int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = read_char(x%d);\n", ret_varnum, port_varnum);
+    gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.read_char(x%d);\n", ret_varnum, port_varnum, port_varnum);
 
     return ret_varnum;
 }
@@ -1765,7 +1766,7 @@ compile_peek_char(struct function *func, int indent, struct value *form)
 
     int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = peek_char(x%d);\n", ret_varnum, port_varnum);
+    gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.peek_char(x%d);\n", ret_varnum, port_varnum, port_varnum);
 
     return ret_varnum;
 }
@@ -2227,13 +2228,20 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    OBJ_PORT,\n");
     fprintf(fp, "};\n");
     fprintf(fp, "\n");
+    fprintf(fp, "enum port_direction {\n");
+    fprintf(fp, "    PORT_DIR_READ,\n");
+    fprintf(fp, "    PORT_DIR_WRITE,\n");
+    fprintf(fp, "};\n");
+    fprintf(fp, "\n");
     fprintf(fp, "struct object {\n");
     fprintf(fp, "    enum object_type type;\n");
     fprintf(fp, "    union {\n");
     fprintf(fp, "        struct {\n");
-    fprintf(fp, "            int input;\n");
-    fprintf(fp, "            int output;\n");
+    fprintf(fp, "            int direction;\n");
     fprintf(fp, "            FILE *fp;\n");
+    fprintf(fp, "            value (*read_char)(value port);\n");
+    fprintf(fp, "            value (*peek_char)(value port);\n");
+    fprintf(fp, "            value (*read_line)(value port);\n");
     fprintf(fp, "        } port;\n");
     fprintf(fp, "    };\n");
     fprintf(fp, "};\n");
@@ -2355,7 +2363,10 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return STRING(p);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value read_line(FILE *fp) {\n");
+    fprintf(fp, "static value file_read_line(value port) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
+    fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char buf[256];\n");
     fprintf(fp, "    char *r = fgets(buf, sizeof(buf), fp);\n");
     fprintf(fp, "    if (!r) {\n");
@@ -2383,21 +2394,39 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return STRING(str);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value read_char(value port) {\n");
+    fprintf(fp, "static value file_read_char(value port) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char ch = getc(fp);\n");
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
     fprintf(fp, "    return CHAR(ch);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value peek_char(value port) {\n");
+    fprintf(fp, "static value file_peek_char(value port) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"peeking non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char ch = getc(fp);\n");
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
     fprintf(fp, "    ungetc(ch, fp);\n");
     fprintf(fp, "    return CHAR(ch);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value open_input_file(value filename) {\n");
+    fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
+    fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
+    fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
+    fprintf(fp, "    FILE *fp = fopen(filenamez, \"r\");\n");
+    fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
+    fprintf(fp, "    struct object *obj = malloc(sizeof(struct object));\n");
+    fprintf(fp, "    obj->type = OBJ_PORT;");
+    fprintf(fp, "    obj->port.direction = PORT_DIR_READ;\n");
+    fprintf(fp, "    obj->port.fp = fp;\n");
+    fprintf(fp, "    obj->port.read_char = file_read_char;\n");
+    fprintf(fp, "    obj->port.peek_char = file_peek_char;\n");
+    fprintf(fp, "    obj->port.read_line = file_read_line;\n");
+    fprintf(fp, "    return OBJECT(obj);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value display(value v);\n");
