@@ -1720,9 +1720,23 @@ compile_open_input_file(struct function *func, int indent, struct value *form)
     }
 
     int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"open-input-file argument must be string\"); }\n", arg_varnum);
     int ret_varnum = func->varnum++;
     gen_code(func, indent, "value x%d = open_input_file(x%d);\n", ret_varnum, arg_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_open_output_file(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2) {
+        fprintf(stderr, "open-output-file needs a single argument\n");
+        exit(1);
+    }
+
+    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = open_output_file(x%d);\n", ret_varnum, arg_varnum);
 
     return ret_varnum;
 }
@@ -2061,6 +2075,7 @@ struct {
     { "input-port?", compile_input_port_q },
     { "make-string", compile_make_string },
     { "open-input-file", compile_open_input_file },
+    { "open-output-file", compile_open_output_file },
     { "port?", compile_port_q },
     { "read-line", compile_read_line },
     { "peek-char", compile_peek_char },
@@ -2469,6 +2484,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value open_input_file(value filename) {\n");
+    fprintf(fp, "    if (!IS_STRING(filename)) { RAISE(\"filename is not a string\"); }\n");
     fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
     fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
     fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
@@ -2481,6 +2497,21 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    obj->port.read_char = file_read_char;\n");
     fprintf(fp, "    obj->port.peek_char = file_peek_char;\n");
     fprintf(fp, "    obj->port.read_line = file_read_line;\n");
+    fprintf(fp, "    return OBJECT(obj);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value open_output_file(value filename) {\n");
+    fprintf(fp, "    if (!IS_STRING(filename)) { RAISE(\"filename is not a string\"); }\n");
+    fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
+    fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
+    fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
+    fprintf(fp, "    FILE *fp = fopen(filenamez, \"w\");\n");
+    fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
+    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
+    fprintf(fp, "    obj->type = OBJ_PORT;");
+    fprintf(fp, "    obj->port.direction = PORT_DIR_WRITE;\n");
+    fprintf(fp, "    obj->port.fp = fp;\n");
+    fprintf(fp, "    obj->port.printf = file_printf;\n");
     fprintf(fp, "    return OBJECT(obj);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
