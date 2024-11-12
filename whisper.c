@@ -1375,6 +1375,30 @@ compile_display(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_write(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2 && form->list.length != 3) {
+        fprintf(stderr, "write expects one or two arguments\n");
+        exit(1);
+    }
+
+    int value_varnum = compile_form(func, indent, &form->list.ptr[1]);
+
+    int port_varnum;
+    if (form->list.length == 2) {
+        port_varnum = func->varnum++;
+        gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", port_varnum);
+    } else {
+        port_varnum = compile_form(func, indent, &form->list.ptr[2]);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = write(x%d, x%d);\n", ret_varnum, value_varnum, port_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_define(struct function *func, int indent, struct value *form)
 {
     int varnum;
@@ -2118,6 +2142,7 @@ struct {
     { "string=?", compile_string_eq_q },
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
+    { "write", compile_write },
     { "+", compile_add },
     { "-", compile_sub },
     { "*", compile_mul },
@@ -2591,6 +2616,135 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
     fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"writing to non-output port\"); }\n");
     fprintf(fp, "    _display(v, port);\n");
+    fprintf(fp, "    return VOID;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void _write(value v, value port);\n");
+    fprintf(fp, "static void _write_pair(struct pair *v, value port, int in_the_middle) {\n");
+    fprintf(fp, "    if (!in_the_middle) GET_OBJECT(port)->port.printf(port, \"(\");\n");
+    fprintf(fp, "    _write(v->car, port);\n");
+    fprintf(fp, "    if (IS_NIL(v->cdr)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \")\");\n");
+    fprintf(fp, "    } else if (IS_PAIR(v->cdr)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \" \");\n");
+    fprintf(fp, "        _write_pair(GET_PAIR(v->cdr), port, 1);\n");
+    fprintf(fp, "    } else {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \" . \");\n");
+    fprintf(fp, "        _write(v->cdr, port);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \")\");\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void _write_char_literal(value v, value port) {\n");
+    fprintf(fp, "    char ch = GET_CHAR(v);\n");
+    fprintf(fp, "    char buf[16];\n");
+    fprintf(fp, "    char *text;\n");
+    fprintf(fp, "    switch (ch) {\n");
+    fprintf(fp, "    case '\\a':\n");
+    fprintf(fp, "        text = \"#\\\\alarm\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\b':\n");
+    fprintf(fp, "        text = \"#\\\\backspace\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\x7f':\n");
+    fprintf(fp, "        text = \"#\\\\delete\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\x1b':\n");
+    fprintf(fp, "        text = \"#\\\\escape\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\n':\n");
+    fprintf(fp, "        text = \"#\\\\newline\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\0':\n");
+    fprintf(fp, "        text = \"#\\\\null\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\r':\n");
+    fprintf(fp, "        text = \"#\\\\return\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case ' ':\n");
+    fprintf(fp, "        text = \"#\\\\space\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    case '\\t':\n");
+    fprintf(fp, "        text = \"#\\\\tab\";\n");
+    fprintf(fp, "        break;\n");
+    fprintf(fp, "    default:\n");
+    fprintf(fp, "        if (ch >= 32 && ch < 127)");
+    fprintf(fp, "            sprintf(buf, \"%%c\", ch);\n");
+    fprintf(fp, "        else");
+    fprintf(fp, "            sprintf(buf, \"\\\\x%%02x\", (int) ch);\n");
+    fprintf(fp, "        text = buf;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    GET_OBJECT(port)->port.printf(port, \"%%s\", text);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void _write_string_literal(value v, value port) {\n");
+    fprintf(fp, "    struct object *op = GET_OBJECT(port);\n");
+    fprintf(fp, "    struct string *s = GET_STRING(v);\n");
+    fprintf(fp, "    op->port.printf(port, \"\\\"\");\n");
+    fprintf(fp, "    for (int i = 0; i < s->len; ++i) {\n");
+    fprintf(fp, "        switch (s->s[i]) {\n");
+    fprintf(fp, "        case '\\a':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\\a\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\b':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\\b\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\r':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\\r\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\n':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\\n\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\t':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\\t\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\"':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\"\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        case '\\\\':\n");
+    fprintf(fp, "            op->port.printf(port, \"\\\\\");\n");
+    fprintf(fp, "            break;\n");
+    fprintf(fp, "        default:\n");
+    fprintf(fp, "            if (s->s[i] >= 32 && s->s[i] < 127)\n");
+    fprintf(fp, "                op->port.printf(port, \"%%c\", s->s[i]);\n");
+    fprintf(fp, "            else\n");
+    fprintf(fp, "                op->port.printf(port, \"\\\\x%%02x\", (int) s->s[i]);\n");
+    fprintf(fp, "        }\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    op->port.printf(port, \"\\\"\");\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void _write(value v, value port) {\n");
+    fprintf(fp, "    if (IS_FIXNUM(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%ld\", GET_FIXNUM(v));\n");
+    fprintf(fp, "    } else if (IS_STRING(v)) {\n");
+    fprintf(fp, "        _write_string_literal(v, port);\n");
+    fprintf(fp, "    } else if (IS_SYMBOL(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%.*s\", (int) symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);\n");
+    fprintf(fp, "    } else if (IS_BOOL(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
+    fprintf(fp, "    } else if (IS_VOID(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<void>\");\n");
+    fprintf(fp, "    } else if (IS_CHAR(v)) {\n");
+    fprintf(fp, "        _write_char_literal(v, port);\n");
+    fprintf(fp, "    } else if (IS_NIL(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"()\");\n");
+    fprintf(fp, "    } else if (IS_PAIR(v)) {\n");
+    fprintf(fp, "        _write_pair(GET_PAIR(v), port, 0);\n");
+    fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
+    fprintf(fp, "    } else if (IS_EOFOBJ(v)) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<eof-object>\");\n");
+    fprintf(fp, "    } else {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<object-%%p>\", v);\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value write(value v, value port) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"writing to non-output port\"); }\n");
+    fprintf(fp, "    _write(v, port);\n");
     fprintf(fp, "    return VOID;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
