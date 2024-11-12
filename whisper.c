@@ -2172,6 +2172,7 @@ struct {
     { "string?", compile_string_q },
     { "symbol?", compile_symbol_q },
     { "write", compile_write },
+    { "write-char", compile_write_char },
     { "+", compile_add },
     { "-", compile_sub },
     { "*", compile_mul },
@@ -2380,6 +2381,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "            value (*read_char)(value port);\n");
     fprintf(fp, "            value (*peek_char)(value port);\n");
     fprintf(fp, "            value (*read_line)(value port);\n");
+    fprintf(fp, "            void (*write_char)(value port, value ch);\n");
     fprintf(fp, "            void (*printf)(value port, const char *fmt, ...);\n");
     fprintf(fp, "        } port;\n");
     fprintf(fp, "    };\n");
@@ -2555,6 +2557,14 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
     fprintf(fp, "    ungetc(ch, fp);\n");
     fprintf(fp, "    return CHAR(ch);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void file_write_char(value port, value ch) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"port not open for writing\") }");
+    fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
+    fprintf(fp, "    int ret = putc(GET_CHAR(ch), fp);\n");
+    fprintf(fp, "    if (ret == EOF) { RAISE(\"error writing to file: %%s\", strerror(errno)); }\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static void file_printf(value port, const char *fmt, ...) {\n");
@@ -2901,14 +2911,14 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    current_output_port.port.direction = PORT_DIR_WRITE;\n");
     fprintf(fp, "    current_output_port.port.fp = stdout;\n");
     fprintf(fp, "    current_output_port.port.printf = file_printf;\n");
-    /* add write_char, etc here */
+    fprintf(fp, "    current_output_port.port.write_char = file_write_char;\n");
     fprintf(fp, "\n");
 
     fprintf(fp, "    current_error_port.type = OBJ_PORT;\n");
     fprintf(fp, "    current_error_port.port.direction = PORT_DIR_WRITE;\n");
     fprintf(fp, "    current_error_port.port.fp = stderr;\n");
     fprintf(fp, "    current_error_port.port.printf = file_printf;\n");
-    /* add write_char, etc here */
+    fprintf(fp, "    current_error_port.port.write_char = file_write_char;\n");
     fprintf(fp, "\n");
 
     fprintf(fp, "    %s(NULL, 0);\n", startup_func->name);
