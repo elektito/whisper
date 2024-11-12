@@ -492,6 +492,36 @@ read_value(struct reader *reader)
                 reader->value.character = ' ';
             } else if (reader->value.identifier.interned == reader->id_char_tab) {
                 reader->value.character = '\t';
+            } else if (reader->value.identifier.name_len == 5 && reader->value.identifier.name[2] == 'x') {
+                char first_digit = reader->value.identifier.name[3];
+                char second_digit = reader->value.identifier.name[4];
+                int first_digit_value, second_digit_value;
+                if (first_digit >= '0' && first_digit <= '9') {
+                    first_digit_value = first_digit - '0';
+                } else if (first_digit >= 'a' && first_digit <= 'z') {
+                    first_digit_value = first_digit - 'a' + 10;
+                } else if (first_digit >= 'A' && first_digit <= 'Z') {
+                    first_digit_value = first_digit - 'A' + 10;
+                } else {
+                    fprintf(stderr, "invalid character literal\n");
+                    exit(1);
+                }
+
+                if (second_digit >= '0' && second_digit <= '9') {
+                    second_digit_value = second_digit - '0';
+                } else if (second_digit >= 'a' && second_digit <= 'z') {
+                    second_digit_value = second_digit - 'a' + 10;
+                } else if (second_digit >= 'A' && second_digit <= 'Z') {
+                    second_digit_value = second_digit - 'A' + 10;
+                } else {
+                    fprintf(stderr, "invalid character literal\n");
+                    exit(1);
+                }
+
+                reader->value.character = (char)(first_digit_value * 16 + second_digit_value);
+            } else {
+                fprintf(stderr, "invalid character literal\n");
+                exit(1);
             }
         } else {
             reader->value.type = VAL_ID;
