@@ -1838,17 +1838,19 @@ compile_read_line(struct function *func, int indent, struct value *form)
 int
 compile_read_char(struct function *func, int indent, struct value *form)
 {
+    if (form->list.length != 1 && form->list.length != 2) {
+        fprintf(stderr, "read-char needs zero or one arguments\n");
+        exit(1);
+    }
+
+    int port_varnum;
     if (form->list.length == 1) {
-        fprintf(stderr, "no-argument form of read-char not yet supported\n");
-        exit(1);
+        port_varnum = func->varnum++;
+        gen_code(func, indent, "value x%d = OBJECT(&current_input_port);\n", port_varnum);
+    } else {
+        port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     }
 
-    if (form->list.length != 2) {
-        fprintf(stderr, "read-port needs a single argument\n");
-        exit(1);
-    }
-
-    int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
     gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.read_char(x%d);\n", ret_varnum, port_varnum, port_varnum);
 
@@ -1858,19 +1860,46 @@ compile_read_char(struct function *func, int indent, struct value *form)
 int
 compile_peek_char(struct function *func, int indent, struct value *form)
 {
+    if (form->list.length != 1 && form->list.length != 2) {
+        fprintf(stderr, "peek-char needs zero or one arguments\n");
+        exit(1);
+    }
+
+    int port_varnum;
     if (form->list.length == 1) {
-        fprintf(stderr, "no-argument form of peek-char not yet supported\n");
-        exit(1);
+        port_varnum = func->varnum++;
+        gen_code(func, indent, "value x%d = OBJECT(&current_input_port);\n", port_varnum);
+    } else {
+        port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     }
 
-    if (form->list.length != 2) {
-        fprintf(stderr, "peek-port needs a single argument\n");
-        exit(1);
-    }
-
-    int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
     int ret_varnum = func->varnum++;
     gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.peek_char(x%d);\n", ret_varnum, port_varnum, port_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_write_char(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 2 && form->list.length != 3) {
+        fprintf(stderr, "write-char needs one or two arguments\n");
+        exit(1);
+    }
+
+    int char_varnum = compile_form(func, indent, &form->list.ptr[1]);
+
+    int port_varnum;
+    if (form->list.length == 2) {
+        port_varnum = func->varnum++;
+        gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", port_varnum);
+    } else {
+        port_varnum = compile_form(func, indent, &form->list.ptr[2]);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "GET_OBJECT(x%d)->port.write_char(x%d, x%d);\n", port_varnum, port_varnum, char_varnum);
+    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
 
     return ret_varnum;
 }
