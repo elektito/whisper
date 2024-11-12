@@ -1323,15 +1323,23 @@ compile_call(struct function *func, int indent, struct value *form)
 int
 compile_display(struct function *func, int indent, struct value *form)
 {
-    if (form->list.length != 2) {
-        fprintf(stderr, "display expects a single argument\n");
+    if (form->list.length != 2 && form->list.length != 3) {
+        fprintf(stderr, "display expects one or two arguments\n");
         exit(1);
     }
 
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    int value_varnum = compile_form(func, indent, &form->list.ptr[1]);
+
+    int port_varnum;
+    if (form->list.length == 2) {
+        port_varnum = func->varnum++;
+        gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", port_varnum);
+    } else {
+        port_varnum = compile_form(func, indent, &form->list.ptr[2]);
+    }
 
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = display(x%d);\n", ret_varnum, arg_varnum);
+    gen_code(func, indent, "value x%d = display(x%d, x%d);\n", ret_varnum, value_varnum, port_varnum);
 
     return ret_varnum;
 }
@@ -1662,6 +1670,48 @@ compile_eq_q(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_current_input_port(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 1) {
+        fprintf(stderr, "current-input-port accepts no arguments\n");
+        exit(1);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = OBJECT(&current_input_port);\n", ret_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_current_output_port(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 1) {
+        fprintf(stderr, "current-output-port accepts no arguments\n");
+        exit(1);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", ret_varnum);
+
+    return ret_varnum;
+}
+
+int
+compile_current_error_port(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length != 1) {
+        fprintf(stderr, "current-error-port accepts no arguments\n");
+        exit(1);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = OBJECT(&current_error_port);\n", ret_varnum);
+
+    return ret_varnum;
+}
+
+int
 compile_open_input_file(struct function *func, int indent, struct value *form)
 {
     if (form->list.length != 2) {
@@ -1673,20 +1723,6 @@ compile_open_input_file(struct function *func, int indent, struct value *form)
     gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"open-input-file argument must be string\"); }\n", arg_varnum);
     int ret_varnum = func->varnum++;
     gen_code(func, indent, "value x%d = open_input_file(x%d);\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_open_output_string(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "open-output-string accepts no arguments\n");
-        exit(1);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = create_output_string_port();\n", ret_varnum);
 
     return ret_varnum;
 }
@@ -2016,6 +2052,9 @@ struct {
     { "cdr", compile_cdr },
     { "close-port", compile_close_port },
     { "cons", compile_cons },
+    { "current-input-port", compile_current_input_port },
+    { "current-output-port", compile_current_output_port },
+    { "current-error-port", compile_current_error_port },
     { "display", compile_display },
     { "eof-object?", compile_eof_object_q },
     { "eq?", compile_eq_q },
@@ -2242,6 +2281,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "            value (*read_char)(value port);\n");
     fprintf(fp, "            value (*peek_char)(value port);\n");
     fprintf(fp, "            value (*read_line)(value port);\n");
+    fprintf(fp, "            void (*printf)(value port, const char *fmt, ...);\n");
     fprintf(fp, "        } port;\n");
     fprintf(fp, "    };\n");
     fprintf(fp, "};\n");
@@ -2316,6 +2356,11 @@ compile_program(struct compiler *compiler)
                 compiler->reader->interned_mangled[compiler->symbols[i]],
                 i);
     }
+    fprintf(fp, "\n");
+
+    fprintf(fp, "static struct object current_input_port;\n");
+    fprintf(fp, "static struct object current_output_port;\n");
+    fprintf(fp, "static struct object current_error_port;\n");
     fprintf(fp, "\n");
 
     fprintf(fp, "static void cleanup(void) {}\n");
@@ -2413,13 +2458,23 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return CHAR(ch);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static void file_printf(value port, const char *fmt, ...) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"port not open for writing\") }");
+    fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, fmt);\n");
+    fprintf(fp, "    vfprintf(fp, fmt, args);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value open_input_file(value filename) {\n");
     fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
     fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
     fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
     fprintf(fp, "    FILE *fp = fopen(filenamez, \"r\");\n");
     fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
-    fprintf(fp, "    struct object *obj = malloc(sizeof(struct object));\n");
+    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
     fprintf(fp, "    obj->type = OBJ_PORT;");
     fprintf(fp, "    obj->port.direction = PORT_DIR_READ;\n");
     fprintf(fp, "    obj->port.fp = fp;\n");
@@ -2429,47 +2484,52 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return OBJECT(obj);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value display(value v);\n");
-    fprintf(fp, "static void display_pair(struct pair *v, int in_the_middle) {\n");
-    fprintf(fp, "    if (!in_the_middle) printf(\"(\");\n");
-    fprintf(fp, "    display(v->car);\n");
+    fprintf(fp, "static void _display(value v, value port);\n");
+    fprintf(fp, "static void _display_pair(struct pair *v, value port, int in_the_middle) {\n");
+    fprintf(fp, "    if (!in_the_middle) GET_OBJECT(port)->port.printf(port, \"(\");\n");
+    fprintf(fp, "    _display(v->car, port);\n");
     fprintf(fp, "    if (IS_NIL(v->cdr)) {\n");
-    fprintf(fp, "        printf(\")\");\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \")\");\n");
     fprintf(fp, "    } else if (IS_PAIR(v->cdr)) {\n");
-    fprintf(fp, "        printf(\" \");\n");
-    fprintf(fp, "        display_pair(GET_PAIR(v->cdr), 1);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \" \");\n");
+    fprintf(fp, "        _display_pair(GET_PAIR(v->cdr), port, 1);\n");
     fprintf(fp, "    } else {\n");
-    fprintf(fp, "        printf(\" . \");\n");
-    fprintf(fp, "        display(v->cdr);\n");
-    fprintf(fp, "        printf(\")\");\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \" . \");\n");
+    fprintf(fp, "        _display(v->cdr, port);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \")\");\n");
     fprintf(fp, "    }\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value display(value v) {\n");
+    fprintf(fp, "static void _display(value v, value port) {\n");
     fprintf(fp, "    if (IS_FIXNUM(v)) {\n");
-    fprintf(fp, "        printf(\"%%ld\", GET_FIXNUM(v));\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%ld\", GET_FIXNUM(v));\n");
     fprintf(fp, "    } else if (IS_STRING(v)) {\n");
-    fprintf(fp, "        printf(\"%%.*s\", (int) GET_STRING(v)->len, GET_STRING(v)->s);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%.*s\", (int) GET_STRING(v)->len, GET_STRING(v)->s);\n");
     fprintf(fp, "    } else if (IS_SYMBOL(v)) {\n");
-    fprintf(fp, "        printf(\"%%.*s\", (int) symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%.*s\", (int) symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);\n");
     fprintf(fp, "    } else if (IS_BOOL(v)) {\n");
-    fprintf(fp, "        printf(\"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%s\", GET_BOOL(v) ? \"#t\" : \"#f\");\n");
     fprintf(fp, "    } else if (IS_VOID(v)) {\n");
-    fprintf(fp, "        printf(\"#<void>\");\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<void>\");\n");
     fprintf(fp, "    } else if (IS_CHAR(v)) {\n");
-    fprintf(fp, "        printf(\"%%c\", GET_CHAR(v));\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"%%c\", GET_CHAR(v));\n");
     fprintf(fp, "    } else if (IS_NIL(v)) {\n");
-    fprintf(fp, "        printf(\"()\");\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"()\");\n");
     fprintf(fp, "    } else if (IS_PAIR(v)) {\n");
-    fprintf(fp, "        display_pair(GET_PAIR(v), 0);\n");
+    fprintf(fp, "        _display_pair(GET_PAIR(v), port, 0);\n");
     fprintf(fp, "    } else if (IS_CLOSURE(v)) {\n");
-    fprintf(fp, "        printf(\"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<procedure-%%d>\", GET_CLOSURE(v)->n_args);\n");
     fprintf(fp, "    } else if (IS_EOFOBJ(v)) {\n");
-    fprintf(fp, "        printf(\"#<eof-object>\");\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<eof-object>\");\n");
     fprintf(fp, "    } else {\n");
-    fprintf(fp, "        printf(\"#<object-%%p>\", v);\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
+    fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value display(value v, value port) {\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"writing to non-output port\"); }\n");
+    fprintf(fp, "    _display(v, port);\n");
     fprintf(fp, "    return VOID;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
@@ -2583,6 +2643,28 @@ compile_program(struct compiler *compiler)
                 compiler->reader->interned_name[compiler->symbols[i]]);
         fprintf(fp, "    symbols[%d].name_len = %d;\n", i, compiler->reader->interned_name_len[compiler->symbols[i]]);
     }
+    fprintf(fp, "\n");
+
+    fprintf(fp, "    current_input_port.type = OBJ_PORT;\n");
+    fprintf(fp, "    current_input_port.port.direction = PORT_DIR_READ;\n");
+    fprintf(fp, "    current_input_port.port.fp = stdin;\n");
+    fprintf(fp, "    current_input_port.port.read_char = file_read_char;\n");
+    fprintf(fp, "    current_input_port.port.peek_char = file_peek_char;\n");
+    fprintf(fp, "    current_input_port.port.read_line = file_read_line;\n");
+    fprintf(fp, "\n");
+
+    fprintf(fp, "    current_output_port.type = OBJ_PORT;\n");
+    fprintf(fp, "    current_output_port.port.direction = PORT_DIR_WRITE;\n");
+    fprintf(fp, "    current_output_port.port.fp = stdout;\n");
+    fprintf(fp, "    current_output_port.port.printf = file_printf;\n");
+    /* add write_char, etc here */
+    fprintf(fp, "\n");
+
+    fprintf(fp, "    current_error_port.type = OBJ_PORT;\n");
+    fprintf(fp, "    current_error_port.port.direction = PORT_DIR_WRITE;\n");
+    fprintf(fp, "    current_error_port.port.fp = stderr;\n");
+    fprintf(fp, "    current_error_port.port.printf = file_printf;\n");
+    /* add write_char, etc here */
     fprintf(fp, "\n");
 
     fprintf(fp, "    %s(NULL, 0);\n", startup_func->name);
