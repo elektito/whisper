@@ -689,6 +689,9 @@ compile_bool(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_primcall_name(struct function *func, int indent, struct value *form);
+
+int
 compile_identifier(struct function *func, int indent, struct value *form)
 {
     int found = 0;
@@ -725,6 +728,16 @@ compile_identifier(struct function *func, int indent, struct value *form)
         }
 
         if (!found || parent->parent == NULL) {
+            if (!found) {
+                /* if not found in any parent (i.e. not even in
+                 * top-level), first check to see if its a primcall
+                 * name */
+                int primcall_varnum = compile_primcall_name(func, indent, form);
+                if (primcall_varnum > -1) {
+                    return primcall_varnum;
+                }
+            }
+
             /* it's a global variable */
             gen_code(func, indent, "value x%d = %.*s;\n", varnum,
                      func->compiler->reader->interned_mangled_len[form->identifier.interned],
@@ -1586,6 +1599,23 @@ compile_primcall(struct function *func, int indent, struct value *form)
 
             free(arg_varnums);
 
+            return ret_varnum;
+        }
+    }
+
+    return -1;
+}
+
+int
+compile_primcall_name(struct function *func, int indent, struct value *form)
+{
+    for (int i = 0; i < sizeof(primcalls) / sizeof(primcalls[0]); ++i) {
+        int len = strlen(primcalls[i].name);
+        if (form->identifier.name_len == len &&
+            memcmp(form->identifier.name, primcalls[i].name, len) == 0)
+        {
+            int ret_varnum = func->varnum++;
+            gen_code(func, indent, "value x%d = make_closure(primcall_%s, 0, 0);", ret_varnum, primcalls[i].name);
             return ret_varnum;
         }
     }
