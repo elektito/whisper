@@ -1641,6 +1641,7 @@ struct {
     { "eq?", "eq_q", 2, 2 },
     { "input-port?", "input_port_q", 1, 1 },
     { "make-string", "make_string", 1, 2 },
+    { "newline", "newline", 0, 1 },
     { "number?", "number_q", 1, 1 },
     { "number->string", "number_to_string", 1, 2 },
     { "open-input-file", "open_input_file", 1, 1 },
@@ -2473,6 +2474,17 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"make-string first argument should be a number\"); }\n");
     fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"make-string second argument should be a character\"); }\n");
     fprintf(fp, "    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_newline(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0 && nargs != 1) { RAISE(\"newline needs zero or one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_output_port);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"newline argument is not an output port\"); }\n");
+    fprintf(fp, "    GET_OBJECT(port)->port.write_char(port, CHAR('\\n'));\n");
+    fprintf(fp, "    return VOID;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_number_q(environment env, int nargs, ...) {\n");
