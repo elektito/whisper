@@ -1529,6 +1529,7 @@ struct {
     { "eq?", "eq_q", 2, 2 },
     { "input-port?", "input_port_q", 1, 1 },
     { "make-string", "make_string", 1, 2 },
+    { "number->string", "number_to_string", 1, 2 },
     { "open-input-file", "open_input_file", 1, 1 },
     { "open-output-file", "open_output_file", 1, 1 },
     { "peek-char", "peek_char", 0, 1 },
@@ -2322,6 +2323,34 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"make-string first argument should be a number\"); }\n");
     fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"make-string second argument should be a character\"); }\n");
     fprintf(fp, "    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_number_to_string(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1 && nargs != 2) { RAISE(\"number->string needs one or two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    value base = nargs == 1 ? FIXNUM(10) : va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"number->string first argument should be a number\"); }\n");
+    fprintf(fp, "    if (!IS_FIXNUM(base)) { RAISE(\"number->string second argument should be a number\"); }\n");
+    fprintf(fp, "    char buf[128];\n");
+    fprintf(fp, "    int start = 0;\n");
+    fprintf(fp, "    int64_t m = GET_FIXNUM(n);\n");
+    fprintf(fp, "    if (m < 0) { buf[0] = '-'; start = 1; m = -m; }\n");
+    fprintf(fp, "    if (base == FIXNUM(10))\n");
+    fprintf(fp, "        snprintf(buf + start, sizeof(buf), \"%%ld\", m);\n");
+    fprintf(fp, "    else if (base == FIXNUM(16))\n");
+    fprintf(fp, "        snprintf(buf + start, sizeof(buf), \"%%lx\", m);\n");
+    fprintf(fp, "    else if (base == FIXNUM(8))\n");
+    fprintf(fp, "        snprintf(buf + start, sizeof(buf), \"%%lo\", m);\n");
+    fprintf(fp, "    else if (base == FIXNUM(2)) {\n");
+    fprintf(fp, "        while (m >= 2) { buf[start++] = '0' + (m %% 2); m /= 2; }\n");
+    fprintf(fp, "        buf[start++] = '0' + m;\n");
+    fprintf(fp, "        buf[start] = 0;\n");
+    fprintf(fp, "    } else\n");
+    fprintf(fp, "        RAISE(\"radix not supported by number->string\");\n");
+    fprintf(fp, "    return make_string(buf, strlen(buf));\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_open_input_file(environment env, int nargs, ...) {\n");
