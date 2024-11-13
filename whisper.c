@@ -1559,6 +1559,7 @@ struct {
     { "port?", "port_q", 1, 1 },
     { "read-char", "read_char", 0, 1 },
     { "read-line", "read_line", 0, 1 },
+    { "string-copy", "string_copy", 1, 3 },
     { "string->number", "string_to_number", 1, 2 },
     { "string->symbol", "string_to_symbol", 1, 1 },
     { "string-append", "string_append", 0, -1 },
@@ -1566,6 +1567,7 @@ struct {
     { "string-ref", "string_ref", 2, 2 },
     { "string=?", "string_eq_q", 1, -1 },
     { "string?", "string_q", 1, 1 },
+    { "substring", "substring", 3, 3 },
     { "symbol?", "symbol_q", 1, 1 },
     { "write", "write", 1, 2 },
     { "write-char", "write_char", 1, 2 },
@@ -2526,6 +2528,26 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return STRING(concat);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_copy(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs > 3) { RAISE(\"string-copy needs at most three arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value str = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_STRING(str)) { RAISE(\"string-copy first argument is not a string\"); }\n");
+    fprintf(fp, "    value start = nargs > 1 ? va_arg(args, value) : FIXNUM(0);\n");
+    fprintf(fp, "    value end = nargs > 2 ? va_arg(args, value) : FIXNUM(GET_STRING(str)->len);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(start)) { RAISE(\"string-copy second argument is not a number\"); }\n");
+    fprintf(fp, "    if (!IS_FIXNUM(end)) { RAISE(\"string-copy third argument is not a number\"); }\n");
+    fprintf(fp, "    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE(\"string-copy start index is out of range\"); }\n");
+    fprintf(fp, "    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE(\"string-copy end index is out of range\"); }\n");
+    fprintf(fp, "    struct string *result = calloc(1, sizeof(struct string));\n");
+    fprintf(fp, "    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);\n");
+    fprintf(fp, "    result->s = malloc(result->len);\n");
+    fprintf(fp, "    memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);\n");
+    fprintf(fp, "    return STRING(result);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value primcall_string_length(environment env, int nargs, ...) {\n");
     fprintf(fp, "    if (nargs != 1) { RAISE(\"string-length needs a single argument\"); }\n");
     fprintf(fp, "    va_list args;\n");
@@ -2575,6 +2597,26 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    value v = va_arg(args, value);");
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "    return BOOL(IS_STRING(v));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_substring(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 3) { RAISE(\"substring needs three arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value str = va_arg(args, value);\n");
+    fprintf(fp, "    value start = va_arg(args, value);\n");
+    fprintf(fp, "    value end = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(str)) { RAISE(\"substring first argument is not a string\"); }\n");
+    fprintf(fp, "    if (!IS_FIXNUM(start)) { RAISE(\"substring second argument is not a number\"); }\n");
+    fprintf(fp, "    if (!IS_FIXNUM(end)) { RAISE(\"substring third argument is not a number\"); }\n");
+    fprintf(fp, "    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE(\"substring start index is out of range\"); }\n");
+    fprintf(fp, "    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE(\"substring end index is out of range\"); }\n");
+    fprintf(fp, "    struct string *result = calloc(1, sizeof(struct string));\n");
+    fprintf(fp, "    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);\n");
+    fprintf(fp, "    result->s = malloc(result->len);\n");
+    fprintf(fp, "    memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);\n");
+    fprintf(fp, "    return STRING(result);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_symbol_q(environment env, int nargs, ...) {\n");
