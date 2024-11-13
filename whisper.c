@@ -1631,6 +1631,7 @@ struct {
     { "cdr", "cdr", 1, 1 },
     { "char-downcase", "char_downcase", 1, 1 },
     { "char-upcase", "char_upcase", 1, 1 },
+    { "char->integer", "char_to_integer", 1, 1 },
     { "close-port", "close_port", 1, 1 },
     { "cons", "cons", 2, 2 },
     { "current-input-port", "current_input_port", 0, 0 },
@@ -1640,6 +1641,7 @@ struct {
     { "eof-object?", "eof_object_q", 1, 1 },
     { "eq?", "eq_q", 2, 2 },
     { "input-port?", "input_port_q", 1, 1 },
+    { "integer->char", "integer_to_char", 1, 1 },
     { "make-string", "make_string", 1, 2 },
     { "newline", "newline", 0, 1 },
     { "number?", "number_q", 1, 1 },
@@ -2385,6 +2387,16 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return GET_CHAR(ch) >= 'a' && GET_CHAR(ch) <= 'z' ? CHAR(GET_CHAR(ch) - 'a' + 'A') : ch;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_char_to_integer(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"char->integer needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value ch = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"char->integer argument is not a char\") }\n");
+    fprintf(fp, "    return FIXNUM((int) GET_CHAR(ch));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value primcall_close_port(environment env, int nargs, ...) {\n");
     fprintf(fp, "    va_list args;\n");
     fprintf(fp, "    va_start(args, nargs);\n");
@@ -2462,6 +2474,17 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    value v = va_arg(args, value);\n");
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_READ);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_integer_to_char(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"integer->char needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"integer->char argument is not a number\") }\n");
+    fprintf(fp, "    if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { RAISE(\"integer->char argument is out of range\") }\n");
+    fprintf(fp, "    return CHAR((char) GET_FIXNUM(n));\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_make_string(environment env, int nargs, ...) {\n");
