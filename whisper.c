@@ -1629,6 +1629,8 @@ struct {
 } primcalls[] = {
     { "car", "car", 1, 1 },
     { "cdr", "cdr", 1, 1 },
+    { "char-downcase", "char_downcase", 1, 1 },
+    { "char-upcase", "char_upcase", 1, 1 },
     { "close-port", "close_port", 1, 1 },
     { "cons", "cons", 2, 2 },
     { "current-input-port", "current_input_port", 0, 0 },
@@ -2360,6 +2362,26 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "    if (!IS_PAIR(arg)) { RAISE(\"cdr argument is not a pair\") }\n");
     fprintf(fp, "    return GET_PAIR(arg)->cdr;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_char_downcase(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"char-downcase needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value ch = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"char-downcase argument is not a char\") }\n");
+    fprintf(fp, "    return GET_CHAR(ch) >= 'A' && GET_CHAR(ch) <= 'Z' ? CHAR(GET_CHAR(ch) - 'A' + 'a') : ch;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_char_upcase(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"char-upcase needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value ch = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"char-upcase argument is not a char\") }\n");
+    fprintf(fp, "    return GET_CHAR(ch) >= 'a' && GET_CHAR(ch) <= 'z' ? CHAR(GET_CHAR(ch) - 'a' + 'A') : ch;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_close_port(environment env, int nargs, ...) {\n");
