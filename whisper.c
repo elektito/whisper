@@ -1216,6 +1216,7 @@ compile_define(struct function *func, int indent, struct value *form)
         int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
         char *mangled_str = func->compiler->reader->interned_mangled[var_name];
         func->n_params++;
+        func->params = realloc(func->params, func->n_params * sizeof(interned_string));
         func->params[func->n_params - 1] = var_name;
 
         if (form->list.length == 2) {
