@@ -1551,6 +1551,11 @@ struct {
     { "-", "sub", 1, -1 },
     { "*", "mul", 0, -1 },
     { "/", "div", 1, -1 },
+    { "=", "num_eq", 1, -1 },
+    { "<", "num_lt", 1, -1 },
+    { ">", "num_gt", 1, -1 },
+    { "<=", "num_le", 1, -1 },
+    { ">=", "num_ge", 1, -1 },
 };
 
 int
@@ -2642,6 +2647,76 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        result -= (int64_t) v;\n");
     fprintf(fp, "    }\n");
     fprintf(fp, "    return result;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_num_eq(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\"= needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"= argument is not a number\"); }\n");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value m = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(m)) { RAISE(\"= argument is not a number\") }\n");
+    fprintf(fp, "        if (n != m) return FALSE;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return TRUE;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_num_lt(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\"< needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"< argument is not a number\"); }\n");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value m = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(m)) { RAISE(\"< argument is not a number\") }\n");
+    fprintf(fp, "        if (n >= m) return FALSE;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return TRUE;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_num_gt(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\"> needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"> argument is not a number\"); }\n");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value m = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(m)) { RAISE(\"> argument is not a number\") }\n");
+    fprintf(fp, "        if (n <= m) return FALSE;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return TRUE;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_num_le(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\"<= needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"<= argument is not a number\"); }\n");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value m = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(m)) { RAISE(\"<= argument is not a number\") }\n");
+    fprintf(fp, "        if (n > m) return FALSE;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return TRUE;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_num_ge(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\">= needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\">= argument is not a number\"); }\n");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value m = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(m)) { RAISE(\">= argument is not a number\") }\n");
+    fprintf(fp, "        if (n < m) return FALSE;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return TRUE;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
