@@ -847,168 +847,6 @@ compile_char(struct function *func, int indent, struct value *form)
 }
 
 int
-compile_car(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "car expects a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_PAIR(x%d)) { RAISE(\"car argument is not a pair\") }\n", arg_varnum);
-
-    int dst_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_PAIR(x%d)->car;\n", dst_varnum, arg_varnum);
-    return dst_varnum;
-}
-
-int
-compile_cdr(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "cdr expects a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_PAIR(x%d)) { RAISE(\"cdr argument is not a pair\") }\n", arg_varnum);
-
-    int dst_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_PAIR(x%d)->cdr;\n", dst_varnum, arg_varnum);
-    return dst_varnum;
-}
-
-int
-compile_cons(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 3) {
-        fprintf(stderr, "cons expects a two arguments\n");
-        exit(1);
-    }
-
-    int car_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int cdr_varnum = compile_form(func, indent, &form->list.ptr[2]);
-    int dst_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = make_pair(x%d, x%d);\n", dst_varnum, car_varnum, cdr_varnum);
-    return dst_varnum;
-}
-
-int
-compile_add(struct function *func, int indent, struct value *form)
-{
-    int dst_varnum;
-    int arg_varnum;
-
-    if (form->list.length == 1) {
-        dst_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = FIXNUM(0);\n", dst_varnum);
-        return dst_varnum;
-    }
-
-    arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    dst_varnum = arg_varnum;
-    for (int i = 2; i < form->list.length; ++i) {
-        dst_varnum = compile_form(func, indent, &form->list.ptr[i]);
-        gen_code(func, indent, "x%d += (int64_t) x%d;\n", dst_varnum, arg_varnum);
-        arg_varnum = dst_varnum;
-    }
-
-    return dst_varnum;
-}
-
-int
-compile_sub(struct function *func, int indent, struct value *form)
-{
-    int dst_varnum;
-    int arg_varnum;
-
-    if (form->list.length == 1) {
-        fprintf(stderr, "subtraction needs at least one argument\n");
-        exit(1);
-    }
-
-    if (form->list.length == 2) {
-        arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-        dst_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = FIXNUM(-GET_FIXNUM(x%d));\n", dst_varnum, arg_varnum);
-        return dst_varnum;
-    }
-
-    dst_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    for (int i = 2; i < form->list.length; ++i) {
-        arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
-        gen_code(func, indent, "x%d -= (int64_t) x%d;\n", dst_varnum, arg_varnum);
-        arg_varnum = dst_varnum;
-    }
-
-    return dst_varnum;
-}
-
-int
-compile_mul(struct function *func, int indent, struct value *form)
-{
-    int int_varnum;
-    int arg_varnum;
-    int ret_varnum;
-
-    if (form->list.length == 1) {
-        ret_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = FIXNUM(1);\n", ret_varnum);
-        return ret_varnum;
-    }
-
-    arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int_varnum = func->varnum++;
-    gen_code(func, indent, "int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
-
-    for (int i = 2; i < form->list.length; ++i) {
-        arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
-        gen_code(func, indent, "x%d *= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
-    }
-
-    ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_div(struct function *func, int indent, struct value *form)
-{
-    int int_varnum;
-    int arg_varnum;
-    int ret_varnum;
-
-    if (form->list.length == 1) {
-        fprintf(stderr, "malformed division\n");
-        exit(1);
-    }
-
-    if (form->list.length == 2) {
-        arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-        int_varnum = func->varnum++;
-        gen_code(func, indent, "int64_t x%d = 1 / GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
-        ret_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
-        return ret_varnum;
-    }
-
-    arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int_varnum = func->varnum++;
-    gen_code(func, indent, "int64_t x%d = GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
-
-    for (int i = 2; i < form->list.length; ++i) {
-        arg_varnum = compile_form(func, indent, &form->list.ptr[i]);
-        gen_code(func, indent, "x%d /= GET_FIXNUM(x%d);\n", int_varnum, arg_varnum);
-    }
-
-    ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = FIXNUM(x%d);\n", ret_varnum, int_varnum);
-
-    return ret_varnum;
-}
-
-int
 compile_function(struct function *func, int indent, struct value *form,
                  int is_define)
 {
@@ -1351,54 +1189,6 @@ compile_call(struct function *func, int indent, struct value *form)
 }
 
 int
-compile_display(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "display expects one or two arguments\n");
-        exit(1);
-    }
-
-    int value_varnum = compile_form(func, indent, &form->list.ptr[1]);
-
-    int port_varnum;
-    if (form->list.length == 2) {
-        port_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", port_varnum);
-    } else {
-        port_varnum = compile_form(func, indent, &form->list.ptr[2]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = display(x%d, x%d);\n", ret_varnum, value_varnum, port_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_write(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "write expects one or two arguments\n");
-        exit(1);
-    }
-
-    int value_varnum = compile_form(func, indent, &form->list.ptr[1]);
-
-    int port_varnum;
-    if (form->list.length == 2) {
-        port_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", port_varnum);
-    } else {
-        port_varnum = compile_form(func, indent, &form->list.ptr[2]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = write(x%d, x%d);\n", ret_varnum, value_varnum, port_varnum);
-
-    return ret_varnum;
-}
-
-int
 compile_define(struct function *func, int indent, struct value *form)
 {
     int varnum;
@@ -1708,475 +1498,44 @@ compile_quote(struct function *func, int indent, struct value *form)
     return compile_quoted_item(func, indent, &form->list.ptr[1]);
 }
 
-int
-compile_eq_q(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 3) {
-        fprintf(stderr, "malformed eq?\n");
-        exit(1);
-    }
-
-    int arg1_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int arg2_varnum = compile_form(func, indent, &form->list.ptr[2]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(x%d == x%d);\n", ret_varnum, arg1_varnum, arg2_varnum);
-    return ret_varnum;
-}
-
-int
-compile_current_input_port(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 1) {
-        fprintf(stderr, "current-input-port accepts no arguments\n");
-        exit(1);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = OBJECT(&current_input_port);\n", ret_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_current_output_port(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 1) {
-        fprintf(stderr, "current-output-port accepts no arguments\n");
-        exit(1);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", ret_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_current_error_port(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 1) {
-        fprintf(stderr, "current-error-port accepts no arguments\n");
-        exit(1);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = OBJECT(&current_error_port);\n", ret_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_open_input_file(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "open-input-file needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = open_input_file(x%d);\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_open_output_file(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "open-output-file needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = open_output_file(x%d);\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_close_port(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "close-port needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int port_varnum = func->varnum++;
-    gen_code(func, indent, "struct object *x%d = GET_OBJECT(x%d);\n", port_varnum, arg_varnum);
-    int close_varnum = func->varnum++;
-    gen_code(func, indent, "int x%d = fclose(x%d->port.fp);\n", close_varnum, port_varnum);
-    gen_code(func, indent, "if (x%d) { RAISE(\"failed to close the port\"); }\n", close_varnum);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_read_line(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length == 1) {
-        fprintf(stderr, "no-argument form of read-line not yet supported\n");
-        exit(1);
-    }
-
-    if (form->list.length != 2) {
-        fprintf(stderr, "read-port needs a single argument\n");
-        exit(1);
-    }
-
-    int port_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.read_line(x%d);\n", ret_varnum, port_varnum, port_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_read_char(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 1 && form->list.length != 2) {
-        fprintf(stderr, "read-char needs zero or one arguments\n");
-        exit(1);
-    }
-
-    int port_varnum;
-    if (form->list.length == 1) {
-        port_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = OBJECT(&current_input_port);\n", port_varnum);
-    } else {
-        port_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.read_char(x%d);\n", ret_varnum, port_varnum, port_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_peek_char(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 1 && form->list.length != 2) {
-        fprintf(stderr, "peek-char needs zero or one arguments\n");
-        exit(1);
-    }
-
-    int port_varnum;
-    if (form->list.length == 1) {
-        port_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = OBJECT(&current_input_port);\n", port_varnum);
-    } else {
-        port_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_OBJECT(x%d)->port.peek_char(x%d);\n", ret_varnum, port_varnum, port_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_write_char(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "write-char needs one or two arguments\n");
-        exit(1);
-    }
-
-    int char_varnum = compile_form(func, indent, &form->list.ptr[1]);
-
-    int port_varnum;
-    if (form->list.length == 2) {
-        port_varnum = func->varnum++;
-        gen_code(func, indent, "value x%d = OBJECT(&current_output_port);\n", port_varnum);
-    } else {
-        port_varnum = compile_form(func, indent, &form->list.ptr[2]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "GET_OBJECT(x%d)->port.write_char(x%d, x%d);\n", port_varnum, port_varnum, char_varnum);
-    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_port_q(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "port? needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(IS_PORT(x%d));\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_input_port_q(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "input-port? needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(IS_PORT(x%d) && GET_OBJECT(x%d)->port.input);\n", ret_varnum, arg_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_eof_object_q(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "eof-object? needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(IS_EOFOBJ(x%d));\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_string_to_symbol(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "string->symbol needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string->symbol argument not a string\"); };\n", arg_varnum);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = string_to_symbol(x%d);\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_string_q(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "string? needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(IS_STRING(x%d));\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_string_append(struct function *func, int indent, struct value *form)
-{
-    int n_strings = form->list.length - 1;
-    int *arg_varnums = malloc(sizeof(int) * n_strings);
-    for (int i = 0; i < n_strings; ++i) {
-        arg_varnums[i] = compile_form(func, indent, &form->list.ptr[i + 1]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = string_append(%d", ret_varnum, n_strings);
-    for (int i = 0; i < n_strings; ++i) {
-        gen_code(func, 0, ", x%d", arg_varnums[i]);
-    }
-    gen_code(func, 0, ");\n");
-
-    free(arg_varnums);
-
-    return ret_varnum;
-}
-
-int
-compile_string_length(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "invalid number of arguments for string-length\n");
-        exit(1);
-    }
-
-    int str_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string-length argument is not a string\"); }\n", str_varnum);
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = FIXNUM(GET_STRING(x%d)->len);\n", ret_varnum, str_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_string_ref(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 3) {
-        fprintf(stderr, "invalid number of arguments for string-ref\n");
-        exit(1);
-    }
-
-    int str_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string-ref first argument is not a string\"); }\n", str_varnum);
-
-    int idx_varnum = compile_form(func, indent, &form->list.ptr[2]);
-    gen_code(func, indent, "if (!IS_FIXNUM(x%d)) { RAISE(\"string-ref second argument is not a number\"); }\n", idx_varnum);
-
-    gen_code(func, indent, "if (GET_FIXNUM(x%d) < 0 || GET_FIXNUM(x%d) >= GET_STRING(x%d)->len) { RAISE(\"string-ref index is not valid\") }\n", idx_varnum, idx_varnum, str_varnum);
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = CHAR(GET_STRING(x%d)->s[GET_FIXNUM(x%d)]);", ret_varnum, str_varnum, idx_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_string_eq_q(struct function *func, int indent, struct value *form)
-{
-    int n_strings = form->list.length - 1;
-    if (n_strings < 2) {
-        fprintf(stderr, "invalid number of arguments for string=?\n");
-        exit(1);
-    }
-
-    int *arg_varnums = malloc(n_strings * sizeof(int));
-    for (int i = 0; i < n_strings; ++i) {
-        arg_varnums[i] = compile_form(func, indent, &form->list.ptr[i + 1]);
-        gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string=? argument is not a string\"); }\n", arg_varnums[i]);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(", ret_varnum);
-    for (int i = 0; i < n_strings - 1; ++i) {
-        if (i != 0) {
-            gen_code(func, 0, " && ");
-        }
-
-        gen_code(func, 0, "string_cmp(GET_STRING(x%d), GET_STRING(x%d)) == 0", arg_varnums[i], arg_varnums[i+1]);
-    }
-    gen_code(func, 0, ");\n");
-
-    free(arg_varnums);
-    return ret_varnum;
-}
-
-int
-compile_make_string(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "invalid number of arguments for make-string\n");
-        exit(1);
-    }
-
-    int len_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_FIXNUM(x%d)) { RAISE(\"make-string first argument is not a number\"); }\n", len_varnum);
-
-    int char_varnum;
-    if (form->list.length == 2) {
-        char_varnum = func->varnum++;
-        gen_code(func, indent, "char x%d = 0;\n", char_varnum);
-    } else {
-        int temp_varnum = compile_form(func, indent, &form->list.ptr[2]);
-        gen_code(func, indent, "if (!IS_CHAR(x%d)) { RAISE(\"make-string second argument is not a char\"); }\n", temp_varnum);
-        char_varnum = func->varnum++;
-        gen_code(func, indent, "char x%d = GET_CHAR(x%d);\n", char_varnum, temp_varnum);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = alloc_string(GET_FIXNUM(x%d), x%d);\n", ret_varnum, len_varnum, char_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_string_to_number(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2 && form->list.length != 3) {
-        fprintf(stderr, "invalid number of arguments for string->number\n");
-        exit(1);
-    }
-
-    int str_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "if (!IS_STRING(x%d)) { RAISE(\"string->number first argument is not a number\"); }\n", str_varnum);
-
-    int base_varnum;
-    if (form->list.length == 2) {
-        base_varnum = func->varnum++;
-        gen_code(func, indent, "int x%d = 10;\n", base_varnum);
-    } else {
-        int temp_varnum = compile_form(func, indent, &form->list.ptr[2]);
-        gen_code(func, indent, "if (!IS_FIXNUM(x%d)) { RAISE(\"string->number second argument is not a number\"); }\n", temp_varnum);
-        base_varnum = func->varnum++;
-        gen_code(func, indent, "int x%d = GET_FIXNUM(x%d);\n", base_varnum, temp_varnum);
-    }
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = string_to_number(x%d, x%d);\n", ret_varnum, str_varnum, base_varnum);
-
-    return ret_varnum;
-}
-
-int
-compile_symbol_q(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "symbol? needs a single argument\n");
-        exit(1);
-    }
-
-    int arg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = BOOL(IS_SYMBOL(x%d));\n", ret_varnum, arg_varnum);
-
-    return ret_varnum;
-}
-
 struct {
     const char *name;
-    int (*compile)(struct function *func, int indent, struct value *form);
+    const char *c_name; /* primcall c function name with "primcall_" prefix */
+    int min_args;
+    int max_args;
 } primcalls[] = {
-    { "car", compile_car },
-    { "cdr", compile_cdr },
-    { "close-port", compile_close_port },
-    { "cons", compile_cons },
-    { "current-input-port", compile_current_input_port },
-    { "current-output-port", compile_current_output_port },
-    { "current-error-port", compile_current_error_port },
-    { "display", compile_display },
-    { "eof-object?", compile_eof_object_q },
-    { "eq?", compile_eq_q },
-    { "input-port?", compile_input_port_q },
-    { "make-string", compile_make_string },
-    { "open-input-file", compile_open_input_file },
-    { "open-output-file", compile_open_output_file },
-    { "port?", compile_port_q },
-    { "read-line", compile_read_line },
-    { "peek-char", compile_peek_char },
-    { "read-char", compile_read_char },
-    { "string->number", compile_string_to_number },
-    { "string->symbol", compile_string_to_symbol },
-    { "string-append", compile_string_append },
-    { "string-length", compile_string_length },
-    { "string-ref", compile_string_ref },
-    { "string=?", compile_string_eq_q },
-    { "string?", compile_string_q },
-    { "symbol?", compile_symbol_q },
-    { "write", compile_write },
-    { "write-char", compile_write_char },
-    { "+", compile_add },
-    { "-", compile_sub },
-    { "*", compile_mul },
-    { "/", compile_div },
+    { "car", "car", 1, 1 },
+    { "cdr", "cdr", 1, 1 },
+    { "close-port", "close_port", 1, 1 },
+    { "cons", "cons", 2, 2 },
+    { "current-input-port", "current_input_port", 0, 0 },
+    { "current-output-port", "current_output_port", 0, 0 },
+    { "current-error-port", "current_error_port", 0, 0 },
+    { "display", "display", 1, 2 },
+    { "eof-object?", "eof_object_q", 1, 1 },
+    { "eq?", "eq_q", 2, 2 },
+    { "input-port?", "input_port_q", 1, 1 },
+    { "make-string", "make_string", 1, 2 },
+    { "open-input-file", "open_input_file", 1, 1 },
+    { "open-output-file", "open_output_file", 1, 1 },
+    { "peek-char", "peek_char", 0, 1 },
+    { "port?", "port_q", 1, 1 },
+    { "read-char", "read_char", 0, 1 },
+    { "read-line", "read_line", 0, 1 },
+    { "string->number", "string_to_number", 1, 2 },
+    { "string->symbol", "string_to_symbol", 1, 1 },
+    { "string-append", "string_append", 0, -1 },
+    { "string-length", "string_length", 1, 1 },
+    { "string-ref", "string_ref", 2, 2 },
+    { "string=?", "string_eq_q", 1, -1 },
+    { "string?", "string_q", 1, 1 },
+    { "symbol?", "symbol_q", 1, 1 },
+    { "write", "write", 1, 2 },
+    { "write-char", "write_char", 1, 2 },
+    { "+", "add", 0, -1 },
+    { "-", "sub", 1, -1 },
+    { "*", "mul", 0, -1 },
+    { "/", "div", 1, -1 },
 };
 
 int
@@ -2187,7 +1546,47 @@ compile_primcall(struct function *func, int indent, struct value *form)
         if (form->list.ptr[0].identifier.name_len == len &&
             memcmp(form->list.ptr[0].identifier.name, primcalls[i].name, len) == 0)
         {
-            return primcalls[i].compile(func, indent, form);
+            int nargs = form->list.length - 1;
+
+            if (primcalls[i].min_args == 0 && primcalls[i].max_args == -1) {
+                /* no argument count checking is needed */
+            } else if (primcalls[i].min_args == primcalls[i].max_args) {
+                if (nargs != primcalls[i].min_args) {
+                    fprintf(stderr, "%s expects %d argument(s), %d provided.\n", primcalls[i].name, primcalls[i].min_args, nargs);
+                    exit(1);
+                }
+            } else if (primcalls[i].max_args == -1) {
+                if (nargs < primcalls[i].min_args) {
+                    fprintf(stderr, "too few arguments for %s: at least %d expected, %d provided.\n", primcalls[i].name, primcalls[i].min_args, nargs);
+                    exit(1);
+                }
+            } else {
+                if (nargs < primcalls[i].min_args) {
+                    fprintf(stderr, "too few arguments for %s: at least %d expected, %d provided.\n", primcalls[i].name, primcalls[i].min_args, nargs);
+                    exit(1);
+                }
+
+                if (nargs > primcalls[i].max_args) {
+                    fprintf(stderr, "too many arguments for %s: at most %d expected, %d provided.\n", primcalls[i].name, primcalls[i].max_args, nargs);
+                    exit(1);
+                }
+            }
+
+            int *arg_varnums = malloc(nargs * sizeof(int));
+            for (int i = 0; i < nargs; ++i) {
+                arg_varnums[i] = compile_form(func, indent, &form->list.ptr[i + 1]);
+            }
+
+            int ret_varnum = func->varnum++;
+            gen_code(func, indent, "value x%d = primcall_%s(NULL, %d", ret_varnum, primcalls[i].c_name, nargs);
+            for (int i = 0; i < nargs; ++i) {
+                gen_code(func, 0, ", x%d", arg_varnums[i]);
+            }
+            gen_code(func, 0, ");\n");
+
+            free(arg_varnums);
+
+            return ret_varnum;
         }
     }
 
@@ -2377,6 +1776,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    union {\n");
     fprintf(fp, "        struct {\n");
     fprintf(fp, "            int direction;\n");
+    fprintf(fp, "            int closed;\n");
     fprintf(fp, "            FILE *fp;\n");
     fprintf(fp, "            value (*read_char)(value port);\n");
     fprintf(fp, "            value (*peek_char)(value port);\n");
@@ -2512,6 +1912,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static value file_read_line(value port) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
     fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char buf[256];\n");
     fprintf(fp, "    char *r = fgets(buf, sizeof(buf), fp);\n");
@@ -2543,6 +1944,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static value file_read_char(value port) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
     fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char ch = getc(fp);\n");
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
@@ -2552,6 +1954,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static value file_peek_char(value port) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"peeking non-port\"); }\n");
     fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char ch = getc(fp);\n");
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
@@ -2562,6 +1965,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static void file_write_char(value port, value ch) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
     fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"port not open for writing\") }");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    int ret = putc(GET_CHAR(ch), fp);\n");
     fprintf(fp, "    if (ret == EOF) { RAISE(\"error writing to file: %%s\", strerror(errno)); }\n");
@@ -2570,43 +1974,12 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "static void file_printf(value port, const char *fmt, ...) {\n");
     fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
     fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"port not open for writing\") }");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    va_list args;\n");
     fprintf(fp, "    va_start(args, fmt);\n");
     fprintf(fp, "    vfprintf(fp, fmt, args);\n");
     fprintf(fp, "    va_end(args);\n");
-    fprintf(fp, "}\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "static value open_input_file(value filename) {\n");
-    fprintf(fp, "    if (!IS_STRING(filename)) { RAISE(\"filename is not a string\"); }\n");
-    fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
-    fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
-    fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
-    fprintf(fp, "    FILE *fp = fopen(filenamez, \"r\");\n");
-    fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
-    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
-    fprintf(fp, "    obj->type = OBJ_PORT;");
-    fprintf(fp, "    obj->port.direction = PORT_DIR_READ;\n");
-    fprintf(fp, "    obj->port.fp = fp;\n");
-    fprintf(fp, "    obj->port.read_char = file_read_char;\n");
-    fprintf(fp, "    obj->port.peek_char = file_peek_char;\n");
-    fprintf(fp, "    obj->port.read_line = file_read_line;\n");
-    fprintf(fp, "    return OBJECT(obj);\n");
-    fprintf(fp, "}\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "static value open_output_file(value filename) {\n");
-    fprintf(fp, "    if (!IS_STRING(filename)) { RAISE(\"filename is not a string\"); }\n");
-    fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
-    fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
-    fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
-    fprintf(fp, "    FILE *fp = fopen(filenamez, \"w\");\n");
-    fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
-    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
-    fprintf(fp, "    obj->type = OBJ_PORT;");
-    fprintf(fp, "    obj->port.direction = PORT_DIR_WRITE;\n");
-    fprintf(fp, "    obj->port.fp = fp;\n");
-    fprintf(fp, "    obj->port.printf = file_printf;\n");
-    fprintf(fp, "    return OBJECT(obj);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static void _display(value v, value port);\n");
@@ -2649,13 +2022,6 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    } else {\n");
     fprintf(fp, "        GET_OBJECT(port)->port.printf(port, \"#<object-%%p>\", v);\n");
     fprintf(fp, "    }\n");
-    fprintf(fp, "}\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "static value display(value v, value port) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"writing to non-output port\"); }\n");
-    fprintf(fp, "    _display(v, port);\n");
-    fprintf(fp, "    return VOID;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static void _write(value v, value port);\n");
@@ -2780,13 +2146,6 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    }\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value write(value v, value port) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"writing to non-output port\"); }\n");
-    fprintf(fp, "    _write(v, port);\n");
-    fprintf(fp, "    return VOID;\n");
-    fprintf(fp, "}\n");
-    fprintf(fp, "\n");
     fprintf(fp, "static value string_to_symbol(value v) {\n");
     fprintf(fp, "    for (int i = 0; i < n_symbols; ++i) {\n");
     fprintf(fp, "        if (symbols[i].name_len == GET_STRING(v)->len && memcmp(symbols[i].name, GET_STRING(v)->s, symbols[i].name_len) == 0) {\n");
@@ -2810,47 +2169,6 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return STRING(str);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
-    fprintf(fp, "static value string_append(int n_strings, ...) {\n");
-    fprintf(fp, "    int total_size = 0;\n");
-    fprintf(fp, "    va_list args;\n");
-    fprintf(fp, "    va_start(args, n_strings);\n");
-    fprintf(fp, "    for (int i = 0; i < n_strings; ++i) {\n");
-    fprintf(fp, "        struct string *str = GET_STRING(va_arg(args, value));");
-    fprintf(fp, "        total_size += str->len;\n");
-    fprintf(fp, "    }\n");
-    fprintf(fp, "    va_end(args);\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "    struct string *concat = malloc(sizeof(struct string));\n");
-    fprintf(fp, "    concat->len = total_size;\n");
-    fprintf(fp, "    concat->s = malloc(total_size);\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "    va_start(args, n_strings);\n");
-    fprintf(fp, "    size_t offset = 0;\n");
-    fprintf(fp, "    for (int i = 0; i < n_strings; ++i) {\n");
-    fprintf(fp, "        struct string *str = GET_STRING(va_arg(args, value));\n");
-    fprintf(fp, "        memcpy(concat->s + offset, str->s, str->len);\n");
-    fprintf(fp, "        offset += str->len;\n");
-    fprintf(fp, "    }\n");
-    fprintf(fp, "    va_end(args);\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "    return STRING(concat);\n");
-    fprintf(fp, "}\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "static value string_to_number(value s, int base) {\n");
-    fprintf(fp, "    if (GET_STRING(s)->len == 0) return FALSE;\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "    /* create a zero terminated version of the string for strtoll */\n");
-    fprintf(fp, "    char *str = malloc(GET_STRING(s)->len + 1);\n");
-    fprintf(fp, "    memcpy(str, GET_STRING(s)->s, GET_STRING(s)->len);\n");
-    fprintf(fp, "    str[GET_STRING(s)->len] = 0;\n");
-    fprintf(fp, "\n");
-    fprintf(fp, "    char *endptr;\n");
-    fprintf(fp, "    int64_t result = strtoll(str, &endptr, base);\n");
-    fprintf(fp, "    if (endptr != str + GET_STRING(s)->len) { free(str); return FALSE; }\n");
-    fprintf(fp, "    free(str);\n");
-    fprintf(fp, "    return FIXNUM(result);\n");
-    fprintf(fp, "}\n");
-    fprintf(fp, "\n");
     fprintf(fp, "static int string_cmp(struct string *s1, struct string *s2) {\n");
     fprintf(fp, "    size_t min_len = s1->len < s2->len ? s1->len : s2->len;\n");
     fprintf(fp, "    int cmp = memcmp(s1->s, s2->s, min_len);\n");
@@ -2862,6 +2180,408 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    } else {\n");
     fprintf(fp, "        return 0;\n");
     fprintf(fp, "    }\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "/************ primcall functions ***********/\n");
+    fprintf(fp, "static value primcall_car(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"car needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value arg = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PAIR(arg)) { RAISE(\"car argument is not a pair\") }\n");
+    fprintf(fp, "    return GET_PAIR(arg)->car;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_cdr(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"car needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value arg = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PAIR(arg)) { RAISE(\"cdr argument is not a pair\") }\n");
+    fprintf(fp, "    return GET_PAIR(arg)->cdr;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_close_port(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value port = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"close-port argument is not a port\") }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) return VOID;\n");
+    fprintf(fp, "    int ret = fclose(GET_OBJECT(port)->port.fp);\n");
+    fprintf(fp, "    if (ret) { RAISE(\"failed to close the port: %%s\", strerror(errno)); }\n");
+    fprintf(fp, "    GET_OBJECT(port)->port.closed = 1;\n");
+    fprintf(fp, "    return VOID;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_cons(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 2) { RAISE(\"cons needs two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value car = va_arg(args, value);\n");
+    fprintf(fp, "    value cdr = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return make_pair(car, cdr);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_current_error_port(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0) { RAISE(\"current-error-port needs no arguments\"); }\n");
+    fprintf(fp, "    return OBJECT(&current_error_port);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_current_input_port(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0) { RAISE(\"current-input-port needs no arguments\"); }\n");
+    fprintf(fp, "    return OBJECT(&current_input_port);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_current_output_port(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0) { RAISE(\"current-output-port needs no arguments\"); }\n");
+    fprintf(fp, "    return OBJECT(&current_output_port);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_display(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1 && nargs != 2) { RAISE(\"display needs one or two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);\n");
+    fprintf(fp, "    value port = nargs == 1 ? OBJECT(&current_output_port) : va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
+    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"writing to non-output port\"); }\n");
+    fprintf(fp, "    _display(v, port);\n");
+    fprintf(fp, "    return VOID;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_eof_object_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"eof-object? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_EOFOBJ(v));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_eq_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 2) { RAISE(\"eq? needs two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v1 = va_arg(args, value);\n");
+    fprintf(fp, "    value v2 = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(v1 == v2);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_input_port_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"input-port? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_READ);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_make_string(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1 && nargs != 2) { RAISE(\"make-string needs one or two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value n = va_arg(args, value);\n");
+    fprintf(fp, "    value ch = nargs == 1 ? CHAR(0) : va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"make-string first argument should be a number\"); }\n");
+    fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"make-string second argument should be a character\"); }\n");
+    fprintf(fp, "    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_open_input_file(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"open-input-file needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value filename = va_arg(args, value);");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(filename)) { RAISE(\"filename is not a string\"); }\n");
+    fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
+    fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
+    fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
+    fprintf(fp, "    FILE *fp = fopen(filenamez, \"r\");\n");
+    fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
+    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
+    fprintf(fp, "    obj->type = OBJ_PORT;");
+    fprintf(fp, "    obj->port.direction = PORT_DIR_READ;\n");
+    fprintf(fp, "    obj->port.fp = fp;\n");
+    fprintf(fp, "    obj->port.read_char = file_read_char;\n");
+    fprintf(fp, "    obj->port.peek_char = file_peek_char;\n");
+    fprintf(fp, "    obj->port.read_line = file_read_line;\n");
+    fprintf(fp, "    return OBJECT(obj);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_open_output_file(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"open-output-file needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value filename = va_arg(args, value);");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(filename)) { RAISE(\"filename is not a string\"); }\n");
+    fprintf(fp, "    int filename_len = GET_STRING(filename)->len;\n");
+    fprintf(fp, "    char *filenamez = malloc(filename_len + 1);\n");
+    fprintf(fp, "    snprintf(filenamez, filename_len + 1, \"%%.*s\", filename_len, GET_STRING(filename)->s);\n");
+    fprintf(fp, "    FILE *fp = fopen(filenamez, \"w\");\n");
+    fprintf(fp, "    if (!fp) { RAISE(\"error opening file: %%s\", strerror(errno)); }\n");
+    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
+    fprintf(fp, "    obj->type = OBJ_PORT;");
+    fprintf(fp, "    obj->port.direction = PORT_DIR_WRITE;\n");
+    fprintf(fp, "    obj->port.fp = fp;\n");
+    fprintf(fp, "    obj->port.printf = file_printf;\n");
+    fprintf(fp, "    return OBJECT(obj);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_peek_char(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0 && nargs != 1) { RAISE(\"peek-char needs zero or one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_input_port);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"peek-char argument is not an input port\"); }\n");
+    fprintf(fp, "    return GET_OBJECT(port)->port.peek_char(port);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_port_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"port? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_PORT(v));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_read_char(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0 && nargs != 1) { RAISE(\"read-char needs zero or one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_input_port);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"read-char argument is not an input port\"); }\n");
+    fprintf(fp, "    return GET_OBJECT(port)->port.read_char(port);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_read_line(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0 && nargs != 1) { RAISE(\"read-line needs zero or one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_input_port);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"read-line argument is not an input port\"); }\n");
+    fprintf(fp, "    return GET_OBJECT(port)->port.read_line(port);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_to_number(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1 && nargs != 2) { RAISE(\"string-to-number needs one or two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value str_v = va_arg(args, value);\n");
+    fprintf(fp, "    value base = nargs == 1 ? FIXNUM(10) : va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(str_v)) { RAISE(\"string->number first argument must be a string\"); }\n");
+    fprintf(fp, "    if (!IS_FIXNUM(base)) { RAISE(\"string->number second argument must be a number\"); }\n");
+    fprintf(fp, "    if (GET_STRING(str_v)->len == 0) return FALSE;\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    /* create a zero terminated version of the string for strtoll */\n");
+    fprintf(fp, "    char *str = malloc(GET_STRING(str_v)->len + 1);\n");
+    fprintf(fp, "    memcpy(str, GET_STRING(str_v)->s, GET_STRING(str_v)->len);\n");
+    fprintf(fp, "    str[GET_STRING(str_v)->len] = 0;\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    char *endptr;\n");
+    fprintf(fp, "    int64_t result = strtoll(str, &endptr, GET_FIXNUM(base));\n");
+    fprintf(fp, "    if (endptr != str + GET_STRING(str_v)->len) { free(str); return FALSE; }\n");
+    fprintf(fp, "    free(str);\n");
+    fprintf(fp, "    return FIXNUM(result);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_to_symbol(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"string->symbol needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value str = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(str)) { RAISE(\"string->symbol argument is not a string\"); }\n");
+    fprintf(fp, "    return string_to_symbol(str);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_append(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    int total_size = 0;\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    for (int i = 0; i < nargs; ++i) {\n");
+    fprintf(fp, "        struct string *str = GET_STRING(va_arg(args, value));");
+    fprintf(fp, "        total_size += str->len;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    struct string *concat = malloc(sizeof(struct string));\n");
+    fprintf(fp, "    concat->len = total_size;\n");
+    fprintf(fp, "    concat->s = malloc(total_size);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    size_t offset = 0;\n");
+    fprintf(fp, "    for (int i = 0; i < nargs; ++i) {\n");
+    fprintf(fp, "        struct string *str = GET_STRING(va_arg(args, value));\n");
+    fprintf(fp, "        memcpy(concat->s + offset, str->s, str->len);\n");
+    fprintf(fp, "        offset += str->len;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    return STRING(concat);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_length(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"string-length needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value str = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(str)) { RAISE(\"string-length argument is not a string\"); }\n");
+    fprintf(fp, "    return FIXNUM(GET_STRING(str)->len);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_ref(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 2) { RAISE(\"string-ref needs two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value str = va_arg(args, value);\n");
+    fprintf(fp, "    value idx = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_STRING(str)) { RAISE(\"string-ref first argument is not a string\"); }\n");
+    fprintf(fp, "    if (!IS_FIXNUM(idx)) { RAISE(\"string-ref second argument is not a number\"); }\n");
+    fprintf(fp, "    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE(\"string-ref index is out of range\"); }\n");
+    fprintf(fp, "    return CHAR(GET_STRING(str)->s[GET_FIXNUM(idx)]);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_eq_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs == 0) { RAISE(\"string=? needs at least one argument\"); }\n");
+    fprintf(fp, "    if (nargs == 1) return TRUE;\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value prev = va_arg(args, value);");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value cur = va_arg(args, value);");
+    fprintf(fp, "        if (string_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {\n");
+    fprintf(fp, "            va_end(args);\n");
+    fprintf(fp, "            return FALSE;\n");
+    fprintf(fp, "        }\n");
+    fprintf(fp, "        prev = cur;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return TRUE;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_string_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"string? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_STRING(v));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_symbol_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"symbol? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_SYMBOL(v));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_write(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1 && nargs != 2) { RAISE(\"write needs one or two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);\n");
+    fprintf(fp, "    value port = nargs == 1 ? OBJECT(&current_output_port) : va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"write second argument is not an output port\"); }\n");
+    fprintf(fp, "    _write(v, port);\n");
+    fprintf(fp, "    return VOID;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_write_char(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1 && nargs != 2) { RAISE(\"write-char needs one or two arguments\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value ch = va_arg(args, value);\n");
+    fprintf(fp, "    value port = nargs == 1 ? OBJECT(&current_output_port) : va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"write-char first argument is not a char\"); }\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"write-char second argument is not an output port\"); }\n");
+    fprintf(fp, "    GET_OBJECT(port)->port.write_char(port, ch);\n");
+    fprintf(fp, "    return VOID;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_add(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    value result = FIXNUM(0);\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    for (int i = 0; i < nargs; ++i) {\n");
+    fprintf(fp, "        value v = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(v)) { RAISE(\"addition (+) argument is not a number\") }\n");
+    fprintf(fp, "        result += (int64_t) v;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return result;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_div(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\"division (-) needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value result_v = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(result_v)) { RAISE(\"division (/) argument is not a number\"); }\n");
+    fprintf(fp, "    int64_t result = GET_FIXNUM(result_v);\n");
+    fprintf(fp, "    if (nargs == 1) {");
+    fprintf(fp, "        if (result == 1)\n");
+    fprintf(fp, "            return FIXNUM(1);\n");
+    fprintf(fp, "        if (result == -1)\n");
+    fprintf(fp, "            return FIXNUM(-1);\n");
+    fprintf(fp, "        if (result == 0)\n");
+    fprintf(fp, "            RAISE(\"division by zero\");\n");
+    fprintf(fp, "        return FIXNUM(0); /* we don't have fractionals, so 1/n is always zero */\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value v = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(v)) { RAISE(\"division (/) argument is not a number\") }\n");
+    fprintf(fp, "        if (GET_FIXNUM(v) == 0)\n");
+    fprintf(fp, "            RAISE(\"division by zero\");\n");
+    fprintf(fp, "        result /= GET_FIXNUM(v);\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return FIXNUM(result);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_mul(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    int64_t result = 1;\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    for (int i = 0; i < nargs; ++i) {\n");
+    fprintf(fp, "        value v = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(v)) { RAISE(\"multiplication (*) argument is not a number\") }\n");
+    fprintf(fp, "        result *= GET_FIXNUM(v);\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return FIXNUM(result);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_sub(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs < 1) { RAISE(\"subtraction (-) needs at least one argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value result = va_arg(args, value);\n");
+    fprintf(fp, "    if (!IS_FIXNUM(result)) { RAISE(\"subtraction (-) argument is not a number\"); }\n");
+    fprintf(fp, "    if (nargs == 1) return FIXNUM(-GET_FIXNUM(result));");
+    fprintf(fp, "    for (int i = 1; i < nargs; ++i) {\n");
+    fprintf(fp, "        value v = va_arg(args, value);\n");
+    fprintf(fp, "        if (!IS_FIXNUM(v)) { RAISE(\"subtraction (-) argument is not a number\") }\n");
+    fprintf(fp, "        result -= (int64_t) v;\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "    return result;\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
 
