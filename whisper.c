@@ -1358,6 +1358,93 @@ compile_cond(struct function *func, int indent, struct value *form)
 }
 
 int
+compile_quoted_item(struct function *func, int indent, struct value *form);
+
+void
+print_value(struct value *value);
+
+int
+compile_case(struct function *func, int indent, struct value *form)
+{
+    if (form->list.length < 2) {
+        fprintf(stderr, "invalid case syntax\n");
+        exit(1);
+    }
+
+    int ret_varnum = func->varnum++;
+    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
+
+    int have_else = 0;
+    int n_clauses = form->list.length - 2;
+    int key_varnum = compile_form(func, indent, &form->list.ptr[1]);
+    for (int i = 0; i < n_clauses; ++i) {
+        struct value *clause = &form->list.ptr[i + 2];
+        if (clause->type != VAL_LIST) {
+            fprintf(stderr, "invalid case clause (must be a list)\n");
+            exit(1);
+        }
+
+        if (clause->list.length < 2) {
+            fprintf(stderr, "invalid case clause (too short)\n");
+            exit(1);
+        }
+
+        struct value *data = &clause->list.ptr[0];
+        if (data->type == VAL_ID &&
+            data->identifier.name_len == 4 &&
+            memcmp(data->identifier.name, "else", 4) == 0)
+        {
+            if (i != n_clauses - 1) {
+                fprintf(stderr, "else clause not the last\n");
+                exit(1);
+            }
+
+            int value_varnum = -1;
+            for (int j = 1; j < clause->list.length; ++j) {
+                value_varnum = compile_form(func, indent + i, &clause->list.ptr[j]);
+            }
+            gen_code(func, indent + i, "x%d = x%d;\n", ret_varnum, value_varnum);
+            have_else = 1;
+        } else {
+            if (data->type != VAL_LIST) {
+                fprintf(stderr, "invalid case clause (data not a list)\n");
+                exit(1);
+            }
+
+            int n_data = data->list.length;
+            int *data_varnums = malloc(n_data * sizeof(int));
+            for (int j = 0; j < n_data; ++j) {
+                data_varnums[j] = compile_quoted_item(func, indent + i, &data->list.ptr[j]);
+            }
+
+            gen_code(func, indent + i, "if (");
+            for (int j = 0; j < n_data; ++j) {
+                gen_code(func, 0, "x%d == x%d", key_varnum, data_varnums[j]);
+                if (j != n_data - 1) {
+                    gen_code(func, 0, " || ");
+                }
+            }
+            free(data_varnums);
+            gen_code(func, 0, ") {\n");
+
+            int value_varnum = -1;
+            for (int j = 1; j < clause->list.length; ++j) {
+                value_varnum = compile_form(func, indent + i + 1, &clause->list.ptr[j]);
+            }
+            gen_code(func, indent + i + 1, "x%d = x%d;\n", ret_varnum, value_varnum);
+
+            gen_code(func, indent + i, "} else {\n");
+        }
+    }
+
+    for (int i = n_clauses - 1 + (have_else ? 0 : 1); i > 0; --i) {
+        gen_code(func, indent + i - 1, "}\n");
+    }
+
+    return ret_varnum;
+}
+
+int
 compile_or(struct function *func, int indent, struct value *form)
 {
     int n_values = form->list.length - 1;
@@ -1708,6 +1795,11 @@ compile_list(struct function *func, int indent, struct value *form)
                memcmp(list_car->identifier.name, "cond", 4) == 0)
     {
         varnum = compile_cond(func, indent, form);
+    } else if (list_car->type == VAL_ID &&
+               list_car->identifier.name_len == 4 &&
+               memcmp(list_car->identifier.name, "case", 4) == 0)
+    {
+        varnum = compile_case(func, indent, form);
     } else if (list_car->type == VAL_ID &&
                list_car->identifier.name_len == 3 &&
                memcmp(list_car->identifier.name, "and", 3) == 0)
@@ -2868,6 +2960,12 @@ print_value(struct value *value)
     switch (value->type) {
     case VAL_NUM:
         fprintf(stderr, "<number %ld>", value->number);
+        break;
+    case VAL_CHAR:
+        fprintf(stderr, "<char %c>", value->character);
+        break;
+    case VAL_STR:
+        fprintf(stderr, "<string \"%.*s\">", value->string.length, value->string.ptr);
         break;
     case VAL_ID:
         fprintf(stderr, "<id %.*s>", value->identifier.name_len, value->identifier.name);
