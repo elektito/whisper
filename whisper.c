@@ -1552,6 +1552,7 @@ struct {
     { "eq?", "eq_q", 2, 2 },
     { "input-port?", "input_port_q", 1, 1 },
     { "make-string", "make_string", 1, 2 },
+    { "number?", "number_q", 1, 1 },
     { "number->string", "number_to_string", 1, 2 },
     { "open-input-file", "open_input_file", 1, 1 },
     { "open-output-file", "open_output_file", 1, 1 },
@@ -2358,6 +2359,15 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    if (!IS_FIXNUM(n)) { RAISE(\"make-string first argument should be a number\"); }\n");
     fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"make-string second argument should be a character\"); }\n");
     fprintf(fp, "    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_number_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"number? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value v = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_FIXNUM(v));\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_number_to_string(environment env, int nargs, ...) {\n");
