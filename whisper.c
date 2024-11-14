@@ -1648,6 +1648,7 @@ struct {
     { "number->string", "number_to_string", 1, 2 },
     { "open-input-file", "open_input_file", 1, 1 },
     { "open-output-file", "open_output_file", 1, 1 },
+    { "pair?", "pair_q", 1, 1 },
     { "peek-char", "peek_char", 0, 1 },
     { "port?", "port_q", 1, 1 },
     { "read-char", "read_char", 0, 1 },
@@ -2587,6 +2588,15 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    obj->port.fp = fp;\n");
     fprintf(fp, "    obj->port.printf = file_printf;\n");
     fprintf(fp, "    return OBJECT(obj);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_pair_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"port? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value x = va_arg(args, value);");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_PAIR(x));\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_peek_char(environment env, int nargs, ...) {\n");
