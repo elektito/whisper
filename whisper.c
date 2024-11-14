@@ -1632,6 +1632,7 @@ struct {
     { "char-downcase", "char_downcase", 1, 1 },
     { "char-upcase", "char_upcase", 1, 1 },
     { "char->integer", "char_to_integer", 1, 1 },
+    { "char?", "char_q", 1, 1 },
     { "close-port", "close_port", 1, 1 },
     { "cons", "cons", 2, 2 },
     { "current-input-port", "current_input_port", 0, 0 },
@@ -2416,6 +2417,15 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "    if (!IS_CHAR(ch)) { RAISE(\"char->integer argument is not a char\") }\n");
     fprintf(fp, "    return FIXNUM((int) GET_CHAR(ch));\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_char_q(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"char? needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value x = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    return BOOL(IS_CHAR(x));\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value primcall_close_port(environment env, int nargs, ...) {\n");
