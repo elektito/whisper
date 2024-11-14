@@ -1549,7 +1549,7 @@ compile_error(struct function *func, int indent, struct value *form)
 
     int msg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     gen_code(func, indent, "printf(\"error: \");\n");
-    gen_code(func, indent, "display(x%d);\n", msg_varnum);
+    gen_code(func, indent, "primcall_display(NULL, 2, x%d, OBJECT(&current_output_port));\n", msg_varnum);
     gen_code(func, indent, "printf(\"\\n\");\n");
     gen_code(func, indent, "exit(1);\n");
 
