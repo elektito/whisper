@@ -1640,6 +1640,7 @@ struct {
     { "display", "display", 1, 2 },
     { "eof-object?", "eof_object_q", 1, 1 },
     { "eq?", "eq_q", 2, 2 },
+    { "get-output-string", "get_output_string", 1, 1 },
     { "input-port?", "input_port_q", 1, 1 },
     { "integer->char", "integer_to_char", 1, 1 },
     { "make-string", "make_string", 1, 2 },
@@ -1648,6 +1649,7 @@ struct {
     { "number->string", "number_to_string", 1, 2 },
     { "open-input-file", "open_input_file", 1, 1 },
     { "open-output-file", "open_output_file", 1, 1 },
+    { "open-output-string", "open_output_string", 0, 0 },
     { "pair?", "pair_q", 1, 1 },
     { "peek-char", "peek_char", 0, 1 },
     { "port?", "port_q", 1, 1 },
@@ -1943,6 +1945,9 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "            int direction;\n");
     fprintf(fp, "            int closed;\n");
     fprintf(fp, "            FILE *fp;\n");
+    fprintf(fp, "            char *string;\n");
+    fprintf(fp, "            int64_t string_cap;\n");
+    fprintf(fp, "            int64_t string_len;\n");
     fprintf(fp, "            value (*read_char)(value port);\n");
     fprintf(fp, "            value (*peek_char)(value port);\n");
     fprintf(fp, "            value (*read_line)(value port);\n");
@@ -2075,9 +2080,6 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value file_read_line(value port) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char buf[256];\n");
     fprintf(fp, "    char *r = fgets(buf, sizeof(buf), fp);\n");
@@ -2107,9 +2109,6 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value file_read_char(value port) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"reading from non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char ch = getc(fp);\n");
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
@@ -2117,9 +2116,6 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static value file_peek_char(value port) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"peeking non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE(\"port not open for reading\") }");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    char ch = getc(fp);\n");
     fprintf(fp, "    if (ch == EOF) return EOFOBJ;\n");
@@ -2128,22 +2124,46 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static void file_write_char(value port, value ch) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"port not open for writing\") }");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    int ret = putc(GET_CHAR(ch), fp);\n");
     fprintf(fp, "    if (ret == EOF) { RAISE(\"error writing to file: %%s\", strerror(errno)); }\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
     fprintf(fp, "static void file_printf(value port, const char *fmt, ...) {\n");
-    fprintf(fp, "    if (!IS_PORT(port)) { RAISE(\"writing to non-port\"); }\n");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE(\"port not open for writing\") }");
-    fprintf(fp, "    if (GET_OBJECT(port)->port.closed) { RAISE(\"the port is closed\") }\n");
     fprintf(fp, "    FILE *fp = GET_OBJECT(port)->port.fp;\n");
     fprintf(fp, "    va_list args;\n");
     fprintf(fp, "    va_start(args, fmt);\n");
     fprintf(fp, "    vfprintf(fp, fmt, args);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void string_write_char(value port, value ch) {\n");
+    fprintf(fp, "    int64_t needed = GET_OBJECT(port)->port.string_cap + 1;\n");
+    fprintf(fp, "    if (needed > GET_OBJECT(port)->port.string_cap) {\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.string_cap *= 2;\n");
+    fprintf(fp, "        GET_OBJECT(port)->port.string = realloc(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_cap);\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    GET_OBJECT(port)->port.string[GET_OBJECT(port)->port.string_len] = GET_CHAR(ch);\n");
+    fprintf(fp, "    GET_OBJECT(port)->port.string_len++;\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static void string_printf(value port, const char *fmt, ...) {\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, fmt);\n");
+    fprintf(fp, "    int extra_needed = vsnprintf(NULL, 0, fmt, args);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    struct object *op = GET_OBJECT(port);\n");
+    fprintf(fp, "    int64_t total_needed = op->port.string_cap + extra_needed;\n");
+    fprintf(fp, "    if (total_needed > op->port.string_cap) {\n");
+    fprintf(fp, "        while (op->port.string_cap < total_needed) op->port.string_cap *= 2;\n");
+    fprintf(fp, "        op->port.string = realloc(op->port.string, op->port.string_cap);\n");
+    fprintf(fp, "    }\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "    va_start(args, fmt);\n");
+    fprintf(fp, "    vsnprintf(op->port.string + op->port.string_len, op->port.string_cap - op->port.string_len, fmt, args);\n");
+    fprintf(fp, "    op->port.string_len += extra_needed;\n");
     fprintf(fp, "    va_end(args);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
@@ -2468,6 +2488,16 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    return BOOL(v1 == v2);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_get_output_string(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 1) { RAISE(\"get-output-string needs a single argument\"); }\n");
+    fprintf(fp, "    va_list args;\n");
+    fprintf(fp, "    va_start(args, nargs);\n");
+    fprintf(fp, "    value port = va_arg(args, value);\n");
+    fprintf(fp, "    va_end(args);\n");
+    fprintf(fp, "    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { RAISE(\"argument is not an output string port\"); }\n");
+    fprintf(fp, "    return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
     fprintf(fp, "static value primcall_input_port_q(environment env, int nargs, ...) {\n");
     fprintf(fp, "    if (nargs != 1) { RAISE(\"input-port? needs a single argument\"); }\n");
     fprintf(fp, "    va_list args;\n");
@@ -2587,6 +2617,20 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    obj->port.direction = PORT_DIR_WRITE;\n");
     fprintf(fp, "    obj->port.fp = fp;\n");
     fprintf(fp, "    obj->port.printf = file_printf;\n");
+    fprintf(fp, "    obj->port.write_char = file_write_char;\n");
+    fprintf(fp, "    return OBJECT(obj);\n");
+    fprintf(fp, "}\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "static value primcall_open_output_string(environment env, int nargs, ...) {\n");
+    fprintf(fp, "    if (nargs != 0) { RAISE(\"open-output-string accepts no arguments\"); }\n");
+    fprintf(fp, "    struct object *obj = calloc(1, sizeof(struct object));\n");
+    fprintf(fp, "    obj->type = OBJ_PORT;");
+    fprintf(fp, "    obj->port.direction = PORT_DIR_WRITE;\n");
+    fprintf(fp, "    obj->port.string = malloc(128);\n");
+    fprintf(fp, "    obj->port.string_cap = 128;\n");
+    fprintf(fp, "    obj->port.string_len = 0;\n");
+    fprintf(fp, "    obj->port.printf = string_printf;\n");
+    fprintf(fp, "    obj->port.write_char = string_write_char;\n");
     fprintf(fp, "    return OBJECT(obj);\n");
     fprintf(fp, "}\n");
     fprintf(fp, "\n");
