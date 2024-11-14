@@ -129,6 +129,9 @@ static struct object current_input_port;
 static struct object current_output_port;
 static struct object current_error_port;
 
+static int cmdline_argc;
+static const char **cmdline_argv;
+
 static void cleanup(void) {}
 
 static value envget(environment env, int index) {
@@ -543,6 +546,18 @@ static value primcall_cons(environment env, int nargs, ...) {
     value cdr = va_arg(args, value);
     va_end(args);
     return make_pair(car, cdr);
+}
+
+static value primcall_command_line(environment env, int nargs, ...) {
+    if (nargs != 0) { RAISE("cons needs two arguments"); }
+
+    value cmdline = NIL;
+    for (int i = cmdline_argc - 1; i >= 0; --i) {
+        value s = make_string(cmdline_argv[i], strlen(cmdline_argv[i]));
+        cmdline = make_pair(s, cmdline);
+    }
+
+    return cmdline;
 }
 
 static value primcall_current_error_port(environment env, int nargs, ...) {

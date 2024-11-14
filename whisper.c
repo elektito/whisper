@@ -1634,6 +1634,7 @@ struct {
     { "char->integer", "char_to_integer", 1, 1 },
     { "char?", "char_q", 1, 1 },
     { "close-port", "close_port", 1, 1 },
+    { "command-line", "command_line", 0, 0 },
     { "cons", "cons", 2, 2 },
     { "current-input-port", "current_input_port", 0, 0 },
     { "current-output-port", "current_output_port", 0, 0 },
@@ -1958,6 +1959,10 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    current_error_port.port.fp = stderr;\n");
     fprintf(fp, "    current_error_port.port.printf = file_printf;\n");
     fprintf(fp, "    current_error_port.port.write_char = file_write_char;\n");
+    fprintf(fp, "\n");
+
+    fprintf(fp, "    cmdline_argc = argc;\n");
+    fprintf(fp, "    cmdline_argv = argv;\n");
     fprintf(fp, "\n");
 
     fprintf(fp, "    %s(NULL, 0);\n", startup_func->name);
