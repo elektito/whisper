@@ -2260,7 +2260,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "        break;\n");
     fprintf(fp, "    default:\n");
     fprintf(fp, "        if (ch >= 32 && ch < 127)");
-    fprintf(fp, "            sprintf(buf, \"%%c\", ch);\n");
+    fprintf(fp, "            sprintf(buf, \"#\\\\%%c\", ch);\n");
     fprintf(fp, "        else");
     fprintf(fp, "            sprintf(buf, \"\\\\x%%02x\", (int) ch);\n");
     fprintf(fp, "        text = buf;\n");
