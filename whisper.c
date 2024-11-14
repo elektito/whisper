@@ -110,6 +110,15 @@ read_token(struct lexer *lexer)
 
         while (*lexer->ptr != '"' && lexer->ptr < program_end) {
             lexer->ptr++;
+            if (*lexer->ptr == '\\') {
+                if (lexer->ptr >= program_end) {
+                    fprintf(stderr, "eof in the middle of string\n");
+                    exit(1);
+                }
+
+                lexer->ptr++;
+                lexer->ptr++;
+            }
         }
 
         if (*lexer->ptr != '"') {
@@ -432,6 +441,9 @@ read_value(struct reader *reader)
 {
     /* this function expects read_token to have been called already */
 
+    int str_len;
+    char *buf, *ptr;
+
     reader->value.tok_start_idx = reader->lexer->cur_tok - reader->lexer->program;
     reader->value.tok_len = reader->lexer->cur_tok_len;
 
@@ -448,8 +460,54 @@ read_value(struct reader *reader)
         break;
     case TOK_STR:
         reader->value.type = VAL_STR;
-        reader->value.string.ptr = reader->lexer->cur_tok;
-        reader->value.string.length = reader->lexer->cur_tok_len;
+
+        buf = malloc(reader->lexer->cur_tok_len);
+        str_len = 0;
+        ptr = buf;
+
+        for (int i = 0; i < reader->lexer->cur_tok_len; ++i) {
+            if (reader->lexer->cur_tok[i] != '\\') {
+                *ptr = reader->lexer->cur_tok[i];
+            } else {
+                i++;
+                switch (reader->lexer->cur_tok[i]) {
+                case 'a':
+                    *ptr = '\a';
+                    break;
+                case 'b':
+                    *ptr = '\b';
+                    break;
+                case 'n':
+                    *ptr = '\n';
+                    break;
+                case 'r':
+                    *ptr = '\r';
+                    break;
+                case 't':
+                    *ptr = '\t';
+                    break;
+                case '"':
+                    *ptr = '"';
+                    break;
+                case '\\':
+                    *ptr = '\\';
+                    break;
+                case '|':
+                    *ptr = '|';
+                    break;
+                default:
+                    fprintf(stderr, "invalid escape character: %c\n", reader->lexer->cur_tok[i]);
+                    exit(1);
+                }
+            }
+
+            str_len++;
+            ptr++;
+        }
+
+        reader->value.string.ptr = buf;
+        reader->value.string.length = str_len;
+
         read_token(reader->lexer);
         break;
     case TOK_QUOTE:
