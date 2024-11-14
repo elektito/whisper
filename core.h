@@ -986,6 +986,11 @@ static value primcall_symbol_q(environment env, int nargs, ...) {
     return BOOL(IS_SYMBOL(v));
 }
 
+static value primcall_void(environment env, int nargs, ...) {
+    if (nargs != 0) { RAISE("void accepts no arguments"); }
+    return VOID;
+}
+
 static value primcall_write(environment env, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("write needs one or two arguments"); }
     va_list args;

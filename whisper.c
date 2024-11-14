@@ -1669,6 +1669,7 @@ struct {
     { "string?", "string_q", 1, 1 },
     { "substring", "substring", 3, 3 },
     { "symbol?", "symbol_q", 1, 1 },
+    { "void", "void", 0, 0 },
     { "write", "write", 1, 2 },
     { "write-char", "write_char", 1, 2 },
     { "+", "add", 0, -1 },
