@@ -1657,6 +1657,8 @@ struct {
     { "port?", "port_q", 1, 1 },
     { "read-char", "read_char", 0, 1 },
     { "read-line", "read_line", 0, 1 },
+    { "set-car!", "set_car_b", 2, 2 },
+    { "set-cdr!", "set_cdr_b", 2, 2 },
     { "string-copy", "string_copy", 1, 3 },
     { "string->number", "string_to_number", 1, 2 },
     { "string->symbol", "string_to_symbol", 1, 1 },

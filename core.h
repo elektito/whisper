@@ -801,6 +801,32 @@ static value primcall_read_line(environment env, int nargs, ...) {
     return GET_OBJECT(port)->port.read_line(port);
 }
 
+static value primcall_set_car_b(environment env, int nargs, ...) {
+    if (nargs != 2) { RAISE("set-car! needs two arguments"); }
+    va_list args;
+    va_start(args, nargs);
+    value pair = va_arg(args, value);
+    value obj = va_arg(args, value);
+    va_end(args);
+
+    if (!IS_PAIR(pair)) { RAISE("set-car! first argument is not a pair"); }
+    GET_PAIR(pair)->car = obj;
+    return VOID;
+}
+
+static value primcall_set_cdr_b(environment env, int nargs, ...) {
+    if (nargs != 2) { RAISE("set-cdr! needs two arguments"); }
+    va_list args;
+    va_start(args, nargs);
+    value pair = va_arg(args, value);
+    value obj = va_arg(args, value);
+    va_end(args);
+
+    if (!IS_PAIR(pair)) { RAISE("set-cdr! first argument is not a pair"); }
+    GET_PAIR(pair)->cdr = obj;
+    return VOID;
+}
+
 static value primcall_string_to_number(environment env, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("string-to-number needs one or two arguments"); }
     va_list args;
