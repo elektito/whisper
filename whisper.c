@@ -14,7 +14,7 @@ read_file(const char *filename, long *length)
     char *buffer;
     FILE *fp = fopen(filename, "rb");
     if (fp == NULL) {
-        perror("error opening file");
+        fprintf(stderr, "error opening file %s: %s\n", filename, strerror(errno));
         exit(1);
     }
 
