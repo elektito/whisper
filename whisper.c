@@ -1514,7 +1514,7 @@ compile_include(struct function *func, int indent, struct value *form)
     }
 
     char *filename = malloc(form->list.ptr[1].string.length + 1);
-    snprintf(filename, sizeof(filename), "%.*s",
+    snprintf(filename, form->list.ptr[1].string.length + 1, "%.*s",
              form->list.ptr[1].string.length,
              form->list.ptr[1].string.ptr);
 
