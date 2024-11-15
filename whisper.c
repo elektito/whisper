@@ -1616,26 +1616,6 @@ compile_include(struct function *func, int indent, struct value *form)
 }
 
 int
-compile_error(struct function *func, int indent, struct value *form)
-{
-    if (form->list.length != 2) {
-        fprintf(stderr, "malformed error\n");
-        exit(1);
-    }
-
-    int msg_varnum = compile_form(func, indent, &form->list.ptr[1]);
-    gen_code(func, indent, "printf(\"error: \");\n");
-    gen_code(func, indent, "primcall_display(NULL, NO_CALL_FLAGS, 2, x%d, OBJECT(&current_output_port));\n", msg_varnum);
-    gen_code(func, indent, "printf(\"\\n\");\n");
-    gen_code(func, indent, "exit(1);\n");
-
-    int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
-
-    return ret_varnum;
-}
-
-int
 compile_quoted_item(struct function *func, int indent, struct value *form)
 {
     int varnum;
@@ -1719,6 +1699,7 @@ struct {
     { "display", "display", 1, 2 },
     { "eof-object?", "eof_object_q", 1, 1 },
     { "eq?", "eq_q", 2, 2 },
+    { "error", "error", 1, 1 },
     { "exit", "exit", 0, 1 },
     { "get-output-string", "get_output_string", 1, 1 },
     { "input-port?", "input_port_q", 1, 1 },
@@ -1910,11 +1891,6 @@ compile_list(struct function *func, int indent, struct value *form)
                memcmp(list_car->identifier.name, "include", 7) == 0)
     {
         varnum = compile_include(func, indent, form);
-    } else if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 5 &&
-               memcmp(list_car->identifier.name, "error", 5) == 0)
-    {
-        varnum = compile_error(func, indent, form);
     } else {
         varnum = compile_call(func, indent, form);
     }

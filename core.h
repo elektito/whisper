@@ -615,6 +615,18 @@ static value primcall_eq_q(environment env, enum call_flags flags, int nargs, ..
     return BOOL(v1 == v2);
 }
 
+static value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("error needs a single argument"); }
+    init_args();
+    value msg = next_arg();
+    free_args();
+    if (!IS_STRING(msg)) { RAISE("error argument is not a string"); }
+    fprintf(stderr, "error: ");
+    _display(msg, OBJECT(&current_error_port));
+    printf("\n");
+    return VOID;
+}
+
 static value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("exit needs zero or one argument"); }
     init_args();
