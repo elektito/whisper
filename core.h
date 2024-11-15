@@ -6,14 +6,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum call_flags {
+    NO_CALL_FLAGS = 0,
+    CALL_HAS_ARG_ARRAY = 1,
+};
+
 typedef void *value;
 typedef value *environment;
 typedef struct closure *closure;
 typedef void(*kont)(value v);
-typedef value(*funcptr)(environment env, int nargs, ...);
+typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 
 struct closure {
-    value (*func)(environment env, int nargs, ...);
+    funcptr func;
     int n_args;
     int n_freevars;
     value freevars[];
@@ -121,6 +126,11 @@ struct object {
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
 
 #define RAISE(...) { fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
+
+#define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
+#define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
+#define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
+#define free_args() va_end(argsx); free(arg_arr)
 
 static int n_symbols = 0;
 static struct symbol *symbols = NULL;
@@ -467,79 +477,71 @@ static int string_cmp(struct string *s1, struct string *s2) {
 
 /************ primcall functions ***********/
 
-static value primcall_boolean_q(environment env, int nargs, ...) {
+static value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("boolean? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_BOOL(v));
 }
 
-static value primcall_car(environment env, int nargs, ...) {
+static value primcall_car(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("car needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value arg = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value arg = next_arg();
+    free_args();
     if (!IS_PAIR(arg)) { RAISE("car argument is not a pair") }
     return GET_PAIR(arg)->car;
 }
 
-static value primcall_cdr(environment env, int nargs, ...) {
+static value primcall_cdr(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("car needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value arg = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value arg = next_arg();
+    free_args();
     if (!IS_PAIR(arg)) { RAISE("cdr argument is not a pair") }
     return GET_PAIR(arg)->cdr;
 }
 
-static value primcall_char_downcase(environment env, int nargs, ...) {
+static value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("char-downcase needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value ch = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value ch = next_arg();
+    free_args();
     if (!IS_CHAR(ch)) { RAISE("char-downcase argument is not a char") }
     return GET_CHAR(ch) >= 'A' && GET_CHAR(ch) <= 'Z' ? CHAR(GET_CHAR(ch) - 'A' + 'a') : ch;
 }
 
-static value primcall_char_upcase(environment env, int nargs, ...) {
+static value primcall_char_upcase(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("char-upcase needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value ch = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value ch = next_arg();
+    free_args();
     if (!IS_CHAR(ch)) { RAISE("char-upcase argument is not a char") }
     return GET_CHAR(ch) >= 'a' && GET_CHAR(ch) <= 'z' ? CHAR(GET_CHAR(ch) - 'a' + 'A') : ch;
 }
 
-static value primcall_char_to_integer(environment env, int nargs, ...) {
+static value primcall_char_to_integer(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("char->integer needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value ch = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value ch = next_arg();
+    free_args();
     if (!IS_CHAR(ch)) { RAISE("char->integer argument is not a char") }
     return FIXNUM((int) GET_CHAR(ch));
 }
 
-static value primcall_char_q(environment env, int nargs, ...) {
+static value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("char? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value x = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value x = next_arg();
+    free_args();
     return BOOL(IS_CHAR(x));
 }
 
-static value primcall_close_port(environment env, int nargs, ...) {
-    va_list args;
-    va_start(args, nargs);
-    value port = va_arg(args, value);
-    va_end(args);
+static value primcall_close_port(environment env, enum call_flags flags, int nargs, ...) {
+    init_args();
+    value port = next_arg();
+    free_args();
     if (!IS_PORT(port)) { RAISE("close-port argument is not a port") }
     if (GET_OBJECT(port)->port.closed) return VOID;
     int ret = fclose(GET_OBJECT(port)->port.fp);
@@ -548,17 +550,16 @@ static value primcall_close_port(environment env, int nargs, ...) {
     return VOID;
 }
 
-static value primcall_cons(environment env, int nargs, ...) {
+static value primcall_cons(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("cons needs two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value car = va_arg(args, value);
-    value cdr = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value car = next_arg();
+    value cdr = next_arg();
+    free_args();
     return make_pair(car, cdr);
 }
 
-static value primcall_command_line(environment env, int nargs, ...) {
+static value primcall_command_line(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("cons needs two arguments"); }
 
     value cmdline = NIL;
@@ -570,59 +571,55 @@ static value primcall_command_line(environment env, int nargs, ...) {
     return cmdline;
 }
 
-static value primcall_current_error_port(environment env, int nargs, ...) {
+static value primcall_current_error_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("current-error-port needs no arguments"); }
     return OBJECT(&current_error_port);
 }
 
-static value primcall_current_input_port(environment env, int nargs, ...) {
+static value primcall_current_input_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("current-input-port needs no arguments"); }
     return OBJECT(&current_input_port);
 }
 
-static value primcall_current_output_port(environment env, int nargs, ...) {
+static value primcall_current_output_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("current-output-port needs no arguments"); }
     return OBJECT(&current_output_port);
 }
 
-static value primcall_display(environment env, int nargs, ...) {
+static value primcall_display(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("display needs one or two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    value port = nargs == 1 ? OBJECT(&current_output_port) : va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
+    free_args();
     if (!IS_PORT(port)) { RAISE("writing to non-port"); }
     if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("writing to non-output port"); }
     _display(v, port);
     return VOID;
 }
 
-static value primcall_eof_object_q(environment env, int nargs, ...) {
+static value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("eof-object? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_EOFOBJ(v));
 }
 
-static value primcall_eq_q(environment env, int nargs, ...) {
+static value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("eq? needs two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value v1 = va_arg(args, value);
-    value v2 = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v1 = next_arg();
+    value v2 = next_arg();
+    free_args();
     return BOOL(v1 == v2);
 }
 
-static value primcall_exit(environment env, int nargs, ...) {
+static value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("exit needs zero or one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value code = nargs == 1 ? va_arg(args, value) : FIXNUM(0);
-    va_end(args);
+    init_args();
+    value code = nargs == 1 ? next_arg() : FIXNUM(0);
+    free_args();
     if (IS_BOOL(code)) {
         if (GET_BOOL(code))
             exit(0);
@@ -637,75 +634,68 @@ static value primcall_exit(environment env, int nargs, ...) {
     return VOID;
 }
 
-static value primcall_get_output_string(environment env, int nargs, ...) {
+static value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("get-output-string needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value port = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value port = next_arg();
+    free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { RAISE("argument is not an output string port"); }
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
 }
 
-static value primcall_input_port_q(environment env, int nargs, ...) {
+static value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("input-port? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_READ);
 }
 
-static value primcall_integer_to_char(environment env, int nargs, ...) {
+static value primcall_integer_to_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("integer->char needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value n = next_arg();
+    free_args();
     if (!IS_FIXNUM(n)) { RAISE("integer->char argument is not a number") }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { RAISE("integer->char argument is out of range") }
     return CHAR((char) GET_FIXNUM(n));
 }
 
-static value primcall_make_string(environment env, int nargs, ...) {
+static value primcall_make_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("make-string needs one or two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
-    value ch = nargs == 1 ? CHAR(0) : va_arg(args, value);
-    va_end(args);
+    init_args();
+    value n = next_arg();
+    value ch = nargs == 1 ? CHAR(0) : next_arg();
+    free_args();
     if (!IS_FIXNUM(n)) { RAISE("make-string first argument should be a number"); }
     if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
     return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));
 }
 
-static value primcall_newline(environment env, int nargs, ...) {
+static value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("newline needs zero or one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_output_port);
-    va_end(args);
+    init_args();
+    value port = nargs == 1 ? next_arg() : OBJECT(&current_output_port);
+    free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("newline argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, CHAR('\n'));
     return VOID;
 }
 
-static value primcall_number_q(environment env, int nargs, ...) {
+static value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("number? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_FIXNUM(v));
 }
 
-static value primcall_number_to_string(environment env, int nargs, ...) {
+static value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("number->string needs one or two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
-    value base = nargs == 1 ? FIXNUM(10) : va_arg(args, value);
-    va_end(args);
+    init_args();
+    value n = next_arg();
+    value base = nargs == 1 ? FIXNUM(10) : next_arg();
+    free_args();
     if (!IS_FIXNUM(n)) { RAISE("number->string first argument should be a number"); }
     if (!IS_FIXNUM(base)) { RAISE("number->string second argument should be a number"); }
     char buf[128];
@@ -727,12 +717,11 @@ static value primcall_number_to_string(environment env, int nargs, ...) {
     return make_string(buf, strlen(buf));
 }
 
-static value primcall_open_input_file(environment env, int nargs, ...) {
+static value primcall_open_input_file(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("open-input-file needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value filename = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value filename = next_arg();
+    free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
     int filename_len = GET_STRING(filename)->len;
     char *filenamez = malloc(filename_len + 1);
@@ -749,12 +738,11 @@ static value primcall_open_input_file(environment env, int nargs, ...) {
     return OBJECT(obj);
 }
 
-static value primcall_open_output_file(environment env, int nargs, ...) {
+static value primcall_open_output_file(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("open-output-file needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value filename = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value filename = next_arg();
+    free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
     int filename_len = GET_STRING(filename)->len;
     char *filenamez = malloc(filename_len + 1);
@@ -770,7 +758,7 @@ static value primcall_open_output_file(environment env, int nargs, ...) {
     return OBJECT(obj);
 }
 
-static value primcall_open_output_string(environment env, int nargs, ...) {
+static value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("open-output-string accepts no arguments"); }
     struct object *obj = calloc(1, sizeof(struct object));
     obj->type = OBJ_PORT;
@@ -783,87 +771,79 @@ static value primcall_open_output_string(environment env, int nargs, ...) {
     return OBJECT(obj);
 }
 
-static value primcall_pair_q(environment env, int nargs, ...) {
+static value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("port? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value x = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value x = next_arg();
+    free_args();
     return BOOL(IS_PAIR(x));
 }
 
-static value primcall_peek_char(environment env, int nargs, ...) {
+static value primcall_peek_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("peek-char needs zero or one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_input_port);
-    va_end(args);
+    init_args();
+    value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
+    free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("peek-char argument is not an input port"); }
     return GET_OBJECT(port)->port.peek_char(port);
 }
 
-static value primcall_port_q(environment env, int nargs, ...) {
+static value primcall_port_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("port? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_PORT(v));
 }
 
-static value primcall_read_char(environment env, int nargs, ...) {
+static value primcall_read_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("read-char needs zero or one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_input_port);
-    va_end(args);
+    init_args();
+    value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
+    free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("read-char argument is not an input port"); }
     return GET_OBJECT(port)->port.read_char(port);
 }
 
-static value primcall_read_line(environment env, int nargs, ...) {
+static value primcall_read_line(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("read-line needs zero or one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value port = nargs == 1 ? va_arg(args, value) : OBJECT(&current_input_port);
-    va_end(args);
+    init_args();
+    value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
+    free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("read-line argument is not an input port"); }
     return GET_OBJECT(port)->port.read_line(port);
 }
 
-static value primcall_set_car_b(environment env, int nargs, ...) {
+static value primcall_set_car_b(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("set-car! needs two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value pair = va_arg(args, value);
-    value obj = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value pair = next_arg();
+    value obj = next_arg();
+    free_args();
 
     if (!IS_PAIR(pair)) { RAISE("set-car! first argument is not a pair"); }
     GET_PAIR(pair)->car = obj;
     return VOID;
 }
 
-static value primcall_set_cdr_b(environment env, int nargs, ...) {
+static value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("set-cdr! needs two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value pair = va_arg(args, value);
-    value obj = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value pair = next_arg();
+    value obj = next_arg();
+    free_args();
 
     if (!IS_PAIR(pair)) { RAISE("set-cdr! first argument is not a pair"); }
     GET_PAIR(pair)->cdr = obj;
     return VOID;
 }
 
-static value primcall_string_to_number(environment env, int nargs, ...) {
+static value primcall_string_to_number(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("string-to-number needs one or two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value str_v = va_arg(args, value);
-    value base = nargs == 1 ? FIXNUM(10) : va_arg(args, value);
-    va_end(args);
+    init_args();
+    value str_v = next_arg();
+    value base = nargs == 1 ? FIXNUM(10) : next_arg();
+    free_args();
     if (!IS_STRING(str_v)) { RAISE("string->number first argument must be a string"); }
     if (!IS_FIXNUM(base)) { RAISE("string->number second argument must be a number"); }
     if (GET_STRING(str_v)->len == 0) return FALSE;
@@ -880,51 +860,47 @@ static value primcall_string_to_number(environment env, int nargs, ...) {
     return FIXNUM(result);
 }
 
-static value primcall_string_to_symbol(environment env, int nargs, ...) {
+static value primcall_string_to_symbol(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("string->symbol needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value str = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value str = next_arg();
+    free_args();
     if (!IS_STRING(str)) { RAISE("string->symbol argument is not a string"); }
     return string_to_symbol(str);
 }
 
-static value primcall_string_append(environment env, int nargs, ...) {
+static value primcall_string_append(environment env, enum call_flags flags, int nargs, ...) {
     int total_size = 0;
-    va_list args;
-    va_start(args, nargs);
+    init_args();
     for (int i = 0; i < nargs; ++i) {
-        struct string *str = GET_STRING(va_arg(args, value));
+        struct string *str = GET_STRING(next_arg());
         total_size += str->len;
     }
-    va_end(args);
 
     struct string *concat = malloc(sizeof(struct string));
     concat->len = total_size;
     concat->s = malloc(total_size);
 
-    va_start(args, nargs);
+    reset_args();
     size_t offset = 0;
     for (int i = 0; i < nargs; ++i) {
-        struct string *str = GET_STRING(va_arg(args, value));
+        struct string *str = GET_STRING(next_arg());
         memcpy(concat->s + offset, str->s, str->len);
         offset += str->len;
     }
-    va_end(args);
+    free_args();
 
     return STRING(concat);
 }
 
-static value primcall_string_copy(environment env, int nargs, ...) {
+static value primcall_string_copy(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs > 3) { RAISE("string-copy needs at most three arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value str = va_arg(args, value);
+    init_args();
+    value str = next_arg();
     if (!IS_STRING(str)) { RAISE("string-copy first argument is not a string"); }
-    value start = nargs > 1 ? va_arg(args, value) : FIXNUM(0);
-    value end = nargs > 2 ? va_arg(args, value) : FIXNUM(GET_STRING(str)->len);
-    va_end(args);
+    value start = nargs > 1 ? next_arg() : FIXNUM(0);
+    value end = nargs > 2 ? next_arg() : FIXNUM(GET_STRING(str)->len);
+    free_args();
     if (!IS_FIXNUM(start)) { RAISE("string-copy second argument is not a number"); }
     if (!IS_FIXNUM(end)) { RAISE("string-copy third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("string-copy start index is out of range"); }
@@ -936,65 +912,60 @@ static value primcall_string_copy(environment env, int nargs, ...) {
     return STRING(result);
 }
 
-static value primcall_string_length(environment env, int nargs, ...) {
+static value primcall_string_length(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("string-length needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value str = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value str = next_arg();
+    free_args();
     if (!IS_STRING(str)) { RAISE("string-length argument is not a string"); }
     return FIXNUM(GET_STRING(str)->len);
 }
 
-static value primcall_string_ref(environment env, int nargs, ...) {
+static value primcall_string_ref(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("string-ref needs two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value str = va_arg(args, value);
-    value idx = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value str = next_arg();
+    value idx = next_arg();
+    free_args();
     if (!IS_STRING(str)) { RAISE("string-ref first argument is not a string"); }
     if (!IS_FIXNUM(idx)) { RAISE("string-ref second argument is not a number"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE("string-ref index is out of range"); }
     return CHAR(GET_STRING(str)->s[GET_FIXNUM(idx)]);
 }
 
-static value primcall_string_eq_q(environment env, int nargs, ...) {
+static value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs == 0) { RAISE("string=? needs at least one argument"); }
     if (nargs == 1) return TRUE;
-    va_list args;
-    va_start(args, nargs);
-    value prev = va_arg(args, value);
+    init_args();
+    value prev = next_arg();
     for (int i = 1; i < nargs; ++i) {
-        value cur = va_arg(args, value);
+        value cur = next_arg();
         if (string_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
-            va_end(args);
+            free_args();
             return FALSE;
         }
         prev = cur;
     }
 
-    va_end(args);
+    free_args();
     return TRUE;
 }
 
-static value primcall_string_q(environment env, int nargs, ...) {
+static value primcall_string_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("string? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_STRING(v));
 }
 
-static value primcall_substring(environment env, int nargs, ...) {
+static value primcall_substring(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 3) { RAISE("substring needs three arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value str = va_arg(args, value);
-    value start = va_arg(args, value);
-    value end = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value str = next_arg();
+    value start = next_arg();
+    value end = next_arg();
+    free_args();
     if (!IS_STRING(str)) { RAISE("substring first argument is not a string"); }
     if (!IS_FIXNUM(start)) { RAISE("substring second argument is not a number"); }
     if (!IS_FIXNUM(end)) { RAISE("substring third argument is not a number"); }
@@ -1007,62 +978,57 @@ static value primcall_substring(environment env, int nargs, ...) {
     return STRING(result);
 }
 
-static value primcall_symbol_q(environment env, int nargs, ...) {
+static value primcall_symbol_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("symbol? needs a single argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    free_args();
     return BOOL(IS_SYMBOL(v));
 }
 
-static value primcall_void(environment env, int nargs, ...) {
+static value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("void accepts no arguments"); }
     return VOID;
 }
 
-static value primcall_write(environment env, int nargs, ...) {
+static value primcall_write(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("write needs one or two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value v = va_arg(args, value);
-    value port = nargs == 1 ? OBJECT(&current_output_port) : va_arg(args, value);
-    va_end(args);
+    init_args();
+    value v = next_arg();
+    value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
+    free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("write second argument is not an output port"); }
     _write(v, port);
     return VOID;
 }
 
-static value primcall_write_char(environment env, int nargs, ...) {
+static value primcall_write_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("write-char needs one or two arguments"); }
-    va_list args;
-    va_start(args, nargs);
-    value ch = va_arg(args, value);
-    value port = nargs == 1 ? OBJECT(&current_output_port) : va_arg(args, value);
-    va_end(args);
+    init_args();
+    value ch = next_arg();
+    value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
+    free_args();
     if (!IS_CHAR(ch)) { RAISE("write-char first argument is not a char"); }
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("write-char second argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, ch);
     return VOID;
 }
 
-static value primcall_add(environment env, int nargs, ...) {
+static value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
     value result = FIXNUM(0);
-    va_list args;
-    va_start(args, nargs);
+    init_args();
     for (int i = 0; i < nargs; ++i) {
-        value v = va_arg(args, value);
+        value v = next_arg();
         if (!IS_FIXNUM(v)) { RAISE("addition (+) argument is not a number") }
         result += (int64_t) v;
     }
     return result;
 }
 
-static value primcall_div(environment env, int nargs, ...) {
+static value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE("division (-) needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value result_v = va_arg(args, value);
+    init_args();
+    value result_v = next_arg();
     if (!IS_FIXNUM(result_v)) { RAISE("division (/) argument is not a number"); }
     int64_t result = GET_FIXNUM(result_v);
     if (nargs == 1) {
@@ -1075,108 +1041,117 @@ static value primcall_div(environment env, int nargs, ...) {
         return FIXNUM(0); /* we don't have fractionals, so 1/n is always zero */
     }
     for (int i = 1; i < nargs; ++i) {
-        value v = va_arg(args, value);
+        value v = next_arg();
         if (!IS_FIXNUM(v)) { RAISE("division (/) argument is not a number") }
         if (GET_FIXNUM(v) == 0)
             RAISE("division by zero");
         result /= GET_FIXNUM(v);
     }
+
+    free_args();
     return FIXNUM(result);
 }
 
-static value primcall_mul(environment env, int nargs, ...) {
+static value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
     int64_t result = 1;
-    va_list args;
-    va_start(args, nargs);
+    init_args();
     for (int i = 0; i < nargs; ++i) {
-        value v = va_arg(args, value);
+        value v = next_arg();
         if (!IS_FIXNUM(v)) { RAISE("multiplication (*) argument is not a number") }
         result *= GET_FIXNUM(v);
     }
+
+    free_args();
     return FIXNUM(result);
 }
 
-static value primcall_sub(environment env, int nargs, ...) {
+static value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE("subtraction (-) needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value result = va_arg(args, value);
+    init_args();
+    value result = next_arg();
     if (!IS_FIXNUM(result)) { RAISE("subtraction (-) argument is not a number"); }
     if (nargs == 1) return FIXNUM(-GET_FIXNUM(result));
     for (int i = 1; i < nargs; ++i) {
-        value v = va_arg(args, value);
+        value v = next_arg();
         if (!IS_FIXNUM(v)) { RAISE("subtraction (-) argument is not a number") }
         result -= (int64_t) v;
     }
+
+    free_args();
     return result;
 }
 
-static value primcall_num_eq(environment env, int nargs, ...) {
+static value primcall_num_eq(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE("= needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
+    init_args();
+    value n = next_arg();
     if (!IS_FIXNUM(n)) { RAISE("= argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
-        value m = va_arg(args, value);
+        value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("= argument is not a number") }
         if (n != m) return FALSE;
     }
+
+    free_args();
     return TRUE;
 }
 
-static value primcall_num_lt(environment env, int nargs, ...) {
+static value primcall_num_lt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE("< needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
+    init_args();
+    value n = next_arg();
     if (!IS_FIXNUM(n)) { RAISE("< argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
-        value m = va_arg(args, value);
+        value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("< argument is not a number") }
         if (n >= m) return FALSE;
     }
+
+    free_args();
     return TRUE;
 }
 
-static value primcall_num_gt(environment env, int nargs, ...) {
+static value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE("> needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
+    init_args();
+    value n = next_arg();
     if (!IS_FIXNUM(n)) { RAISE("> argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
-        value m = va_arg(args, value);
+        value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("> argument is not a number") }
         if (n <= m) return FALSE;
     }
+
+    free_args();
     return TRUE;
 }
 
-static value primcall_num_le(environment env, int nargs, ...) {
+static value primcall_num_le(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE("<= needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
+    init_args();
+    value n = next_arg();
     if (!IS_FIXNUM(n)) { RAISE("<= argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
-        value m = va_arg(args, value);
+        value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("<= argument is not a number") }
         if (n > m) return FALSE;
     }
+
+    free_args();
     return TRUE;
 }
 
-static value primcall_num_ge(environment env, int nargs, ...) {
+static value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { RAISE(">= needs at least one argument"); }
-    va_list args;
-    va_start(args, nargs);
-    value n = va_arg(args, value);
+    init_args();
+    value n = next_arg();
     if (!IS_FIXNUM(n)) { RAISE(">= argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
-        value m = va_arg(args, value);
+        value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE(">= argument is not a number") }
         if (n < m) return FALSE;
     }
+
+    free_args();
     return TRUE;
 }

@@ -955,8 +955,7 @@ compile_function(struct function *func, int indent, struct value *form,
         gen_code(new_func, 1, "if (nargs != %d) { RAISE(\"argument count mismatch\"); }\n", n_params);
     }
 
-    gen_code(new_func, 1, "va_list args;\n");
-    gen_code(new_func, 1, "va_start(args, nargs);\n");
+    gen_code(new_func, 1, "init_args();\n");
     for (int i = 0; i < n_params; ++i) {
         int offset = is_define ? 1 : 0;
         struct value *param = &params->list.ptr[i + offset];
@@ -966,7 +965,7 @@ compile_function(struct function *func, int indent, struct value *form,
         }
         new_func->params[i] = param->identifier.interned;
 
-        gen_code(new_func, 1, "value %.*s = va_arg(args, value);\n",
+        gen_code(new_func, 1, "value %.*s = next_arg();\n",
                 func->compiler->reader->interned_mangled_len[param->identifier.interned],
                 func->compiler->reader->interned_mangled[param->identifier.interned]);
     }
@@ -986,7 +985,7 @@ compile_function(struct function *func, int indent, struct value *form,
         gen_code(new_func, 1, "value %.*s = NIL;\n",
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx]);
-        gen_code(new_func, 1, "for (int i = 0; i < nargs - %d; ++i) { value v = va_arg(args, value); %.*s = make_pair(v, %.*s); }\n",
+        gen_code(new_func, 1, "for (int i = 0; i < nargs - %d; ++i) { value v = next_arg(); %.*s = make_pair(v, %.*s); }\n",
                  n_params,
                  func->compiler->reader->interned_mangled_len[rest_idx],
                  func->compiler->reader->interned_mangled[rest_idx],
@@ -999,7 +998,6 @@ compile_function(struct function *func, int indent, struct value *form,
                  func->compiler->reader->interned_mangled[rest_idx]);
     }
 
-    gen_code(new_func, 1, "va_end(args);\n");
     gen_code(new_func, 0, "\n");
 
     int new_varnum = -1;
@@ -1007,6 +1005,7 @@ compile_function(struct function *func, int indent, struct value *form,
         new_varnum = compile_form(new_func, 1, &form->list.ptr[i]);
     }
 
+    gen_code(new_func, 1, "free_args();\n");
     gen_code(new_func, 1, "return x%d;\n", new_varnum);
 
     /* now generate to code for referencing the function */
@@ -1250,7 +1249,7 @@ compile_call(struct function *func, int indent, struct value *form)
     }
 
     ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
+    gen_code(func, indent, "value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, NO_CALL_FLAGS, %d", ret_varnum, func_varnum, func_varnum, form->list.length - 1);
     for (int i = 0; i < form->list.length - 1; ++i) {
         gen_code(func, 0, ", x%d", arg_varnums[i]);
     }
@@ -1626,7 +1625,7 @@ compile_error(struct function *func, int indent, struct value *form)
 
     int msg_varnum = compile_form(func, indent, &form->list.ptr[1]);
     gen_code(func, indent, "printf(\"error: \");\n");
-    gen_code(func, indent, "primcall_display(NULL, 2, x%d, OBJECT(&current_output_port));\n", msg_varnum);
+    gen_code(func, indent, "primcall_display(NULL, NO_CALL_FLAGS, 2, x%d, OBJECT(&current_output_port));\n", msg_varnum);
     gen_code(func, indent, "printf(\"\\n\");\n");
     gen_code(func, indent, "exit(1);\n");
 
@@ -1802,7 +1801,7 @@ compile_primcall(struct function *func, int indent, struct value *form)
             }
 
             int ret_varnum = func->varnum++;
-            gen_code(func, indent, "value x%d = primcall_%s(NULL, %d", ret_varnum, primcalls[i].c_name, nargs);
+            gen_code(func, indent, "value x%d = primcall_%s(NULL, NO_CALL_FLAGS, %d", ret_varnum, primcalls[i].c_name, nargs);
             for (int i = 0; i < nargs; ++i) {
                 gen_code(func, 0, ", x%d", arg_varnums[i]);
             }
@@ -1993,7 +1992,7 @@ compile_program(struct compiler *compiler)
 
     /* add function prototypes */
     for (int i = 0; i < compiler->n_functions; ++i) {
-        fprintf(fp, "static value %s(environment env, int nargs, ...);\n", compiler->functions[i]->name);
+        fprintf(fp, "static value %s(environment env, enum call_flags flags, int nargs, ...);\n", compiler->functions[i]->name);
     }
     fprintf(fp, "\n");
 
@@ -2007,7 +2006,7 @@ compile_program(struct compiler *compiler)
 
     /* add function implementations */
     for (int i = 0; i < compiler->n_functions; ++i) {
-        fprintf(fp, "static value %s(environment env, int nargs, ...) {\n", compiler->functions[i]->name);
+        fprintf(fp, "static value %s(environment env, enum call_flags flags, int nargs, ...) {\n", compiler->functions[i]->name);
         fwrite(compiler->functions[i]->code, 1, compiler->functions[i]->code_size, fp);
         fprintf(fp, "}\n\n");
     }
@@ -2051,7 +2050,7 @@ compile_program(struct compiler *compiler)
     fprintf(fp, "    cmdline_argv = argv;\n");
     fprintf(fp, "\n");
 
-    fprintf(fp, "    %s(NULL, 0);\n", startup_func->name);
+    fprintf(fp, "    %s(NULL, NO_CALL_FLAGS, 0);\n", startup_func->name);
     fprintf(fp, "}\n");
     fclose(fp);
 }
