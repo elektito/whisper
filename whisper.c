@@ -1844,6 +1844,10 @@ compile_list(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
+    /* XXX This is function strictly speaking does not compile
+     * correctly. It doesn't allow binding or defining primcalls or
+     * special forms. */
+
     struct value *list_car = &form->list.ptr[0];
     if (list_car->type == VAL_ID) {
         varnum = compile_primcall(func, indent, form);
