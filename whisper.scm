@@ -389,7 +389,7 @@
 ;;;;;; main ;;;;;;
 
 (if (not (= 2 (length (command-line))))
-    (compile-error "you need to pass the input file as the only argument"))
+    (compile-error "usage: ~a input-file" (car (command-line))))
 
 (let ((port (open-input-file (cadr (command-line)))))
   (let ((program (create-program port)))
