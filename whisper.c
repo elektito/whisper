@@ -1269,6 +1269,25 @@ compile_define(struct function *func, int indent, struct value *form)
         exit(1);
     }
 
+    /* check for re-defined variables/functions */
+    {
+        int var_name;
+        if (form->list.ptr[1].type == VAL_ID) {
+            var_name = form->list.ptr[1].identifier.interned;
+        } else {
+            var_name = form->list.ptr[1].list.ptr[0].identifier.interned;
+        }
+
+        for (int i = 0; i < func->n_params; ++i) {
+            if (func->params[i] == var_name) {
+                fprintf(stderr, "re-defining: %.*s\n",
+                        func->compiler->reader->interned_name_len[var_name],
+                        func->compiler->reader->interned_name[var_name]);
+                exit(1);
+            }
+        }
+    }
+
     if (form->list.ptr[1].type == VAL_ID) {
         int var_name = form->list.ptr[1].identifier.interned;
         int mangled_len = func->compiler->reader->interned_mangled_len[var_name];
