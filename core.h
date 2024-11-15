@@ -617,6 +617,26 @@ static value primcall_eq_q(environment env, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+static value primcall_exit(environment env, int nargs, ...) {
+    if (nargs != 0 && nargs != 1) { RAISE("exit needs zero or one argument"); }
+    va_list args;
+    va_start(args, nargs);
+    value code = nargs == 1 ? va_arg(args, value) : FIXNUM(0);
+    va_end(args);
+    if (IS_BOOL(code)) {
+        if (GET_BOOL(code))
+            exit(0);
+        else
+            exit(1);
+    } else if (IS_FIXNUM(code)) {
+        exit(GET_FIXNUM(code));
+    } else {
+        RAISE("invalid exit code");
+    }
+
+    return VOID;
+}
+
 static value primcall_get_output_string(environment env, int nargs, ...) {
     if (nargs != 1) { RAISE("get-output-string needs a single argument"); }
     va_list args;

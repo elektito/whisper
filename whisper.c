@@ -1720,6 +1720,7 @@ struct {
     { "display", "display", 1, 2 },
     { "eof-object?", "eof_object_q", 1, 1 },
     { "eq?", "eq_q", 2, 2 },
+    { "exit", "exit", 0, 1 },
     { "get-output-string", "get_output_string", 1, 1 },
     { "input-port?", "input_port_q", 1, 1 },
     { "integer->char", "integer_to_char", 1, 1 },
