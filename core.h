@@ -667,11 +667,13 @@ static value primcall_exit(environment env, enum call_flags flags, int nargs, ..
     value code = nargs == 1 ? next_arg() : FIXNUM(0);
     free_args();
     if (IS_BOOL(code)) {
+        cleanup();
         if (GET_BOOL(code))
             exit(0);
         else
             exit(1);
     } else if (IS_FIXNUM(code)) {
+        cleanup();
         exit(GET_FIXNUM(code));
     } else {
         RAISE("invalid exit code");
