@@ -15,6 +15,9 @@
 (define (null? x)
   (eq? '() x))
 
+(define (list? x)
+  (or (null? x) (pair? x)))
+
 (define (list . x) x)
 
 (define (list-tail ls k)
@@ -85,6 +88,15 @@
       (char=? #\newline c)
       (char=? #\return c)))
 
+(define (char-alphabetic? ch)
+  (let ((code (char->integer ch))
+        (a (char->integer #\a))
+        (z (char->integer #\z))
+        (A (char->integer #\A))
+        (Z (char->integer #\Z)))
+    (or (and (>= code a) (<= code z))
+        (and (>= code A) (<= code Z)))))
+
 (define (char-numeric? ch)
   (let ((code (char->integer ch))
         (zero (char->integer #\0))
@@ -97,6 +109,9 @@
 (define (negative? n)
   (< n 0))
 
+(define (!= m n)
+  (not (= m n)))
+
 (define (string-join strs sep)
   (let loop ((result "") (strs strs))
     (if (null? strs)
@@ -104,6 +119,9 @@
         (if (string=? "" result)
             (loop (car strs) (cdr strs))
             (loop (string-append result sep (car strs)) (cdr strs))))))
+
+(define (string-append-char str ch)
+  (string-append str (make-string 1 ch)))
 
 (define (print . x)
   (let loop ((x x))

@@ -126,6 +126,7 @@
   (list port
         '() ; funcs
         0   ; funcnum (function counter)
+        '() ; interned symbols
         ))
 
 (define (program-port program)
@@ -138,6 +139,12 @@
   (let ((n (caddr func)))
     (list-set! func 2 (+ n 1))
     n))
+
+(define (program-symbols program)
+  (list-ref program 3))
+
+(define (program-set-symbols program symbols)
+  (list-set! program 3 symbols))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
@@ -156,17 +163,37 @@
           (format output "\n")
           (loop (cdr funcs))))))
 
+(define (gen-symbol-defines program output)
+  (let loop ((i 0) (symbols (program-symbols program)))
+    (if (not (null? symbols))
+        (begin
+          (format output "#define sym~a ~a\n" (mangle-name (symbol->string (car symbols))) i)
+          (loop (+ i 1) (cdr symbols))))))
+
+(define (gen-symbol-table-init program output)
+  (let ((n-symbols (length (program-symbols program))))
+    (format output "    n_symbols = ~a;\n" n-symbols)
+    (format output "    symbols = malloc(sizeof(struct symbol) * ~a);\n" n-symbols)
+    (let loop ((i 0) (symbols (program-symbols program)))
+      (if (not (null? symbols))
+          (begin
+            (format output "    symbols[~a].name = \"~a\";\n" i (symbol->string (car symbols)))
+            (format output "    symbols[~a].name_len = ~a;\n" i (string-length (symbol->string (car symbols))))
+            (loop (+ i 1) (cdr symbols)))))))
+
 (define (output-program-code program)
   (let ((port (open-output-file "b.c")))
     (display "#include \"core.h\"\n\n" port)
+    (gen-symbol-defines program port)
+    (newline port)
     (gen-func-prototypes program port)
     (newline port)
     (gen-func-bodies program port)
-    (newline port)
     (display "int main(int argc, char *argv[]) {\n" port)
+    (gen-symbol-table-init program port)
+    (newline port)
     (display "    f0(NULL, 0);\n" port)
-    (display "}\n" port)
-    (void)))
+    (display "}\n" port)))
 
 (define (add-function program parent nargs has-rest)
   (let ((func (list (open-output-string) ; port
@@ -189,6 +216,9 @@
 
 (define (func-name func)
   (list-ref func 2))
+
+(define (func-program func)
+  (list-ref func 3))
 
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
@@ -267,8 +297,55 @@
               varnum)
             (loop (cdr primcalls))))))
 
+(define (mangle-name name)
+  (let loop ((i 0)
+             (mangled "_"))
+    (if (= i (string-length name))
+        mangled
+        (let ((ch (string-ref name i)))
+          (cond ((= i (string-length name)) mangled)
+                ((or (char-alphabetic? ch) (char-numeric? ch))
+                 (loop (+ i 1) (string-append-char mangled ch)))
+                ((char=? #\- ch) (loop (+ i 1) (string-append mangled "_")))
+                ((char=? #\_ ch) (loop (+ i 1) (string-append mangled "__")))
+                (else (loop (+ i 1) (format "~a_~a" mangled (char->integer ch)))))))))
+
+(define (intern program sym)
+  (let loop ((i 0) (symbols (program-symbols program)))
+    (if (null? symbols)
+        (program-set-symbols program (cons sym (program-symbols program)))
+        (if (eq? sym (car symbols))
+            i
+            (loop (+ i 1) (cdr symbols))))))
+
+(define (compile-quoted-item func indent form)
+  (cond ((boolean? form) (compile-form form))
+        ((number? form) (compile-form form))
+        ((char? form) (compile-form form))
+        ((string? form) (compile-form form))
+        ((symbol? form) (let ((varnum (func-next-varnum func)))
+                          (intern (func-program func) form)
+                          (gen-code func indent "value x~a = sym~a;\n" varnum (mangle-name (symbol->string form)))
+                          varnum))
+        ((list? form) (let ((varnum (func-next-varnum func)))
+                        (gen-code func indent "value x~a = NIL;\n" varnum)
+                        (let loop ((form form))
+                          (if (null? form)
+                              varnum
+                              (let ((car-varnum (compile-quoted-item func indent (car form))))
+                                (gen-code func indent "x~a = make_pair(x~a, x~a);\n" varnum car-varnum varnum)
+                                (loop (cdr form)))))))
+        (else (compile-error "unknown quoted value: ~s" form))))
+
+(define (compile-quote func indent form)
+  (if (!= (length form) 2)
+      (compile-error "quote expects a single argument")
+      (compile-quoted-item func indent (cadr form))))
+
 (define (compile-special-form func indent form)
-  -1)
+  (case (car form)
+    ((quote) (compile-quote func indent form))
+    (else -1)))
 
 (define (compile-call func indent form)
   (compile-error "calling procedures not implemented yet"))
@@ -280,7 +357,7 @@
 
   (let ((varnum (compile-primcall func indent form)))
     (if (negative? varnum)
-        (let ((varnum (compile-special-form func indent form)))
+          (let ((varnum (compile-special-form func indent form)))
           (if (negative? varnum)
               (compile-call func indent form)
               varnum))

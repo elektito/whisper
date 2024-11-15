@@ -454,6 +454,12 @@ static value string_to_symbol(value v) {
     return SYMBOL(n_symbols - 1);
 }
 
+static value symbol_to_string(value v) {
+    int i = GET_SYMBOL(v);
+    if (i < 0 || i >= n_symbols) { RAISE("unknown symbol"); }
+    return make_string(symbols[i].name, symbols[i].name_len);
+}
+
 static value alloc_string(size_t len, char fill) {
     struct string *str = malloc(sizeof(struct string));
     str->len = len;
@@ -659,6 +665,8 @@ static value primcall_error(environment env, enum call_flags flags, int nargs, .
     fprintf(stderr, "error: ");
     _display(msg, OBJECT(&current_error_port));
     printf("\n");
+    cleanup();
+    exit(1);
     return VOID;
 }
 
@@ -918,6 +926,15 @@ static value primcall_string_to_symbol(environment env, enum call_flags flags, i
     return string_to_symbol(str);
 }
 
+static value primcall_symbol_to_string(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("symbol->string needs a single argument"); }
+    init_args();
+    value str = next_arg();
+    free_args();
+    if (!IS_SYMBOL(str)) { RAISE("symbol->string argument is not a symbol"); }
+    return symbol_to_string(str);
+}
+
 static value primcall_string_append(environment env, enum call_flags flags, int nargs, ...) {
     int total_size = 0;
     init_args();
@@ -1140,7 +1157,7 @@ static value primcall_num_eq(environment env, enum call_flags flags, int nargs, 
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("= argument is not a number") }
-        if (n != m) return FALSE;
+        if (GET_FIXNUM(n) != GET_FIXNUM(m)) return FALSE;
     }
 
     free_args();
@@ -1155,7 +1172,7 @@ static value primcall_num_lt(environment env, enum call_flags flags, int nargs, 
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("< argument is not a number") }
-        if (n >= m) return FALSE;
+        if (GET_FIXNUM(n) >= GET_FIXNUM(m)) return FALSE;
     }
 
     free_args();
@@ -1170,7 +1187,7 @@ static value primcall_num_gt(environment env, enum call_flags flags, int nargs, 
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("> argument is not a number") }
-        if (n <= m) return FALSE;
+        if (GET_FIXNUM(n) <= GET_FIXNUM(m)) return FALSE;
     }
 
     free_args();
@@ -1185,7 +1202,7 @@ static value primcall_num_le(environment env, enum call_flags flags, int nargs, 
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE("<= argument is not a number") }
-        if (n > m) return FALSE;
+        if (GET_FIXNUM(n) > GET_FIXNUM(m)) return FALSE;
     }
 
     free_args();
@@ -1200,7 +1217,7 @@ static value primcall_num_ge(environment env, enum call_flags flags, int nargs, 
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
         if (!IS_FIXNUM(m)) { RAISE(">= argument is not a number") }
-        if (n < m) return FALSE;
+        if (GET_FIXNUM(n) < GET_FIXNUM(m)) return FALSE;
     }
 
     free_args();

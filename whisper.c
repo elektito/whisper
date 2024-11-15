@@ -1722,6 +1722,7 @@ struct {
     { "string-copy", "string_copy", 1, 3 },
     { "string->number", "string_to_number", 1, 2 },
     { "string->symbol", "string_to_symbol", 1, 1 },
+    { "symbol->string", "symbol_to_string", 1, 1 },
     { "string-append", "string_append", 0, -1 },
     { "string-length", "string_length", 1, 1 },
     { "string-ref", "string_ref", 2, 2 },
