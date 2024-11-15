@@ -466,6 +466,16 @@ static int string_cmp(struct string *s1, struct string *s2) {
 }
 
 /************ primcall functions ***********/
+
+static value primcall_boolean_q(environment env, int nargs, ...) {
+    if (nargs != 1) { RAISE("boolean? needs a single argument"); }
+    va_list args;
+    va_start(args, nargs);
+    value v = va_arg(args, value);
+    va_end(args);
+    return BOOL(IS_BOOL(v));
+}
+
 static value primcall_car(environment env, int nargs, ...) {
     if (nargs != 1) { RAISE("car needs a single argument"); }
     va_list args;
