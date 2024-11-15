@@ -1683,6 +1683,7 @@ struct {
     int min_args;
     int max_args;
 } primcalls[] = {
+    { "apply", "apply", 1, -1 },
     { "boolean?", "boolean_q", 1, 1 },
     { "car", "car", 1, 1 },
     { "cdr", "cdr", 1, 1 },

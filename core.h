@@ -130,7 +130,7 @@ struct object {
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
-#define free_args() va_end(argsx); free(arg_arr)
+#define free_args() va_end(argsx); free(arg_arr_base)
 
 static int n_symbols = 0;
 static struct symbol *symbols = NULL;
@@ -476,6 +476,40 @@ static int string_cmp(struct string *s1, struct string *s2) {
 }
 
 /************ primcall functions ***********/
+
+static value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs < 0) { RAISE("apply needs at least one argument"); }
+    init_args();
+
+    value func = next_arg();
+
+    /* allocate memory for all arguments except the last one (which should be a list) */
+    int n_pre_list_args = nargs - 2;
+    value *args = malloc(sizeof(value) * n_pre_list_args);
+    for (int i = 0; i < n_pre_list_args; ++i) {
+        args[i] = next_arg();
+    }
+
+    value args_list = next_arg();
+    if (!IS_PAIR(args_list) && args_list != NIL) { RAISE("apply last argument is not a list"); }
+
+    int args_list_len = 0;
+    value ptr = args_list;
+    while (ptr != NIL) { args_list_len++; ptr = GET_PAIR(ptr)->cdr; }
+
+    int func_nargs = n_pre_list_args + args_list_len;
+    args = realloc(args, sizeof(value) * func_nargs);
+    ptr = args_list;
+    for (int i = n_pre_list_args; i < func_nargs; ++i) {
+        args[i] = GET_PAIR(ptr)->car;
+        ptr = GET_PAIR(ptr)->cdr;
+    }
+
+    value ret = GET_CLOSURE(func)->func(env, CALL_HAS_ARG_ARRAY, func_nargs, args);
+
+    free_args();
+    return ret;
+}
 
 static value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("boolean? needs a single argument"); }
