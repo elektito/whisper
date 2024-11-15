@@ -482,6 +482,7 @@ static value primcall_apply(environment env, enum call_flags flags, int nargs, .
     init_args();
 
     value func = next_arg();
+    if (!IS_CLOSURE(func)) { RAISE("apply first argument is not a procedure"); }
 
     /* allocate memory for all arguments except the last one (which should be a list) */
     int n_pre_list_args = nargs - 2;
@@ -986,8 +987,10 @@ static value primcall_string_eq_q(environment env, enum call_flags flags, int na
     if (nargs == 1) return TRUE;
     init_args();
     value prev = next_arg();
+    if (!IS_STRING(prev)) { RAISE("string=? argument is not a string"); }
     for (int i = 1; i < nargs; ++i) {
         value cur = next_arg();
+        if (!IS_STRING(cur)) { RAISE("string=? argument is not a string"); }
         if (string_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
             free_args();
             return FALSE;
