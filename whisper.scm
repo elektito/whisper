@@ -193,7 +193,7 @@
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
     (display (make-string (* indent *indent-size*) #\space) port)
-    (%format port fmt args)))
+    (apply port fmt args)))
 
 (define (compile-number func indent form)
   (let ((varnum (func-next-varnum func)))
@@ -241,7 +241,7 @@
         (else (compile-error "don't know how to compile form: ~s" form))))
 
 (define (compile-error fmt . args)
-  (%format (current-error-port) fmt args)
+  (apply format (current-error-port) fmt args)
   (newline (current-error-port))
   (exit 1))
 
