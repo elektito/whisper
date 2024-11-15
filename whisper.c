@@ -1807,7 +1807,7 @@ compile_primcall_name(struct function *func, int indent, struct value *form)
             memcmp(form->identifier.name, primcalls[i].name, len) == 0)
         {
             int ret_varnum = func->varnum++;
-            gen_code(func, indent, "value x%d = make_closure(primcall_%s, 0, 0);", ret_varnum, primcalls[i].name);
+            gen_code(func, indent, "value x%d = make_closure(primcall_%s, 0, 0);", ret_varnum, primcalls[i].c_name);
             return ret_varnum;
         }
     }
