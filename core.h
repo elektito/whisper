@@ -236,7 +236,7 @@ static void file_printf(value port, const char *fmt, ...) {
 }
 
 static void string_write_char(value port, value ch) {
-    int64_t needed = GET_OBJECT(port)->port.string_cap + 1;
+    int64_t needed = GET_OBJECT(port)->port.string_len + 1;
     if (needed > GET_OBJECT(port)->port.string_cap) {
         GET_OBJECT(port)->port.string_cap *= 2;
         GET_OBJECT(port)->port.string = realloc(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_cap);
