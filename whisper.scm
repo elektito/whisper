@@ -193,7 +193,7 @@
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
     (display (make-string (* indent *indent-size*) #\space) port)
-    (apply port fmt args)))
+    (apply format port fmt args)))
 
 (define (compile-number func indent form)
   (let ((varnum (func-next-varnum func)))
