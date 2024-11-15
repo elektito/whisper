@@ -1222,7 +1222,7 @@ compile_let(struct function *func, int indent, struct value *form)
 
     /* create a call to the function we just created, passing binding values as arguments*/
     int ret_varnum = func->varnum++;
-    gen_code(func, indent, "value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, %d", ret_varnum, func_varnum, func_varnum, bindings->list.length);
+    gen_code(func, indent, "value x%d = GET_CLOSURE(x%d)->func(GET_CLOSURE(x%d)->freevars, NO_CALL_FLAGS, %d", ret_varnum, func_varnum, func_varnum, bindings->list.length);
     for (int i = 0; i < bindings->list.length; ++i) {
         gen_code(func, 0, ", x%d", arg_varnums[i]);
     }
