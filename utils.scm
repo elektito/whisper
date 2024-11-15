@@ -7,6 +7,7 @@
 (define (zero? x)
   (eq? x 0))
 
+(define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
 (define (cddr x) (cdr (cdr x)))
 (define (caddr x) (car (cdr (cdr x))))
@@ -52,6 +53,29 @@
 (define (reverse ls)
   (%reverse ls '()))
 
+(define (any? values)
+  (if (null? values)
+      #f
+      (if (car values)
+          #t
+          (any? (cdr values)))))
+
+(define (mapcar func args)
+  (if (null? args)
+      '()
+      (cons (func (car args))
+            (mapcar func (cdr args)))))
+
+(define (%map func arg-lists acc)
+  (if (any? (mapcar null? arg-lists))
+      (reverse acc)
+      (%map func
+            (mapcar cdr arg-lists)
+            (cons (apply func (mapcar car arg-lists)) acc))))
+
+(define (map func . arg-lists)
+  (%map func arg-lists '()))
+
 (define (char=? c1 c2)
   (eq? c1 c2))
 
@@ -72,6 +96,14 @@
 
 (define (negative? n)
   (< n 0))
+
+(define (string-join strs sep)
+  (let loop ((result "") (strs strs))
+    (if (null? strs)
+        result
+        (if (string=? "" result)
+            (loop (car strs) (cdr strs))
+            (loop (string-append result sep (car strs)) (cdr strs))))))
 
 (define (print . x)
   (let loop ((x x))

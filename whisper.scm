@@ -197,17 +197,20 @@
 
 (define (compile-number func indent form)
   (let ((varnum (func-next-varnum func)))
-    (gen-code func indent "value x~a = FIXNUM(~a);\n" varnum form)))
+    (gen-code func indent "value x~a = FIXNUM(~a);\n" varnum form)
+    varnum))
 
 (define (compile-string func indent form)
   (let ((varnum (func-next-varnum func)))
-    (gen-code func indent "value x~a = make_string(~s, ~a);\n" varnum form (string-length form))))
+    (gen-code func indent "value x~a = make_string(~s, ~a);\n" varnum form (string-length form))
+    varnum))
 
 (define (compile-bool func indent form)
   (let ((varnum (func-next-varnum func)))
     (if form
         (gen-code func indent "value x~a = TRUE;\n" varnum form)
-        (gen-code func indent "value x~a = FALSE;\n" varnum form))))
+        (gen-code func indent "value x~a = FALSE;\n" varnum form))
+    varnum))
 
 (define (c-char ch)
   ;; output the c literal form of a character (minus the single quotes).
@@ -233,11 +236,62 @@
   (let ((varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = CHAR('~a');\n" varnum (c-char form))))
 
+(define *primcalls* '((car "car" 1 1)
+                      (cdr "cdr" 1 1)))
+
+;;; compiles a list of forms and returns their varnums as a list
+(define (compile-list-of-forms func indent forms)
+  (let loop ((varnums '()) (forms forms))
+    (if (null? forms)
+        varnums
+        (loop (cons (compile-form func indent (car forms)) varnums)
+              (cdr forms)))))
+
+(define (compile-primcall func indent form)
+  (let loop ((primcalls *primcalls*))
+    (if (null? primcalls)
+        -1
+        (if (and (symbol? (car form))
+                 (eq? (car form) (caar primcalls)))
+            (let ((c-name (list-ref (car primcalls) 1))
+                  (min-args (list-ref (car primcalls) 2))
+                  (max-args (list-ref (car primcalls) 3))
+                  (arg-varnums (compile-list-of-forms func indent (cdr form)))
+                  (varnum (func-next-varnum func)))
+              (gen-code func
+                        indent
+                        "value x~a = primcall_~a(~a);\n"
+                        varnum
+                        c-name
+                        (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
+              varnum)
+            (loop (cdr primcalls))))))
+
+(define (compile-special-form func indent form)
+  -1)
+
+(define (compile-call func indent form)
+  (compile-error "calling procedures not implemented yet"))
+
+(define (compile-list func indent form)
+  ;; TODO fixme in the future. this function, strictly speaking, does
+  ;; not work correctly. it won't allow binding or defining primcalls
+  ;; and special forms.
+
+  (let ((varnum (compile-primcall func indent form)))
+    (if (negative? varnum)
+        (let ((varnum (compile-special-form func indent form)))
+          (if (negative? varnum)
+              (compile-call func indent form)
+              varnum))
+        varnum)))
+
 (define (compile-form func indent form)
   (cond ((number? form) (compile-number func indent form))
         ((string? form) (compile-string func indent form))
         ((boolean? form) (compile-bool func indent form))
         ((char? form) (compile-char func indent form))
+        ((pair? form) (compile-list func indent form))
         (else (compile-error "don't know how to compile form: ~s" form))))
 
 (define (compile-error fmt . args)
