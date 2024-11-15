@@ -1853,8 +1853,8 @@ compile_list(struct function *func, int indent, struct value *form)
     }
 
     if (list_car->type == VAL_ID &&
-               list_car->identifier.name_len == 5 &&
-               memcmp(list_car->identifier.name, "quote", 5) == 0)
+        list_car->identifier.name_len == 5 &&
+        memcmp(list_car->identifier.name, "quote", 5) == 0)
     {
         varnum = compile_quote(func, indent, form);
     } else if (list_car->type == VAL_ID &&
