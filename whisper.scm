@@ -409,9 +409,10 @@
                   (varnum (func-next-varnum func)))
               (gen-code func
                         indent
-                        "value x~a = primcall_~a(~a);\n"
+                        "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a, ~a);\n"
                         varnum
                         c-name
+                        (length arg-varnums)
                         (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
               varnum)
             (loop (cdr primcalls))))))
