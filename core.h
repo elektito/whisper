@@ -284,7 +284,7 @@ static void print_unprintable(value v, value port) {
     } else if (IS_EOFOBJ(v)) {
         GET_OBJECT(port)->port.printf(port, "#<eof-object>");
     } else if (IS_PORT(v)) {
-        struct object *op = GET_OBJECT(op);
+        struct object *op = GET_OBJECT(v);
         const char *dir = op->port.direction == PORT_DIR_READ ? "input" : "output";
         const char *kind = op->port.string ? "string-" : "";
         GET_OBJECT(port)->port.printf(port, "#<%s-%sport>", dir, kind);
