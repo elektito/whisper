@@ -41,6 +41,7 @@ struct symbol {
 
 enum object_type {
     OBJ_PORT,
+    OBJ_SYMBOL, /* uninterned symbol */
 };
 
 enum port_direction {
@@ -64,6 +65,7 @@ struct object {
             void (*write_char)(value port, value ch);
             void (*printf)(value port, const char *fmt, ...);
         } port;
+        struct symbol symbol; /* used for uninterned symbols */
     };
 };
 
@@ -109,7 +111,7 @@ struct object {
 #define GET_STRING(v) ((struct string *)((uint64_t)(v) & VALUE_MASK))
 #define GET_PAIR(v) ((struct pair *)((uint64_t)(v) & VALUE_MASK))
 #define GET_CHAR(v) ((char)((uint64_t)(v) >> 32))
-#define GET_SYMBOL(v) ((int)((uint64_t)(v) >> 32))
+#define GET_SYMBOL(v) (IS_OBJECT(v)? &GET_OBJECT(v)->symbol : &symbols[((int)((uint64_t)(v) >> 32))])
 #define GET_OBJECT(v) ((struct object *)((uint64_t)(v) & VALUE_MASK))
 
 #define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)
@@ -118,7 +120,7 @@ struct object {
 #define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)
 #define IS_VOID(v) (((uint64_t)(v) & VOID_TAG_MASK) == VOID_TAG)
 #define IS_CHAR(v) (((uint64_t)(v) & CHAR_TAG_MASK) == CHAR_TAG)
-#define IS_SYMBOL(v) (((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG)
+#define IS_SYMBOL(v) ((((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG) || (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_SYMBOL))
 #define IS_NIL(v) ((uint64_t)(v) == NIL_TAG)
 #define IS_PAIR(v) (((uint64_t)(v) & TAG_MASK) == PAIR_TAG)
 #define IS_EOFOBJ(v) ((uint64_t)(v) == EOFOBJ_TAG)
@@ -132,6 +134,7 @@ struct object {
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
 #define free_args() va_end(argsx); free(arg_arr_base)
 
+static uint64_t gensym_counter;
 static int n_symbols = 0;
 static struct symbol *symbols = NULL;
 
@@ -275,6 +278,29 @@ static void string_printf(value port, const char *fmt, ...) {
     va_end(args);
 }
 
+static void print_unprintable(value v, value port) {
+    if (IS_CLOSURE(v)) {
+        GET_OBJECT(port)->port.printf(port, "#<procedure-%d>", GET_CLOSURE(v)->n_args);
+    } else if (IS_EOFOBJ(v)) {
+        GET_OBJECT(port)->port.printf(port, "#<eof-object>");
+    } else if (IS_PORT(v)) {
+        struct object *op = GET_OBJECT(op);
+        const char *dir = op->port.direction == PORT_DIR_READ ? "input" : "output";
+        const char *kind = op->port.string ? "string-" : "";
+        GET_OBJECT(port)->port.printf(port, "#<%s-%sport>", dir, kind);
+    } else {
+        GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
+    }
+}
+
+static void print_symbol(value sym, value port) {
+    if (IS_OBJECT(sym)) {
+        GET_OBJECT(port)->port.printf(port, "#:"); /* uninterned symbol prefix */
+    }
+
+    GET_OBJECT(port)->port.printf(port, "%.*s", (int) GET_SYMBOL(sym)->name_len, GET_SYMBOL(sym)->name);
+}
+
 static void _display(value v, value port);
 static void _display_pair(struct pair *v, value port, int in_the_middle) {
     if (!in_the_middle) GET_OBJECT(port)->port.printf(port, "(");
@@ -297,7 +323,7 @@ static void _display(value v, value port) {
     } else if (IS_STRING(v)) {
         GET_OBJECT(port)->port.printf(port, "%.*s", (int) GET_STRING(v)->len, GET_STRING(v)->s);
     } else if (IS_SYMBOL(v)) {
-        GET_OBJECT(port)->port.printf(port, "%.*s", (int) symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);
+        print_symbol(v, port);
     } else if (IS_BOOL(v)) {
         GET_OBJECT(port)->port.printf(port, "%s", GET_BOOL(v) ? "#t" : "#f");
     } else if (IS_VOID(v)) {
@@ -308,12 +334,8 @@ static void _display(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "()");
     } else if (IS_PAIR(v)) {
         _display_pair(GET_PAIR(v), port, 0);
-    } else if (IS_CLOSURE(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<procedure-%d>", GET_CLOSURE(v)->n_args);
-    } else if (IS_EOFOBJ(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<eof-object>");
     } else {
-        GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
+        print_unprintable(v, port);
     }
 }
 
@@ -419,7 +441,7 @@ static void _write(value v, value port) {
     } else if (IS_STRING(v)) {
         _write_string_literal(v, port);
     } else if (IS_SYMBOL(v)) {
-        GET_OBJECT(port)->port.printf(port, "%.*s", (int) symbols[GET_SYMBOL(v)].name_len, symbols[GET_SYMBOL(v)].name);
+        print_symbol(v, port);
     } else if (IS_BOOL(v)) {
         GET_OBJECT(port)->port.printf(port, "%s", GET_BOOL(v) ? "#t" : "#f");
     } else if (IS_VOID(v)) {
@@ -430,12 +452,8 @@ static void _write(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "()");
     } else if (IS_PAIR(v)) {
         _write_pair(GET_PAIR(v), port, 0);
-    } else if (IS_CLOSURE(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<procedure-%d>", GET_CLOSURE(v)->n_args);
-    } else if (IS_EOFOBJ(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<eof-object>");
     } else {
-        GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
+        print_unprintable(v, port);
     }
 }
 
@@ -455,9 +473,8 @@ static value string_to_symbol(value v) {
 }
 
 static value symbol_to_string(value v) {
-    int i = GET_SYMBOL(v);
-    if (i < 0 || i >= n_symbols) { RAISE("unknown symbol"); }
-    return make_string(symbols[i].name, symbols[i].name_len);
+    struct symbol *sym = GET_SYMBOL(v);
+    return make_string(sym->name, sym->name_len);
 }
 
 static value alloc_string(size_t len, char fill) {
@@ -689,6 +706,33 @@ static value primcall_exit(environment env, enum call_flags flags, int nargs, ..
     }
 
     return VOID;
+}
+
+static value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0 && nargs != 1) { RAISE("gensym needs zero or one argument"); }
+    init_args();
+
+    struct object *sym = malloc(sizeof(struct object));
+    sym->type = OBJ_SYMBOL;
+
+    if (nargs == 1) {
+        value name = next_arg();
+        if (!IS_STRING(name)) { RAISE("gensym argument is not a string"); }
+        sym->symbol.name_len = GET_STRING(name)->len;
+        sym->symbol.name = malloc(sym->symbol.name_len);
+        memcpy(sym->symbol.name, GET_STRING(name)->s, sym->symbol.name_len);
+    } else {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "g%lu", gensym_counter++);
+        int len = strlen(buf);
+        sym->symbol.name_len = len;
+        sym->symbol.name = malloc(len);
+        memcpy(sym->symbol.name, buf, len);
+    }
+
+    free_args();
+
+    return OBJECT(sym);
 }
 
 static value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...) {
@@ -1052,6 +1096,14 @@ static value primcall_symbol_q(environment env, enum call_flags flags, int nargs
     value v = next_arg();
     free_args();
     return BOOL(IS_SYMBOL(v));
+}
+
+static value primcall_uninterned_symbol_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("uninterned-symbol? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_SYMBOL(v) && IS_OBJECT(v));
 }
 
 static value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
