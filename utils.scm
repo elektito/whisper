@@ -1,6 +1,17 @@
 (define (eqv? x y)
   (eq? x y))
 
+(define (equal? x y)
+  (cond ((eq? x y) #t)
+        ((eqv? x y) #t)
+        ((and (string? x) (string? y) (string=? x y)) #t)
+        ((not (and (pair? x) (pair? y))) #f)
+        (else (and (equal? (car x) (car y))
+                   (equal? (cdr x) (cdr y))))))
+
+(define (atom? x)
+  (not (pair? x)))
+
 (define (not x)
   (if (eq? x #f) #t #f))
 
@@ -19,6 +30,13 @@
   (or (null? x) (pair? x)))
 
 (define (list . x) x)
+
+;; from srfi 1 (named cons* in there)
+(define (list* first . rest)
+  (let recur ((x first) (rest rest))
+    (if (pair? rest)
+        (cons x (recur (car rest) (cdr rest)))
+        x)))
 
 (define (list-tail ls k)
   (if (zero? k)
@@ -55,6 +73,26 @@
 
 (define (reverse ls)
   (%reverse ls '()))
+
+(define (%append ls1 ls2)
+  (if (not (list? ls1))
+      (error "append: not a proper list"))
+
+  (if (null? ls1)
+      ls2
+      (if (null? (cdr ls1))
+          (cons (car ls1) ls2)
+          (%append (cdr ls1) (cons (car ls1) ls2)))))
+
+(define (append . lists)
+  (if (null? lists)
+      '()
+      (if (null? (cdr lists))
+          (car lists)
+          (if (null? (cddr lists))
+              (%append (reverse (car lists)) (cadr lists))
+              (%append (reverse (car lists))
+                       (apply append (cdr lists)))))))
 
 (define (any? values)
   (if (null? values)

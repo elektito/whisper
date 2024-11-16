@@ -1,5 +1,6 @@
 (include "utils.scm")
 (include "format.scm")
+(include "qq.scm")
 
 (define *indent-size* 4)
 
@@ -13,6 +14,8 @@
           ((char=? #\" ch) (read-string-literal port))
           ((char=? #\# ch) (read-sharp-thing port))
           ((char=? #\' ch) (read-quoted-form port))
+          ((char=? #\` ch) (read-quasiquoted-form port))
+          ((char=? #\, ch) (read-unquoted-form port))
           ((char=? #\; ch) (skip-line-comment port) (read port))
           (else (read-identifier-or-number port)))))
 
@@ -27,6 +30,21 @@
   (read-char port) ; skip the quote character
   (let ((form (read port)))
     (cons 'quote (cons form '()))))
+
+(define (read-quasiquoted-form port)
+  (read-char port) ; skip the quasiquote character
+  (let ((form (read port)))
+    (cons 'quasiquote (cons form '()))))
+
+(define (read-unquoted-form port)
+  (read-char port) ; skip the unquote (comma) character
+  (let ((unquote (if (char=? #\@ (peek-char port))
+                     (begin
+                       (read-char port)
+                       'unquote-splicing)
+                     'unquote)))
+    (let ((form (read port)))
+      (cons unquote (cons form '())))))
 
 (define (read-list port)
   (read-char port) ; get rid of the open parenthesis
@@ -342,9 +360,15 @@
       (compile-error "quote expects a single argument")
       (compile-quoted-item func indent (cadr form))))
 
+(define (compile-quasiquote func indent form)
+  (if (!= (length form) 2)
+      (compile-error "quasiquote expects a single argument")
+      (compile-form func indent (qq-quasiquote (cadr form)))))
+
 (define (compile-special-form func indent form)
   (case (car form)
     ((quote) (compile-quote func indent form))
+    ((quasiquote) (compile-quasiquote func indent form))
     (else -1)))
 
 (define (compile-call func indent form)
