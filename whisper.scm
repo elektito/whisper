@@ -185,7 +185,7 @@
   (let loop ((i 0) (symbols (program-symbols program)))
     (if (not (null? symbols))
         (begin
-          (format output "#define sym~a ~a\n" (mangle-name (symbol->string (car symbols))) i)
+          (format output "#define sym~a ~a\n" (mangle-name (car symbols)) i)
           (loop (+ i 1) (cdr symbols))))))
 
 (define (gen-symbol-table-init program output)
@@ -213,14 +213,16 @@
     (display "    f0(NULL, 0);\n" port)
     (display "}\n" port)))
 
-(define (add-function program parent nargs has-rest)
+(define (add-function program parent params rest-param)
   (let ((func (list (open-output-string) ; port
                     0                    ; varnum
                     (format "f~a" (program-next-funcnum program)) ; name
                     program
+                    params
                     parent
-                    nargs
-                    has-rest)))
+                    rest-param
+                    '() ; freevars
+                    )))
     (list-set! program 1 (cons func (program-funcs program)))
     func))
 
@@ -237,6 +239,44 @@
 
 (define (func-program func)
   (list-ref func 3))
+
+(define (func-params func)
+  (list-ref func 4))
+
+(define (func-parent func)
+  (list-ref func 5))
+
+(define (func-rest-param func)
+  (list-ref func 6))
+
+(define (func-freevars func)
+  (list-ref func 7))
+
+(define (func-freevars-set! func freevars)
+  (list-set! func 7 freevars))
+
+(define (func-add-freevar func var)
+  (let ((new-freevars (cons var (func-freevars func))))
+    (func-freevars-set! new-freevars)
+
+    ;; return the index of the new freevar
+    (- (length new-freevars) 1)))
+
+(define (func-find-freevar func var)
+  (let loop ((i 0) (freevars (func-freevars func)))
+    (if (null? freevars)
+        #f
+        (if (eq? var (car freevars))
+            i
+            (loop (+ i 1) (cdr freevars))))))
+
+(define (func-has-param func param)
+  (let loop ((params (func-params)))
+    (if (null? params)
+        #f
+        (if (eq? param (car params))
+            #t
+            (loop (cdr params))))))
 
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
@@ -377,17 +417,22 @@
             (loop (cdr primcalls))))))
 
 (define (mangle-name name)
-  (let loop ((i 0)
-             (mangled "_"))
-    (if (= i (string-length name))
-        mangled
-        (let ((ch (string-ref name i)))
-          (cond ((= i (string-length name)) mangled)
-                ((or (char-alphabetic? ch) (char-numeric? ch))
-                 (loop (+ i 1) (string-append-char mangled ch)))
-                ((char=? #\- ch) (loop (+ i 1) (string-append mangled "_")))
-                ((char=? #\_ ch) (loop (+ i 1) (string-append mangled "__")))
-                (else (loop (+ i 1) (format "~a_~a" mangled (char->integer ch)))))))))
+  (let ((name (if (symbol? name)
+                  (symbol->string name)
+                  (if (string? name)
+                      name
+                      (error "mangle-name argument not a string or symbol")))))
+    (let loop ((i 0)
+               (mangled "_"))
+      (if (= i (string-length name))
+          mangled
+          (let ((ch (string-ref name i)))
+            (cond ((= i (string-length name)) mangled)
+                  ((or (char-alphabetic? ch) (char-numeric? ch))
+                   (loop (+ i 1) (string-append-char mangled ch)))
+                  ((char=? #\- ch) (loop (+ i 1) (string-append mangled "_")))
+                  ((char=? #\_ ch) (loop (+ i 1) (string-append mangled "__")))
+                  (else (loop (+ i 1) (format "~a_~a" mangled (char->integer ch))))))))))
 
 (define (intern program sym)
   (let loop ((i 0) (symbols (program-symbols program)))
@@ -404,7 +449,7 @@
         ((string? form) (compile-form func indent form))
         ((symbol? form) (let ((varnum (func-next-varnum func)))
                           (intern (func-program func) form)
-                          (gen-code func indent "value x~a = sym~a;\n" varnum (mangle-name (symbol->string form)))
+                          (gen-code func indent "value x~a = sym~a;\n" varnum (mangle-name form))
                           varnum))
         ((list? form) (let ((varnum (func-next-varnum func)))
                         (gen-code func indent "value x~a = NIL;\n" varnum)
@@ -426,10 +471,88 @@
       (compile-error "quasiquote expects a single argument")
       (compile-form func indent (qq-quasiquote (cadr form)))))
 
+(define (parse-lambda-params form)
+  ;; given a lambda form, parse its arguments and return a list with two
+  ;; elements: (params rest-param). params is the list of arguments
+  ;; without rest parameter. rest-param is either the name of the reset
+  ;; parameter, or #f otherwise.
+  ;;
+  ;; some examples and their return values:
+  ;; (lambda () 1) => (() #f)
+  ;; (lambda (x y) x) => ((x y) #f)
+  ;; (lambda (x y . z) x) => ((x y) z)
+  ;; (lambda x x) => (() x)
+  (let ((params (cadr form)))
+    (if (symbol? params)
+        (list '() params)
+        (let loop ((proper-params '()) (params params))
+          (cond ((null? params) (list (reverse proper-params) #f))
+                ((atom? params) (list (reverse proper-params) params))
+                (else (loop (cons (car params) proper-params) (cdr params))))))))
+
+(define (compile-lambda func indent form)
+  (if (< (length form) 3)
+      (compile-error "malformed lambda"))
+  (let ((params-and-rest (parse-lambda-params form)))
+    (let ((params (car params-and-rest))
+          (rest-param (cadr params-and-rest)))
+      (let ((new-func (add-function (func-program func)
+                                    func
+                                    params
+                                    rest-param)))
+        (if (eq? rest-param #f)
+            (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch\");\n" (length params))
+            (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function\");\n" (length params)))
+
+        ;; generate code for reading arguments
+        (gen-code new-func 1 "init_args();\n")
+        (let loop ((params params))
+          (if (not (null? params))
+              (begin
+                (if (not (symbol? (car params)))
+                    (compile-error "parameter not an identifier: ~a" (car params)))
+                (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-name (car params)))
+                (loop (cdr params)))))
+
+        (if (not (eq? rest-param #f))
+            (begin
+              (gen-code new-func 1 "value ~a = NIL;\n" (mangle-name rest-param))
+              (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))))
+
+        (gen-code new-func 1 "\n")
+
+        ;; compile function body
+        (let loop ((body (cddr form)) (varnum -1))
+          (if (null? body)
+              (begin
+                (gen-code new-func 1 "free_args();\n")
+                (gen-code new-func 1 "return x~a;\n" varnum))
+              (let ((form (car body)))
+                (loop (cdr body) (compile-form new-func 1 form)))))
+
+        ;; generate the code for referencing the function
+        (let ((varnum (func-next-varnum func)))
+          (gen-code func indent "value x~a = make_closure(~a, ~a, ~a" varnum (func-name new-func) (length params) (length (func-freevars new-func)))
+          (let loop ((freevars (reverse (func-freevars new-func))))
+            (if (not (null? freevars))
+                (begin
+                  (if (func-has-param (car freevars))
+                      (gen-code func 0 (mangle-name (car freevars))) ;; generate mangled param name
+                      (let ((freevar (func-find-freevar (car freevars))))
+                        (if freevar
+                            (gen-code func 0 "envget(env, ~a)" freevar)
+                            (gen-code func 0 "envget(env, ~a)" (func-add-freevar (car freevars))))))
+                  (loop (cdr freevars)))))
+          (gen-code func 0 ");\n")
+
+          ;; return function varnum
+          varnum)))))
+
 (define (compile-special-form func indent form)
   (case (car form)
     ((quote) (compile-quote func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
+    ((lambda) (compile-lambda func indent form))
     (else -1)))
 
 (define (compile-call func indent form)
@@ -462,7 +585,7 @@
   (exit 1))
 
 (define (compile-program program)
-  (let ((func (add-function program #f 0 0))
+  (let ((func (add-function program #f '() #f))
         (port (program-port program)))
     (let loop ((form (read port)))
       (if (eof-object? form)
