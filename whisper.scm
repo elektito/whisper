@@ -392,7 +392,7 @@
 (define (compile-list-of-forms func indent forms)
   (let loop ((varnums '()) (forms forms))
     (if (null? forms)
-        varnums
+        (reverse varnums)
         (loop (cons (compile-form func indent (car forms)) varnums)
               (cdr forms)))))
 
@@ -556,7 +556,18 @@
     (else -1)))
 
 (define (compile-call func indent form)
-  (compile-error "calling procedures not implemented yet"))
+  (let ((func-varnum (compile-form func indent (car form))))
+    (gen-code func indent "if (!IS_CLOSURE(x~a)) { RAISE(\"called object not a procedure\"); }\n" func-varnum)
+    (let ((arg-varnums (compile-list-of-forms func indent (cdr form))))
+      (let ((ret-varnum (func-next-varnum func)))
+        (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
+                  ret-varnum
+                  func-varnum
+                  func-varnum
+                  (length arg-varnums)
+                  (if (eq? '() arg-varnums) "" ", ")
+                  (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
+        ret-varnum))))
 
 (define (compile-list func indent form)
   ;; TODO fixme in the future. this function, strictly speaking, does
@@ -566,10 +577,10 @@
   (let ((varnum (compile-primcall func indent form)))
     (if (negative? varnum)
           (let ((varnum (compile-special-form func indent form)))
-          (if (negative? varnum)
-              (compile-call func indent form)
-              varnum))
-        varnum)))
+            (if (negative? varnum)
+                (compile-call func indent form)
+                varnum))
+          varnum)))
 
 (define (compile-form func indent form)
   (cond ((number? form) (compile-number func indent form))
