@@ -466,7 +466,7 @@
         (port (program-port program)))
     (let loop ((form (read port)))
       (if (eof-object? form)
-          func
+          (gen-code func 1 "return VOID;\n")
           (begin
             (compile-form func 1 form)
             (loop (read port)))))))
