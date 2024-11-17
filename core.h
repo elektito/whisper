@@ -529,7 +529,7 @@ static value primcall_apply(environment env, enum call_flags flags, int nargs, .
         ptr = GET_PAIR(ptr)->cdr;
     }
 
-    value ret = GET_CLOSURE(func)->func(env, CALL_HAS_ARG_ARRAY, func_nargs, args);
+    value ret = GET_CLOSURE(func)->func(GET_CLOSURE(func)->freevars, CALL_HAS_ARG_ARRAY, func_nargs, args);
 
     free_args();
     return ret;
