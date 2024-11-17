@@ -1297,7 +1297,7 @@ compile_define(struct function *func, int indent, struct value *form)
 
         if (form->list.length == 2) {
             /* define the variable with a void initial value */
-            gen_code(func, indent, "value %.*s = VOID;\n", mangled_len, mangled_str);
+            gen_code(func, indent, "%.*s = VOID;\n", mangled_len, mangled_str);
             varnum = func->varnum++;
             gen_code(func, indent, "value x%d = %.*s;\n", mangled_len, mangled_str);
 
