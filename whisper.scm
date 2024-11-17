@@ -4,6 +4,10 @@
 
 (define *indent-size* 4)
 
+;; just a unique value to represent a single dot which could be used to
+;; specify pairs/dotted lists.
+(define *dot* (gensym "dot"))
+
 ;;;;;; reader ;;;;;;
 
 (define (read port)
@@ -17,7 +21,10 @@
           ((char=? #\` ch) (read-quasiquoted-form port))
           ((char=? #\, ch) (read-unquoted-form port))
           ((char=? #\; ch) (skip-line-comment port) (read port))
-          (else (read-identifier-or-number port)))))
+          ((char=? #\| ch) (read-piped-symbol port))
+          ((char=? #\. ch) (read-dot-or-identifier port))
+          (else (read-char port) ; read-identifier-or-number expects first character already read and passed to it
+                (read-identifier-or-number port ch)))))
 
 (define (skip-line-comment port)
   (read-char port) ; skip the semicolon character
@@ -65,8 +72,63 @@
     (read-char port)
     (cond ((eof-object? ch) (compile-error "eof in string"))
           ((char=? #\" ch) s)
+          ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
+                             (loop (peek-char port) (string-append-char s escaped-char))))
+          (else (let ((s (string-append-char s ch)))
+                  (loop (peek-char port) s))))))
+
+(define (read-piped-symbol port)
+  (read-char port) ; get rid of initial pipe
+  (let loop ((ch (peek-char port))
+             (s ""))
+    (read-char port)
+    (cond ((eof-object? ch) (compile-error "eof in piped symbol"))
+          ((char=? #\| ch) (string->symbol s))
+          ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
+                             (loop (peek-char port) (string-append-char s escaped-char))))
           (else (let ((s (string-append s (make-string 1 ch))))
                   (loop (peek-char port) s))))))
+
+(define (read-escaped-char port)
+  ;; note: the backslash is already read
+  (let ((ch (peek-char port)))
+    (read-char port)
+    (case ch
+      ((#\a) #\alarm)
+      ((#\b) #\backspace)
+      ((#\n) #\newline)
+      ((#\r) #\return)
+      ((#\t) #\tab)
+      ((#\") #\")
+      ((#\|) #\|)
+      ((#\\) #\\)
+      ((#\x) (read-escaped-hex-char port))
+      (else (compile-error "bad escape sequence")))))
+
+(define (char-is-hex-digit? ch)
+  (let ((code (char->integer ch))
+        (zero (char->integer #\0))
+        (nine (char->integer #\9))
+        (a (char->integer #\a))
+        (f (char->integer #\f))
+        (A (char->integer #\A))
+        (F (char->integer #\F)))
+    (or (and (>= code zero) (<= code nine))
+        (and (>= code a) (<= code f))
+        (and (>= code A) (<= code F)))))
+
+(define (read-escaped-hex-char port)
+  ;; reads a character literal like \x22;
+  ;; assumes \x is already read
+  (let loop ((ch (read-char port)) (s ""))
+    (cond ((eof-object? ch) (compile-error "eof inside escape sequence"))
+          ((char-is-hex-digit? ch)
+           (loop (read-char port) (string-append-char s ch)))
+          ((char=? #\; ch) (let ((n (string->number s 16)))
+                             (if n
+                                 (integer->char n)
+                                 (compile-error "bad hex code: ~a" s))))
+          (else (compile-error "bad character in hex escape code: ~a" ch)))))
 
 (define (sym-or-num s)
   (let ((n (string->number s)))
@@ -74,17 +136,29 @@
         (string->symbol s)
         n)))
 
-(define (read-identifier-or-number port)
-  (let loop ((ch (peek-char port))
-             (s ""))
-    (if (or (char-whitespace? ch)
-            (char=? #\' ch)
-            (char=? #\( ch)
-            (char=? #\) ch))
-        (sym-or-num s)
-        (let ((s (string-append s (make-string 1 ch))))
-          (read-char port)
-          (loop (peek-char port) s)))))
+(define (char-is-separator? ch)
+  (or (char-whitespace? ch)
+      (char=? #\' ch)
+      (char=? #\( ch)
+      (char=? #\) ch)))
+
+(define (read-dot-or-identifier port)
+  (read-char port) ; skip the dot
+  (let ((ch (peek-char port)))
+    (if (or (eof-object? ch)
+            (char-is-separator? ch))
+        *dot*
+        (read-identifier-or-number port #\.))))
+
+(define (read-identifier-or-number port first-char)
+  (let loop ((first-iter #t) (ch first-char) (s ""))
+    (cond ((char-is-separator? ch) (sym-or-num s))
+          ((eq? #\\ ch) (if (not first-iter) (read-char port))
+                        (let ((escaped-char (read-escaped-char port)))
+                          (loop #f (peek-char port) (string-append s escaped-char))))
+          (else (if (not first-iter)
+                    (read-char port))
+                (loop #f (peek-char port) (string-append-char s ch))))))
 
 (define (read-sharp-thing port)
   (read-char port) ; skip the sharp
@@ -663,6 +737,7 @@
         ((boolean? form) (compile-bool func indent form))
         ((char? form) (compile-char func indent form))
         ((pair? form) (compile-list func indent form))
+        ((eq? form *dot*) (compile-error "unexpected dot (.)"))
         (else (compile-error "don't know how to compile form: ~s" form))))
 
 (define (compile-error fmt . args)
@@ -687,6 +762,8 @@
     (compile-error "usage: ~a input-file" (car (command-line))))
 
 (let ((port (open-input-file (cadr (command-line)))))
+  (print (read port))
+  (exit)
   (let ((program (create-program port)))
     (compile-program program)
     (output-program-code program)))
