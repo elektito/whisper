@@ -1365,14 +1365,14 @@ compile_if(struct function *func, int indent, struct value *form)
     if (form->list.length == 3) {
         ret_varnum = func->varnum++;
         gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
-        gen_code(func, indent, "if (GET_BOOL(x%d)) {\n", cond_varnum);
+        gen_code(func, indent, "if (x%d != FALSE) {\n", cond_varnum);
         int then_varnum = compile_form(func, indent + 1, &form->list.ptr[2]);
         gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, then_varnum);
         gen_code(func, indent, "}\n");
     } else {
         ret_varnum = func->varnum++;
         gen_code(func, indent, "value x%d;\n", ret_varnum);
-        gen_code(func, indent, "if (GET_BOOL(x%d)) {\n", cond_varnum);
+        gen_code(func, indent, "if (x%d != FALSE) {\n", cond_varnum);
         int then_varnum = compile_form(func, indent + 1, &form->list.ptr[2]);
         gen_code(func, indent + 1, "x%d = x%d;\n", ret_varnum, then_varnum);
         gen_code(func, indent, "} else {\n");
@@ -1414,7 +1414,7 @@ compile_cond(struct function *func, int indent, struct value *form)
             gen_code(func, indent + i - 1, "x%d = x%d;\n", ret_varnum, varnum);
         } else {
             int condition_varnum = compile_form(func, indent + (i - 1), condition);
-            gen_code(func, indent + (i - 1), "if (GET_BOOL(x%d)) {\n", condition_varnum);
+            gen_code(func, indent + (i - 1), "if (x%d != FALSE) {\n", condition_varnum);
 
             int varnum;
             for (int j = 1; j < clause->list.length; ++j) {
