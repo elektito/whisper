@@ -145,6 +145,7 @@
         '() ; funcs
         0   ; funcnum (function counter)
         '() ; interned symbols
+        #f  ; init func, to be set later
         ))
 
 (define (program-port program)
@@ -163,6 +164,12 @@
 
 (define (program-set-symbols program symbols)
   (list-set! program 3 symbols))
+
+(define (program-init-func program)
+  (list-ref program 4))
+
+(define (program-init-func-set! program func)
+  (list-set! program 4 func))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
@@ -199,10 +206,20 @@
             (format output "    symbols[~a].name_len = ~a;\n" i (string-length (symbol->string (car symbols))))
             (loop (+ i 1) (cdr symbols)))))))
 
+(define (gen-global-vars program output)
+  (let ((func (program-init-func program)))
+    (let loop ((params (func-params func)))
+      (if (not (null? params))
+          (begin
+            (format output "static value ~a = VOID;\n" (mangle-name (car params)))
+            (loop (cdr params)))))))
+
 (define (output-program-code program)
   (let ((port (open-output-file "b.c")))
     (display "#include \"core.h\"\n\n" port)
     (gen-symbol-defines program port)
+    (newline port)
+    (gen-global-vars program port)
     (newline port)
     (gen-func-prototypes program port)
     (newline port)
@@ -243,6 +260,9 @@
 (define (func-params func)
   (list-ref func 4))
 
+(define (func-params-set! func params)
+  (list-set! func 4 params))
+
 (define (func-parent func)
   (list-ref func 5))
 
@@ -261,6 +281,10 @@
 
     ;; return the index of the new freevar
     (- (length new-freevars) 1)))
+
+(define (func-add-param func var)
+  (let ((new-params (cons var (func-params func))))
+    (func-params-set! func new-params)))
 
 (define (func-find-freevar func var)
   (let loop ((i 0) (freevars (func-freevars func)))
@@ -549,11 +573,61 @@
           ;; return function varnum
           varnum)))))
 
+(define (compile-define func indent form)
+  (if (< (length form) 2)
+      (compile-error "malformed define: ~s" form))
+  (if (and (symbol? (cadr form))
+           (> (length form) 3))
+      (compile-error "malformed define: ~s" form))
+
+  ;; we could technically allow this, and then further on, declare the
+  ;; variable in-place as opposed to setting the global variable.
+  ;; something like this:
+  ;;
+  ;; (if (null? (func-parent func))
+  ;;     (gen-code func indent "~a = x~a;\n" (mangle-name name) init-varnum)
+  ;;     (gen-code func indent "value ~a = x~a;\n" (mangle-name name) init-varnum))
+  ;;
+  ;; this is technically incorrect though, since it can't shadow current
+  ;; function parameters while it should.
+  (if (func-parent func)
+      (compile-error "define currently only supported at the top-level"))
+
+  ;; convert the function form to normal form
+  (let ((form (if (list? (cadr form))
+                  (list 'define
+                        (caadr form)
+                        (append (list 'lambda (cdadr form)) (cddr form)))
+                  form)))
+    (let ((name (cadr form))
+          (init-form (if (< (length form) 3)
+                         #f
+                         (caddr form))))
+      ;; check for re-definition
+      (let loop ((params (func-params func)))
+        (if (not (null? params))
+            (if (eq? (car params) name)
+                (compile-error "re-defining: ~a" name)
+                (loop (cdr params)))))
+
+      ;; add the name to the list of current function parameters
+      (func-add-param func name)
+
+      ;; copmile init form and either set it as a global variable (if in
+      ;; the top-level), or declare it as a variable.
+      (let ((init-varnum (compile-form func indent init-form)))
+        ;; if not init value, we won't initialize here. all global
+        ;; variables are initialized with VOID at the top-level.
+        (if init-form
+            (gen-code func indent "~a = x~a;\n" (mangle-name name) init-varnum))
+        init-varnum))))
+
 (define (compile-special-form func indent form)
   (case (car form)
     ((quote) (compile-quote func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
     ((lambda) (compile-lambda func indent form))
+    ((define) (compile-define func indent form))
     (else -1)))
 
 (define (compile-call func indent form)
@@ -599,6 +673,7 @@
 (define (compile-program program)
   (let ((func (add-function program #f '() #f))
         (port (program-port program)))
+    (program-init-func-set! program func)
     (let loop ((form (read port)))
       (if (eof-object? form)
           (gen-code func 1 "return VOID;\n")

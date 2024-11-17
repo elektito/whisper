@@ -21,7 +21,9 @@
 (define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
 (define (cddr x) (cdr (cdr x)))
+(define (caadr x) (car (car (cdr x))))
 (define (caddr x) (car (cdr (cdr x))))
+(define (cdadr x) (cdr (car (cdr x))))
 
 (define (null? x)
   (eq? '() x))
