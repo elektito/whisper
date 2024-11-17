@@ -1093,8 +1093,7 @@ compile_let(struct function *func, int indent, struct value *form)
     int n_params = bindings->list.length;
     struct function *new_func = add_function(func, func->compiler, n_params, 0);
 
-    gen_code(new_func, 1, "va_list args;\n");
-    gen_code(new_func, 1, "va_start(args, nargs);\n");
+    gen_code(new_func, 1, "init_args();\n");
 
     /* add binding variables as parameters */
     for (int i = 0; i < form->list.ptr[bindings_idx].list.length; ++i) {
@@ -1110,12 +1109,12 @@ compile_let(struct function *func, int indent, struct value *form)
         }
 
         new_func->params[i] = binding->list.ptr[0].identifier.interned;
-        gen_code(new_func, 1, "value %.*s = va_arg(args, value);\n",
+        gen_code(new_func, 1, "value %.*s = next_arg();\n",
                  func->compiler->reader->interned_mangled_len[binding->list.ptr[0].identifier.interned],
                  func->compiler->reader->interned_mangled[binding->list.ptr[0].identifier.interned]);
     }
 
-    gen_code(new_func, 1, "va_end(args);\n");
+    gen_code(new_func, 1, "free_args();\n");
     gen_code(new_func, 0, "\n");
 
     /* if we have a self-reference variable add a dummy parent function
