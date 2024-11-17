@@ -53,13 +53,36 @@
     (let ((form (read port)))
       (cons unquote (cons form '())))))
 
+(define (check-for-stray-dot ls)
+  (let loop ((l ls))
+    (if (not (pair? l))
+        ls
+        (if (eq? *dot* (car l))
+            (compile-error "unexpected dot (.)")
+            (loop (cdr l))))))
+
+(define (postprocess-list ls)
+  ;; receives a list that has just been read, and does two things on it:
+  ;; 1) if there is a dot in it in the correct position, converts it to
+  ;; a dotted list. 2) reverses the list (since it's initially read in
+  ;; reverse order).
+  (if (or (null? ls) (null? (cdr ls)))
+      (check-for-stray-dot ls)
+      (let ((tail (if (eq? *dot* (cadr ls))
+                      (car ls)
+                      '()))
+            (rest (if (eq? *dot* (cadr ls))
+                      (cddr ls)
+                      ls)))
+        (check-for-stray-dot (append (reverse rest) tail)))))
+
 (define (read-list port)
   (read-char port) ; get rid of the open parenthesis
   (let loop ((ch (peek-char port))
              (ls '()))
     (cond ((eof-object? ch) (compile-error "eof inside list"))
           ((char-whitespace? ch) (read-char port) (loop (peek-char port) ls))
-          ((char=? #\) ch) (read-char port) (reverse ls))
+          ((char=? #\) ch) (read-char port) (postprocess-list ls))
           (else (let ((item (read port)))
                   (if (eof-object? item)
                       (compile-error "eof inside list")
@@ -762,8 +785,6 @@
     (compile-error "usage: ~a input-file" (car (command-line))))
 
 (let ((port (open-input-file (cadr (command-line)))))
-  (print (read port))
-  (exit)
   (let ((program (create-program port)))
     (compile-program program)
     (output-program-code program)))
