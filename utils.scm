@@ -71,6 +71,9 @@
       (set-car! ls obj)
       (list-set! (cdr ls) (- k 1) obj)))
 
+(define (last ls)
+  (list-ref ls (- (length ls) 1)))
+
 (define (list->string x)
   (if (null? x)
       ""

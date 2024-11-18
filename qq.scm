@@ -123,7 +123,7 @@
                      (qq-attach-conses
                       (reverse (cl-cdr (reverse (cl-cdar args))))
                       (qq-attach-append *qq-append*
-                                        (cl-car (last (cl-car args)))
+                                        (cl-car (cl-last (cl-car args)))
                                         result)))
                     ((and (eq? (cl-caar args) *qq-quote*)
                           (pair? (cl-cadar args))
@@ -258,7 +258,7 @@
           #f)))
 
 ;; very similar to last-pair above, but works exactly like in CL
-(define (last x)
+(define (cl-last x)
   (if (null? x)
       x
       (if (null? (cdr x))

@@ -531,7 +531,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(define if lambda let quasiquote quote))
+(define *specials* '(cond define if lambda let quasiquote quote))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -770,8 +770,40 @@
                     (gen-code func indent "}\n")))))
           ret-varnum)))
 
+(define (compile-cond func indent form)
+  (let ((ret-varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a = VOID;\n" ret-varnum)
+    (let loop ((clauses (cdr form)) (i 0))
+      (if (null? clauses)
+          ret-varnum
+          (let ((clause (car clauses)))
+            (if (not (pair? clause))
+                (compile-error "bad cond clause: ~s" clause))
+            (if (eq? (car clause) 'else)
+                (cond ((null? (cdr clause))
+                       (compile-error "bad cond else clause: ~s" clause))
+                      ((!= 1 (length clauses))
+                       (compile-error "else is not the last cond clause"))
+                      (else (let ((arg-varnums (compile-list-of-forms func (+ indent i) (cdr clause))))
+                              (gen-code func (+ indent i) "x~a = x~a;\n" ret-varnum (last arg-varnums)))))
+                (let ((cond-varnum (compile-form func (+ indent i) (car clause))))
+                  (gen-code func (+ indent i) "if (x~a != FALSE) {\n" cond-varnum)
+                  (let ((arg-varnums (compile-list-of-forms func (+ indent i 1) (cdr clause))))
+                    (if (null? arg-varnums)
+                        (gen-code func (+ indent i 1) "x~a = x~a;\n" ret-varnum cond-varnum)
+                        (gen-code func (+ indent i 1) "x~a = x~a;\n" ret-varnum (last arg-varnums)))
+                    (gen-code func (+ indent i) "} else {\n")
+                    (loop (cdr clauses) (+ i 1))))))))
+    (let loop ((i 0))
+      (if (< i (- (length form) 1))
+          (begin
+            (gen-code func (+ indent (length form) (- i) -2) "}\n")
+            (loop (+ i 1)))))
+    ret-varnum))
+
 (define (compile-special func indent form kind)
   (case kind
+    ((cond) (compile-cond func indent form))
     ((define) (compile-define func indent form))
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
