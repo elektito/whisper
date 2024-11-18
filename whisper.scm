@@ -531,7 +531,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(define lambda let quasiquote quote))
+(define *specials* '(define if lambda let quasiquote quote))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -751,9 +751,29 @@
             (gen-code func indent "~a = x~a;\n" (mangle-name name) init-varnum))
         init-varnum))))
 
+(define (compile-if func indent form)
+  (if (or (< (length form) 3) (> (length form) 4))
+      (compile-error "malformed if"))
+  (let ((cond-varnum (compile-form func indent (cadr form)))
+        (one-legged (= (length form) 3)))
+    (let ((ret-varnum (func-next-varnum func)))
+          (gen-code func indent "value x~a = VOID;\n" ret-varnum)
+          (gen-code func indent "if (x~a != FALSE) {\n" cond-varnum)
+          (let ((then-varnum (compile-form func (+ indent 1) (caddr form))))
+            (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum then-varnum)
+            (if one-legged
+                (gen-code func indent "}\n")
+                (begin
+                  (gen-code func indent "} else {\n")
+                  (let ((else-varnum (compile-form func (+ indent 1) (cadddr form))))
+                    (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum else-varnum)
+                    (gen-code func indent "}\n")))))
+          ret-varnum)))
+
 (define (compile-special func indent form kind)
   (case kind
     ((define) (compile-define func indent form))
+    ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
     ((lambda) (compile-lambda func indent form))
     ((quasiquote) (compile-quasiquote func indent form))

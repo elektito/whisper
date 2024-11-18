@@ -31,6 +31,7 @@
 (define (caddr x) (car (cdr (cdr x))))
 (define (cdadr x) (cdr (car (cdr x))))
 (define (cdddr x) (cdr (cdr (cdr x))))
+(define (cadddr x) (car (cdr (cdr (cdr x)))))
 
 (define (null? x)
   (eq? '() x))
