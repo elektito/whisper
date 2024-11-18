@@ -1938,7 +1938,7 @@ void
 compile_program(struct compiler *compiler)
 {
     struct function *startup_func = add_function(NULL, compiler, 0, 0);
-    for (int i = 1;; ++i) {
+    for (int i = 0;;) {
         read_value(compiler->reader);
         if (compiler->reader->value.type == VAL_EOF)
             break;
@@ -1946,6 +1946,7 @@ compile_program(struct compiler *compiler)
 
         /* if a test suite, and we're compiling the main file (i.e. not an include)... */
         if (compiler->test_suite && compiler->reader->n_lexers == 1) {
+            i++;
             gen_code(startup_func, 1, "if (x%d == TRUE) { printf(\".\"); } else { printf(\"F(%d)\"); }\n", varnum, i);
         }
     }
@@ -2160,6 +2161,7 @@ main(int argc, char const *argv[])
     arguments.output_filename = NULL;
     arguments.output_c = 0;
     arguments.run = 0;
+    arguments.test_suite = 0;
 
     arguments.delete_executable = 0;
     arguments.c_filename = NULL;
