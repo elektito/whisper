@@ -266,7 +266,13 @@ static void string_printf(value port, const char *fmt, ...) {
     va_end(args);
 
     struct object *op = GET_OBJECT(port);
-    int64_t total_needed = op->port.string_len + extra_needed;
+
+    /* we add 1 to the total needed, because vsnprintf writes a null
+     * character at the end and if we're right at the end of the buffer
+     * and there's only one character remaining, it will only write a
+     * null character. this way, we make sure the null char is always
+     * after actual data. */
+    int64_t total_needed = op->port.string_len + extra_needed + 1;
     if (total_needed > op->port.string_cap) {
         while (op->port.string_cap < total_needed) op->port.string_cap *= 2;
         op->port.string = realloc(op->port.string, op->port.string_cap);
