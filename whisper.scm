@@ -900,7 +900,7 @@
           ;; is not allowed where bar is undefined, but:
           ;;     (define foo (lambda () bar))
           ;; is allowed.
-          ((unknown) (if (func-parent form)
+          ((unknown) (if (func-parent func)
                          (compile-call func indent form)
                          (compile-error "unbound identifier: ~a" (car form))))
           (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
