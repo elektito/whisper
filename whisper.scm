@@ -392,7 +392,7 @@
             (loop (+ i 1) (cdr freevars))))))
 
 (define (func-has-param func param)
-  (let loop ((params (func-params)))
+  (let loop ((params (func-params func)))
     (if (null? params)
         #f
         (if (eq? param (car params))
@@ -509,6 +509,8 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
+(define *specials* '(define lambda quasiquote quote))
+
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
   (let loop ((varnums '()) (forms forms))
@@ -517,26 +519,20 @@
         (loop (cons (compile-form func indent (car forms)) varnums)
               (cdr forms)))))
 
-(define (compile-primcall func indent form)
-  (let loop ((primcalls *primcalls*))
-    (if (null? primcalls)
-        -1
-        (if (and (symbol? (car form))
-                 (eq? (car form) (caar primcalls)))
-            (let ((c-name (list-ref (car primcalls) 1))
-                  (min-args (list-ref (car primcalls) 2))
-                  (max-args (list-ref (car primcalls) 3))
-                  (arg-varnums (compile-list-of-forms func indent (cdr form)))
-                  (varnum (func-next-varnum func)))
-              (gen-code func
-                        indent
-                        "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a, ~a);\n"
-                        varnum
-                        c-name
-                        (length arg-varnums)
-                        (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
-              varnum)
-            (loop (cdr primcalls))))))
+(define (compile-primcall func indent form primcall-info)
+  (let ((c-name (list-ref primcall-info 1))
+        (min-args (list-ref primcall-info 2))
+        (max-args (list-ref primcall-info 3))
+        (arg-varnums (compile-list-of-forms func indent (cdr form)))
+        (varnum (func-next-varnum func)))
+    (gen-code func
+              indent
+              "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a, ~a);\n"
+              varnum
+              c-name
+              (length arg-varnums)
+              (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
+    varnum))
 
 (define (mangle-name name)
   (let ((name (if (symbol? name)
@@ -658,7 +654,7 @@
           (let loop ((freevars (reverse (func-freevars new-func))))
             (if (not (null? freevars))
                 (begin
-                  (if (func-has-param (car freevars))
+                  (if (func-has-param func (car freevars))
                       (gen-code func 0 (mangle-name (car freevars))) ;; generate mangled param name
                       (let ((freevar (func-find-freevar (car freevars))))
                         (if freevar
@@ -719,8 +715,8 @@
             (gen-code func indent "~a = x~a;\n" (mangle-name name) init-varnum))
         init-varnum))))
 
-(define (compile-special-form func indent form)
-  (case (car form)
+(define (compile-special func indent form kind)
+  (case kind
     ((quote) (compile-quote func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
     ((lambda) (compile-lambda func indent form))
@@ -741,21 +737,112 @@
                   (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
         ret-varnum))))
 
-(define (compile-list func indent form)
-  ;; TODO fixme in the future. this function, strictly speaking, does
-  ;; not work correctly. it won't allow binding or defining primcalls
-  ;; and special forms.
+(define (lookup-primcall identifier)
+  (let loop ((primcalls *primcalls*))
+    (if (null? primcalls)
+        #f
+        (if (eq? identifier (caar primcalls))
+            (car primcalls)
+            (loop (cdr primcalls))))))
 
-  (let ((varnum (compile-primcall func indent form)))
-    (if (negative? varnum)
-          (let ((varnum (compile-special-form func indent form)))
-            (if (negative? varnum)
-                (compile-call func indent form)
-                varnum))
-          varnum)))
+(define (lookup-special identifier)
+  (let loop ((specials *specials*))
+    (if (null? specials)
+        #f
+        (if (eq? identifier (car specials))
+            (car specials)
+            (loop (cdr specials))))))
+
+(define (make-meaning kind info)
+  (list kind info))
+
+(define (meaning-kind m)
+  (car m))
+
+(define (meaning-info m)
+  (cadr m))
+
+(define (lookup-identifier func identifier)
+  ;; returned types
+  ;;  - local: it's a local variable in current function
+  ;;
+  ;;  - parent: it's a free variable in current function but a local in
+  ;;    one of its parents (but not top-level)
+  ;;
+  ;;  - global: it's defined in top-level
+  ;;
+  ;;  - primcall: it's a primcall
+  ;;
+  ;;  - special: it's a special form
+  ;;
+  ;;  - unknown: neither of the previous ones
+
+  (if (func-has-param func identifier)
+      (if (func-parent func) (make-meaning 'local #f) (make-meaning 'global #f))
+      (let loop ((func (func-parent func)))
+        (if func
+            (if (func-has-param func identifier)
+                (if (func-parent func) (make-meaning 'local #f) (make-meaning 'global #f))
+                (loop (func-parent func)))
+            ;;(cond ((lookup-primcall identifier) => (lambda (x) (make-meaning 'primcall x))
+            ;;      ((lookup-special identifier) => (lambda (x) (make-meaning 'special x)))
+            ;;      (else 'global))))))
+            (let ((primcall-info (lookup-primcall identifier)))
+              (if primcall-info
+                  (make-meaning 'primcall primcall-info)
+                  (let ((special-info (lookup-special identifier)))
+                    (if special-info
+                        (make-meaning 'special special-info)
+                        (make-meaning 'unknown #f)))))))))
+
+(define (compile-list func indent form)
+  (if (not (symbol? (car form)))
+      (compile-call func indent form)
+      (let ((meaning (lookup-identifier func (car form))))
+        (case (meaning-kind meaning)
+          ((local global) (compile-call func indent form))
+          ((primcall) (compile-primcall func indent form (meaning-info meaning)))
+          ((special) (compile-special func indent form (meaning-info meaning)))
+
+          ;; allow use not-yet defined variables only in non-top-level
+          ;; functions, i.e. inside a lambda or let, but not directly.
+          ;; for example:
+          ;;     (define foo bar)
+          ;; is not allowed where bar is undefined, but:
+          ;;     (define foo (lambda () bar))
+          ;; is allowed.
+          ((unknown) (if (func-parent form)
+                         (compile-call func indent form)
+                         (compile-error "unbound identifier: ~a" (car form))))
+          (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
+
+(define (compile-identifier func indent form)
+  (let ((meaning (lookup-identifier func form))
+        (varnum (func-next-varnum func)))
+    (case (meaning-kind meaning)
+      ((local global)
+       (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form)))
+      ((primcall)
+       (gen-code func indent "value x~a = make_closure(primcall_~a, 0, 0);\n" varnum (list-ref (meaning-info meaning) 1)))
+      ((special) (compile-error "invalid use of special: ~a" form))
+
+      ;; allow use of not-yet defined variables only in non-top-level
+      ;; functions, i.e. inside a lambda or let, but not directly.
+      ;; for example:
+      ;;     (define foo bar)
+      ;; is not allowed where bar is undefined, but:
+      ;;     (define foo (lambda () bar))
+      ;; is allowed.
+      ((unknown) (if (func-parent form)
+                     (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))
+                     (compile-error "unbound identifier: ~a" form)))
+
+      (else (error (format "unknown meaning kind: ~a" (meaning-kind meaning)))))
+    varnum))
 
 (define (compile-form func indent form)
-  (cond ((number? form) (compile-number func indent form))
+  (cond ((symbol? form) (compile-identifier func indent form))
+        ((number? form) (compile-number func indent form))
         ((string? form) (compile-string func indent form))
         ((boolean? form) (compile-bool func indent form))
         ((char? form) (compile-char func indent form))
