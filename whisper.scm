@@ -275,14 +275,14 @@
   (let loop ((funcs (program-funcs program)))
     (if (not (null? funcs))
         (begin
-          (format output "static value ~a(environment env, int nargs, ...);\n" (func-name (car funcs)))
+          (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...);\n" (func-name (car funcs)))
           (loop (cdr funcs))))))
 
 (define (gen-func-bodies program output)
   (let loop ((funcs (program-funcs program)))
     (if (not (null? funcs))
         (begin
-          (format output "static value ~a(environment env, int nargs, ...) {\n" (func-name (car funcs)))
+          (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...) {\n" (func-name (car funcs)))
           (display (get-output-string (func-port (car funcs))) output)
           (format output "}\n")
           (format output "\n")
@@ -327,7 +327,26 @@
     (display "int main(int argc, char *argv[]) {\n" port)
     (gen-symbol-table-init program port)
     (newline port)
-    (display "    f0(NULL, 0);\n" port)
+    (display "    current_input_port.type = OBJ_PORT;\n" port)
+    (display "    current_input_port.port.direction = PORT_DIR_READ;\n" port)
+    (display "    current_input_port.port.fp = stdin;\n" port)
+    (display "    current_input_port.port.read_char = file_read_char;\n" port)
+    (display "    current_input_port.port.peek_char = file_peek_char;\n" port)
+    (display "    current_input_port.port.read_line = file_read_line;\n" port)
+    (newline port)
+    (display "    current_output_port.type = OBJ_PORT;\n" port)
+    (display "    current_output_port.port.direction = PORT_DIR_WRITE;\n" port)
+    (display "    current_output_port.port.fp = stdout;\n" port)
+    (display "    current_output_port.port.printf = file_printf;\n" port)
+    (display "    current_output_port.port.write_char = file_write_char;\n" port)
+    (newline port)
+    (display "    current_error_port.type = OBJ_PORT;\n" port)
+    (display "    current_error_port.port.direction = PORT_DIR_WRITE;\n" port)
+    (display "    current_error_port.port.fp = stderr;\n" port)
+    (display "    current_error_port.port.printf = file_printf;\n" port)
+    (display "    current_error_port.port.write_char = file_write_char;\n" port)
+    (newline port)
+    (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
     (display "}\n" port)))
 
 (define (add-function program parent params rest-param)
@@ -530,10 +549,11 @@
         (varnum (func-next-varnum func)))
     (gen-code func
               indent
-              "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a, ~a);\n"
+              "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a~a~a);\n"
               varnum
               c-name
               (length arg-varnums)
+              (if (null? arg-varnums) "" ", ")
               (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
     varnum))
 
