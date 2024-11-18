@@ -636,6 +636,7 @@ struct compiler
     struct reader *reader;
     const char *c_filename;
     FILE *output_file;
+    int test_suite;
 
     int n_functions;
     struct function **functions;
@@ -1264,6 +1265,11 @@ compile_define(struct function *func, int indent, struct value *form)
 
     if (form->list.length < 2) {
         fprintf(stderr, "malformed define\n");
+        exit(1);
+    }
+
+    if (func->parent) {
+        fprintf(stderr, "define currently only allowed at the top-level\n");
         exit(1);
     }
 
@@ -1932,12 +1938,22 @@ void
 compile_program(struct compiler *compiler)
 {
     struct function *startup_func = add_function(NULL, compiler, 0, 0);
-    for (;;) {
+    for (int i = 1;; ++i) {
         read_value(compiler->reader);
         if (compiler->reader->value.type == VAL_EOF)
             break;
-        compile_form(startup_func, 1, &compiler->reader->value);
+        int varnum = compile_form(startup_func, 1, &compiler->reader->value);
+
+        /* if a test suite, and we're compiling the main file (i.e. not an include)... */
+        if (compiler->test_suite && compiler->reader->n_lexers == 1) {
+            gen_code(startup_func, 1, "if (x%d == TRUE) { printf(\".\"); } else { printf(\"F(%d)\"); }\n", varnum, i);
+        }
     }
+
+    if (compiler->test_suite) {
+        gen_code(startup_func, 1, "printf(\"\\n\");\n");
+    }
+
     gen_code(startup_func, 1, "return VOID;\n");
 
     for (int i = 0; i < compiler->n_referenced_vars; ++i) {
@@ -2081,6 +2097,7 @@ struct arguments {
     const char *output_filename;
     int output_c;
     int run;
+    int test_suite;
 
     const char *c_filename;
     const char *executable_filename;
@@ -2103,6 +2120,10 @@ parse_opt(int key, char *arg, struct argp_state *state)
 
     case 'r':
         arguments->run = 1;
+        break;
+
+    case 't':
+        arguments->test_suite = 1;
         break;
 
     case ARGP_KEY_ARG:
@@ -2148,6 +2169,7 @@ main(int argc, char const *argv[])
         { "run", 'r', 0, 0, "Run the output executable", },
         { "c", 'c', 0, 0, "Output a C file, not an executable"},
         { "output", 'o', "FILENAME", 0, "Output filename (C or executable depending on -c). Defaults to b.c or b.out" },
+        { "test", 't', 0, 0, "Compile as a test suite" },
         { 0 },
     };
     struct argp argp = { options, parse_opt, "FILENAME", 0 };
@@ -2209,6 +2231,7 @@ main(int argc, char const *argv[])
     struct compiler compiler = {
         .reader = reader,
         .c_filename = arguments.c_filename,
+        .test_suite = arguments.test_suite,
     };
     compile_program(&compiler);
 

@@ -1,6 +1,12 @@
 (define (eqv? x y)
   (eq? x y))
 
+(define (symbol=? x y)
+  (eq? x y))
+
+(define (boolean=? x y)
+  (eq? x y))
+
 (define (equal? x y)
   (cond ((eq? x y) #t)
         ((eqv? x y) #t)
