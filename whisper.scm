@@ -531,7 +531,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(define lambda quasiquote quote))
+(define *specials* '(define lambda let quasiquote quote))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -689,6 +689,19 @@
           ;; return function varnum
           varnum)))))
 
+(define (compile-let func indent form)
+  (if (< (length form) 3)
+      (compile-error "malformed let"))
+  (let loop ((bindings (cadr form))
+             (params '())
+             (init-forms '()))
+    (if (null? bindings)
+        (compile-form func indent (append (list (append (list 'lambda (reverse params)) (cddr form))) (reverse init-forms)))
+        (let ((binding (car bindings)))
+          (if (!= (length binding) 2)
+              (compile-error "bad let binding: ~s" binding)
+              (loop (cdr bindings) (cons (car binding) params) (cons (cadr binding) init-forms)))))))
+
 (define (compile-define func indent form)
   (if (< (length form) 2)
       (compile-error "malformed define: ~s" form))
@@ -743,6 +756,7 @@
     ((quote) (compile-quote func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
     ((lambda) (compile-lambda func indent form))
+    ((let) (compile-let func indent form))
     ((define) (compile-define func indent form))
     (else -1)))
 
