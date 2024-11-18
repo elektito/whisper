@@ -188,6 +188,9 @@
   (let ((ch (peek-char port)))
     (cond ((eof-object? ch) (compile-error "unexpected eof after sharp"))
           ((char=? #\\ ch) (read-char-literal port))
+          ((char=? #\; ch) (read-char port) ; skip the semicolon
+                           (read port)      ; read and ignore one datum. e.g. #;(foo 1 2)
+                           (read port))
           (else (read-sharp-identifier port)))))
 
 (define (read-sharp-identifier port)
