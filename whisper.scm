@@ -439,8 +439,8 @@
 (define (compile-bool func indent form)
   (let ((varnum (func-next-varnum func)))
     (if form
-        (gen-code func indent "value x~a = TRUE;\n" varnum form)
-        (gen-code func indent "value x~a = FALSE;\n" varnum form))
+        (gen-code func indent "value x~a = TRUE;\n" varnum)
+        (gen-code func indent "value x~a = FALSE;\n" varnum))
     varnum))
 
 (define (c-char ch)
