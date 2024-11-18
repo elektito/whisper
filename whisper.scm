@@ -753,11 +753,11 @@
 
 (define (compile-special func indent form kind)
   (case kind
-    ((quote) (compile-quote func indent form))
-    ((quasiquote) (compile-quasiquote func indent form))
-    ((lambda) (compile-lambda func indent form))
-    ((let) (compile-let func indent form))
     ((define) (compile-define func indent form))
+    ((let) (compile-let func indent form))
+    ((lambda) (compile-lambda func indent form))
+    ((quasiquote) (compile-quasiquote func indent form))
+    ((quote) (compile-quote func indent form))
     (else -1)))
 
 (define (compile-call func indent form)
