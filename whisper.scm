@@ -424,7 +424,7 @@
 
 (define (func-add-freevar func var)
   (let ((new-freevars (cons var (func-freevars func))))
-    (func-freevars-set! new-freevars)
+    (func-freevars-set! func new-freevars)
 
     ;; return the index of the new freevar
     (- (length new-freevars) 1)))
