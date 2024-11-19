@@ -56,6 +56,7 @@ struct object {
             int direction;
             int closed;
             FILE *fp;
+            char *filename;
             char *string;
             int64_t string_cap;
             int64_t string_len;
@@ -300,7 +301,11 @@ static void print_unprintable(value v, value port) {
         struct object *op = GET_OBJECT(v);
         const char *dir = op->port.direction == PORT_DIR_READ ? "input" : "output";
         const char *kind = op->port.string ? "string-" : "";
-        GET_OBJECT(port)->port.printf(port, "#<%s-%sport>", dir, kind);
+        if (op->port.filename) {
+            GET_OBJECT(port)->port.printf(port, "#<%s-%sport \"%s\">", dir, kind, op->port.filename);
+        } else {
+            GET_OBJECT(port)->port.printf(port, "#<%s-%sport>", dir, kind);
+        }
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
     }
@@ -837,12 +842,13 @@ static value primcall_open_input_file(environment env, enum call_flags flags, in
     value filename = next_arg();
     free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
-    int filename_len = GET_STRING(filename)->len;
-    char *filenamez = malloc(filename_len + 1);
-    snprintf(filenamez, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
-    FILE *fp = fopen(filenamez, "r");
-    if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
     struct object *obj = calloc(1, sizeof(struct object));
+    int filename_len = GET_STRING(filename)->len;
+    obj->port.filename = malloc(filename_len + 1);
+    snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
+    FILE *fp = fopen(obj->port.filename, "r");
+    if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
+
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_READ;
     obj->port.fp = fp;
