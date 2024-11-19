@@ -979,10 +979,10 @@ static value primcall_string_to_symbol(environment env, enum call_flags flags, i
 static value primcall_symbol_to_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("symbol->string needs a single argument"); }
     init_args();
-    value str = next_arg();
+    value sym = next_arg();
     free_args();
-    if (!IS_SYMBOL(str)) { RAISE("symbol->string argument is not a symbol"); }
-    return symbol_to_string(str);
+    if (!IS_SYMBOL(sym)) { RAISE("symbol->string argument is not a symbol"); }
+    return symbol_to_string(sym);
 }
 
 static value primcall_string_append(environment env, enum call_flags flags, int nargs, ...) {
