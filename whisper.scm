@@ -82,6 +82,7 @@
              (ls '()))
     (cond ((eof-object? ch) (compile-error "eof inside list"))
           ((char-whitespace? ch) (read-char port) (loop (peek-char port) ls))
+          ((char=? #\; ch) (skip-line-comment port) (loop (peek-char port) ls))
           ((char=? #\) ch) (read-char port) (postprocess-list ls))
           (else (let ((item (read port)))
                   (if (eof-object? item)
