@@ -1132,7 +1132,7 @@ static value primcall_unread_char(environment env, enum call_flags flags, int na
     value ch = next_arg();
     if (!IS_CHAR(ch)) { RAISE("unread-char first argument is not a character"); }
     value port = nargs == 2 ? next_arg() : OBJECT(&current_input_port);
-    if (!IS_PORT(ch)) { RAISE("unread-char second argument is not a port"); }
+    if (!IS_PORT(port)) { RAISE("unread-char second argument is not a port"); }
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("unread-char argument is not an input port"); }
     GET_OBJECT(port)->port.unread_char(port, ch);

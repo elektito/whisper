@@ -38,7 +38,7 @@
                                ((#\|) (read-char port)
                                       (skip-block-comment port)
                                       (loop (peek-char port)))
-                               (else (unread-char port next-char)))))
+                               (else (unread-char next-char port)))))
           (else (void)))))
 
 (define (skip-line-comment port)
