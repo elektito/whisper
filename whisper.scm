@@ -258,15 +258,26 @@
 ;;;;;; compiler ;;;;;;
 
 (define (create-program port)
-  (list port
+  (list (list port)
         '() ; funcs
         0   ; funcnum (function counter)
         '() ; interned symbols
         #f  ; init func, to be set later
         ))
 
-(define (program-port program)
+(define (program-ports program)
   (car program))
+
+(define (program-port program)
+  (caar program))
+
+(define (program-push-port program port)
+  (let ((ports (list-ref program 0)))
+    (list-set! program 0 (cons port ports))))
+
+(define (program-pop-port program)
+  (let ((ports (program-ports program)))
+    (list-set! program 0 (cdr ports))))
 
 (define (program-funcs program)
   (cadr program))
@@ -549,7 +560,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(case cond define if lambda let quasiquote quote))
+(define *specials* '(case cond define if include lambda let quasiquote quote))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -863,11 +874,20 @@
                 (loop (- i 1))))))
       ret-varnum)))
 
+(define (compile-include func indent form)
+  (if (or (!= (length form) 2)
+          (not (string? (cadr form))))
+      (compile-error "bad include form: ~s" form))
+  (let ((port (open-input-file (cadr form))))
+    (program-push-port (func-program func) port))
+  -1)
+
 (define (compile-special func indent form kind)
   (case kind
     ((case) (compile-case func indent form))
     ((cond) (compile-cond func indent form))
     ((define) (compile-define func indent form))
+    ((include) (compile-include func indent form))
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
     ((lambda) (compile-lambda func indent form))
@@ -1008,15 +1028,18 @@
   (exit 1))
 
 (define (compile-program program)
-  (let ((func (add-function program #f '() #f))
-        (port (program-port program)))
+  (let ((func (add-function program #f '() #f)))
     (program-init-func-set! program func)
-    (let loop ((form (read port)))
+    (let loop ((form (read (program-port program))))
       (if (eof-object? form)
-          (gen-code func 1 "return VOID;\n")
+          (if (= (length (program-ports program)) 1)
+              (gen-code func 1 "return VOID;\n")
+              (begin
+                (program-pop-port program)
+                (loop (read (program-port program)))))
           (begin
             (compile-form func 1 form)
-            (loop (read port)))))))
+            (loop (read (program-port program))))))))
 
 ;;;;;; main ;;;;;;
 
