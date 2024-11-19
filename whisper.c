@@ -1392,6 +1392,7 @@ compile_if(struct function *func, int indent, struct value *form)
 int
 compile_cond(struct function *func, int indent, struct value *form)
 {
+    int have_else = 0;
     int ret_varnum = func->varnum++;
     gen_code(func, indent, "value x%d = VOID;\n", ret_varnum);
 
@@ -1412,6 +1413,8 @@ compile_cond(struct function *func, int indent, struct value *form)
                 exit(1);
             }
 
+            have_else = 1;
+
             int varnum;
             for (int j = 1; j < clause->list.length; ++j) {
                 varnum = compile_form(func, indent + (i - 1), &clause->list.ptr[j]);
@@ -1431,8 +1434,8 @@ compile_cond(struct function *func, int indent, struct value *form)
         }
     }
 
-    for (int i = 1; i < form->list.length - 1; ++i) {
-        gen_code(func, indent + form->list.length - i - 2, "}\n");
+    for (int i = 1; i < form->list.length - 1 + (have_else ? 0 : 1); ++i) {
+        gen_code(func, indent + form->list.length - i - 1 - (have_else ? 1 : 0), "}\n");
     }
 
     return ret_varnum;
