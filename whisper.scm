@@ -12,6 +12,7 @@
 
 (define (read port)
   (let ((ch (peek-char port)))
+    (skip-whitespace-and-comments port)
     (cond ((eof-object? ch) ch)
           ((char-whitespace? ch) (read-char port) (read port))
           ((char=? #\( ch) (read-list port))
@@ -20,11 +21,26 @@
           ((char=? #\' ch) (read-quoted-form port))
           ((char=? #\` ch) (read-quasiquoted-form port))
           ((char=? #\, ch) (read-unquoted-form port))
-          ((char=? #\; ch) (skip-line-comment port) (read port))
           ((char=? #\| ch) (read-piped-symbol port))
           ((char=? #\. ch) (read-dot-or-identifier port))
           (else (read-char port) ; read-identifier-or-number expects first character already read and passed to it
                 (read-identifier-or-number port ch)))))
+
+(define (skip-whitespace-and-comments port)
+  (let loop ((ch (peek-char port)))
+    (cond ((char-whitespace? ch) (read-char port) (loop (peek-char port)))
+          ((char=? #\; ch) (skip-line-comment port) (loop (peek-char port)))
+          ((char=? #\# ch) (read-char port)
+                           (let ((next-char (peek-char port)))
+                             (case next-char
+                               ((#\;) (read-char port)
+                                      (read port)
+                                      (loop (peek-char port))) ; read and ignore one datum
+                               ((#\|) (read-char port)
+                                      (skip-block-comment port)
+                                      (loop (peek-char port)))
+                               (else (unread-char port next-char)))))
+          (else (void)))))
 
 (define (skip-line-comment port)
   (read-char port) ; skip the semicolon character
@@ -32,6 +48,9 @@
     (cond ((eof-object? ch) ch)
           ((eq? #\newline ch) ch)
           (else (loop (read-char port))))))
+
+(define (skip-block-comment port)
+  (compile-error "block comments not yet supported"))
 
 (define (read-quoted-form port)
   (read-char port) ; skip the quote character
@@ -78,16 +97,17 @@
 
 (define (read-list port)
   (read-char port) ; get rid of the open parenthesis
+  (skip-whitespace-and-comments port)
   (let loop ((ch (peek-char port))
              (ls '()))
     (cond ((eof-object? ch) (compile-error "eof inside list"))
-          ((char-whitespace? ch) (read-char port) (loop (peek-char port) ls))
-          ((char=? #\; ch) (skip-line-comment port) (loop (peek-char port) ls))
           ((char=? #\) ch) (read-char port) (postprocess-list ls))
           (else (let ((item (read port)))
                   (if (eof-object? item)
                       (compile-error "eof inside list")
-                      (loop (peek-char port) (cons item ls))))))))
+                      (begin
+                        (skip-whitespace-and-comments port)
+                        (loop (peek-char port) (cons item ls)))))))))
 
 (define (read-string-literal port)
   (read-char port) ; get rid of open quotation
@@ -189,9 +209,6 @@
   (let ((ch (peek-char port)))
     (cond ((eof-object? ch) (compile-error "unexpected eof after sharp"))
           ((char=? #\\ ch) (read-char-literal port))
-          ((char=? #\; ch) (read-char port) ; skip the semicolon
-                           (read port)      ; read and ignore one datum. e.g. #;(foo 1 2)
-                           (read port))
           (else (read-sharp-identifier port)))))
 
 (define (read-sharp-identifier port)
@@ -519,6 +536,7 @@
                       (substring "substring" 3 3)
                       (symbol? "symbol_q" 1 1)
                       (uninterned-symbol? "uninterned_symbol_q" 1 1)
+                      (unread-char "unread_char" 1 2)
                       (void "void" 0 0)
                       (write "write" 1 2)
                       (write-char "write_char" 1 2)

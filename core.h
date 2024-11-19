@@ -62,6 +62,7 @@ struct object {
             value (*read_char)(value port);
             value (*peek_char)(value port);
             value (*read_line)(value port);
+            void (*unread_char)(value port, value ch);
             void (*write_char)(value port, value ch);
             void (*printf)(value port, const char *fmt, ...);
         } port;
@@ -232,6 +233,12 @@ static value file_peek_char(value port) {
     if (ch == EOF) return EOFOBJ;
     ungetc(ch, fp);
     return CHAR(ch);
+}
+
+static void file_unread_char(value port, value ch) {
+    FILE *fp = GET_OBJECT(port)->port.fp;
+    int ret = ungetc(GET_CHAR(ch), fp);
+    if (ret == EOF) { RAISE("error unreading character"); }
 }
 
 static void file_write_char(value port, value ch) {
@@ -842,6 +849,7 @@ static value primcall_open_input_file(environment env, enum call_flags flags, in
     obj->port.read_char = file_read_char;
     obj->port.peek_char = file_peek_char;
     obj->port.read_line = file_read_line;
+    obj->port.unread_char = file_unread_char;
     return OBJECT(obj);
 }
 
@@ -1110,6 +1118,19 @@ static value primcall_uninterned_symbol_q(environment env, enum call_flags flags
     value v = next_arg();
     free_args();
     return BOOL(IS_SYMBOL(v) && IS_OBJECT(v));
+}
+
+static value primcall_unread_char(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { RAISE("unread-char needs one or two arguments"); }
+    init_args();
+    value ch = next_arg();
+    if (!IS_CHAR(ch)) { RAISE("unread-char first argument is not a character"); }
+    value port = nargs == 2 ? next_arg() : OBJECT(&current_input_port);
+    if (!IS_PORT(ch)) { RAISE("unread-char second argument is not a port"); }
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("unread-char argument is not an input port"); }
+    GET_OBJECT(port)->port.unread_char(port, ch);
+    return VOID;
 }
 
 static value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
