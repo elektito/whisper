@@ -1005,7 +1005,7 @@
       ;; is not allowed where bar is undefined, but:
       ;;     (define foo (lambda () bar))
       ;; is allowed.
-      ((unknown) (if (func-parent form)
+      ((unknown) (if (func-parent func)
                      (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))
                      (compile-error "unbound identifier: ~a" form)))
 
