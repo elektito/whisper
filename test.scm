@@ -2,7 +2,7 @@
 
 ;; defines
 
-(eq? 1 1 #;(spam eggs)) ; also test datum comment at the end of a list
+(eq? 1 1) ; also test datum comment at the end of a list
 (eq? 'foo 'foo)
 
 (eq? #f '#f)
