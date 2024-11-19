@@ -11,10 +11,9 @@
 ;;;;;; reader ;;;;;;
 
 (define (read port)
+  (skip-whitespace-and-comments port)
   (let ((ch (peek-char port)))
-    (skip-whitespace-and-comments port)
     (cond ((eof-object? ch) ch)
-          ((char-whitespace? ch) (read-char port) (read port))
           ((char=? #\( ch) (read-list port))
           ((char=? #\" ch) (read-string-literal port))
           ((char=? #\# ch) (read-sharp-thing port))
