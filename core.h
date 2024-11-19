@@ -787,6 +787,7 @@ static value primcall_make_string(environment env, enum call_flags flags, int na
     value ch = nargs == 1 ? CHAR(0) : next_arg();
     free_args();
     if (!IS_FIXNUM(n)) { RAISE("make-string first argument should be a number"); }
+    if (GET_FIXNUM(n) < 0) { RAISE("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
     return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));
 }
