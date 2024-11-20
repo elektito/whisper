@@ -55,7 +55,6 @@
 (define (cdddar x) (cdr (cdr (cdr (car x)))))
 (define (cddddr x) (cdr (cdr (cdr (cdr x)))))
 
-
 (define (null? x)
   (eq? '() x))
 
@@ -141,6 +140,13 @@
           #t
           (any? (cdr values)))))
 
+(define (all? values)
+  (if (null? values)
+      #t
+      (if (car values)
+          (all? (cdr values))
+          #f)))
+
 (define (mapcar func args)
   (if (null? args)
       '()
@@ -157,10 +163,45 @@
 (define (map func . arg-lists)
   (%map func arg-lists '()))
 
-(define (char=? c . rest)
-  (if (null? rest)
+;; utility
+
+;; apply the given function to pairs of the given list and return the results as
+;; a list.
+;;
+;; for example, (pairwise list '(1 2 3 4)) would result in (1 2) (2 3) (3 4)
+(define (pairwise fn ls)
+  (cond ((< (length ls) 2)
+         (error "Invalid number of arguments for pairwise"))
+        ((eqv? (length ls) 2)
+         (list (fn (car ls) (cadr ls))))
+        (else
+         (cons (fn (car ls) (cadr ls))
+               (pairwise fn (cdr ls))))))
+
+(define (char=? . chars)
+  (if (null? (cdr chars))
       #t
-      (and (eq? c (car rest)) (apply char=? (car rest) (cdr rest)))))
+      (all? (pairwise eq? chars))))
+
+(define (char<? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise < (map char->integer chars)))))
+
+(define (char>? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise > (map char->integer chars)))))
+
+(define (char<=? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise <= (map char->integer chars)))))
+
+(define (char>=? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise >= (map char->integer chars)))))
 
 (define (char-whitespace? c)
   (or (char=? #\space c)
@@ -169,19 +210,19 @@
       (char=? #\return c)))
 
 (define (char-alphabetic? ch)
-  (let ((code (char->integer ch))
-        (a (char->integer #\a))
-        (z (char->integer #\z))
-        (A (char->integer #\A))
-        (Z (char->integer #\Z)))
-    (or (and (>= code a) (<= code z))
-        (and (>= code A) (<= code Z)))))
+  (or (and (char>=? ch #\a) (char<=? ch #\z))
+      (and (char>=? ch #\A) (char<=? ch #\Z))))
 
 (define (char-numeric? ch)
-  (let ((code (char->integer ch))
-        (zero (char->integer #\0))
-        (nine (char->integer #\9)))
-    (and (>= code zero) (<= code nine))))
+  (and (char>=? ch #\0) (char<=? ch #\9)))
+
+(define (char-upper-case? ch)
+  (and (char>=? ch #\A)
+       (char<=? ch #\Z)))
+
+(define (char-lower-case? ch)
+  (and (char>=? ch #\a)
+       (char<=? ch #\z)))
 
 (define (positive? n)
   (> n 0))

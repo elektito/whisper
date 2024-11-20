@@ -156,16 +156,9 @@
       (else (compile-error "bad escape sequence")))))
 
 (define (char-is-hex-digit? ch)
-  (let ((code (char->integer ch))
-        (zero (char->integer #\0))
-        (nine (char->integer #\9))
-        (a (char->integer #\a))
-        (f (char->integer #\f))
-        (A (char->integer #\A))
-        (F (char->integer #\F)))
-    (or (and (>= code zero) (<= code nine))
-        (and (>= code a) (<= code f))
-        (and (>= code A) (<= code F)))))
+  (or (and (char>=? ch #\0) (char<=? ch #\9))
+      (and (char>=? ch #\a) (char<=? ch #\f))
+      (and (char>=? ch #\A) (char<=? ch #\F))))
 
 (define (read-escaped-hex-char port)
   ;; reads a character literal like \x22;
