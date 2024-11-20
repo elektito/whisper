@@ -270,6 +270,7 @@
         0   ; funcnum (function counter)
         '() ; interned symbols
         #f  ; init func, to be set later
+        '() ; referenced variables
         ))
 
 (define (program-ports program)
@@ -305,6 +306,19 @@
 
 (define (program-init-func-set! program func)
   (list-set! program 4 func))
+
+(define (program-referenced-vars program)
+  (list-ref program 5))
+
+(define (program-referenced-vars-set! program vars)
+  (list-set! program 5 vars))
+
+(define (program-add-referenced-var program var)
+  (let loop ((vars (program-referenced-vars program)))
+    (if (null? vars)
+        (program-referenced-vars-set! program (cons var (program-referenced-vars program)))
+        (if (not (eq? var (car vars)))
+            (loop (cdr vars))))))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
@@ -1078,7 +1092,9 @@
       ;;     (define foo (lambda () bar))
       ;; is allowed.
       ((unknown) (if (func-parent func)
-                     (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))
+                     (begin
+                       (program-add-referenced-var (func-program func) form)
+                       (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form)))
                      (compile-error "unbound identifier: ~a" form)))
 
       (else (error (format "unknown meaning kind: ~a" (meaning-kind meaning)))))
@@ -1111,7 +1127,14 @@
                 (loop (read (program-port program)))))
           (begin
             (compile-form func 1 form)
-            (loop (read (program-port program))))))))
+            (loop (read (program-port program))))))
+    ;; check for undefined referenced variables
+    (let loop ((vars (program-referenced-vars program)))
+      (if (not (null? vars))
+          (begin
+            (if (not (func-has-param func (car vars)))
+                (compile-error "undefined variable: ~a" (car vars)))
+            (loop (cdr vars)))))))
 
 ;;;;;; main ;;;;;;
 
