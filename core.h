@@ -918,6 +918,14 @@ static value primcall_port_q(environment env, enum call_flags flags, int nargs, 
     return BOOL(IS_PORT(v));
 }
 
+static value primcall_procedure_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("procedure? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_CLOSURE(v));
+}
+
 static value primcall_read_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("read-char needs zero or one argument"); }
     init_args();

@@ -577,6 +577,21 @@ read_value(struct reader *reader)
                 }
 
                 reader->value.character = (char)(first_digit_value * 16 + second_digit_value);
+            } else if (reader->value.identifier.name_len == 4 && reader->value.identifier.name[2] == 'x') {
+                char digit = reader->value.identifier.name[3];
+                int digit_value;
+                if (digit >= '0' && digit <= '9') {
+                    digit_value = digit - '0';
+                } else if (digit >= 'a' && digit <= 'z') {
+                    digit_value = digit - 'a' + 10;
+                } else if (digit >= 'A' && digit <= 'Z') {
+                    digit_value = digit - 'A' + 10;
+                } else {
+                    fprintf(stderr, "invalid character literal\n");
+                    exit(1);
+                }
+
+                reader->value.character = (char)(digit_value);
             } else {
                 fprintf(stderr, "invalid character literal\n");
                 exit(1);
@@ -1724,6 +1739,7 @@ struct {
     { "pair?", "pair_q", 1, 1 },
     { "peek-char", "peek_char", 0, 1 },
     { "port?", "port_q", 1, 1 },
+    { "procedure?", "procedure_q", 1, 1 },
     { "read-char", "read_char", 0, 1 },
     { "read-line", "read_line", 0, 1 },
     { "set-car!", "set_car_b", 2, 2 },
