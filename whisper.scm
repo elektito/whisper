@@ -523,7 +523,8 @@
 
 (define (compile-char func indent form)
   (let ((varnum (func-next-varnum func)))
-    (gen-code func indent "value x~a = CHAR('~a');\n" varnum (c-char form))))
+    (gen-code func indent "value x~a = CHAR('~a');\n" varnum (c-char form))
+    varnum))
 
 (define *primcalls* '((apply "apply" 1 -1)
                       (car "car" 1 1)
