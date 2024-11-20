@@ -590,7 +590,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(and begin case cond define if include lambda let quasiquote quote))
+(define *specials* '(and begin case cond define if include lambda let or quasiquote quote))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -962,6 +962,24 @@
             (loop (cdr values)))))
     ret-varnum))
 
+(define (compile-or func indent form)
+  (let ((ret-varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a;\n" ret-varnum)
+    (let loop ((values (cdr form)) (i 0))
+      (if (not (null? values))
+          (let ((arg-varnum (compile-form func (+ indent i) (car values))))
+            (gen-code func (+ indent i) "if (x~a != FALSE) {\n" arg-varnum)
+            (gen-code func (+ indent i 1) "x~a = x~a;\n" ret-varnum arg-varnum)
+            (gen-code func (+ indent i) "} else {\n")
+            (loop (cdr values) (+ i 1)))))
+    (gen-code func (+ indent (length form) -1) "x~a = FALSE;\n" ret-varnum)
+    (let loop ((values (cdr form)))
+      (if (not (null? values))
+          (begin
+            (gen-code func (length values) "}\n")
+            (loop (cdr values)))))
+    ret-varnum))
+
 (define (compile-begin func indent form)
   (let ((ret-varnum (func-next-varnum func)))
     (if (= 1 (length form))
@@ -986,6 +1004,7 @@
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
     ((lambda) (compile-lambda func indent form #f))
+    ((or) (compile-or func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
     ((quote) (compile-quote func indent form))
     (else -1)))
