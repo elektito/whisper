@@ -449,12 +449,14 @@
             (loop (+ i 1) (cdr freevars))))))
 
 (define (func-has-param func param)
-  (let loop ((params (func-params func)))
-    (if (null? params)
-        #f
-        (if (eq? param (car params))
-            #t
-            (loop (cdr params))))))
+  (if (eq? param (func-rest-param func))
+      #t
+      (let loop ((params (func-params func)))
+        (if (null? params)
+            #f
+            (if (eq? param (car params))
+                #t
+                (loop (cdr params)))))))
 
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
