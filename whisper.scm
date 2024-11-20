@@ -666,7 +666,7 @@
                           varnum))
         ((list? form) (let ((varnum (func-next-varnum func)))
                         (gen-code func indent "value x~a = NIL;\n" varnum)
-                        (let loop ((form form))
+                        (let loop ((form (reverse form)))
                           (if (null? form)
                               varnum
                               (let ((car-varnum (compile-quoted-item func indent (car form))))
