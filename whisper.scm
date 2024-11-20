@@ -894,11 +894,12 @@
                         (gen-code func (+ indent i 1) "x~a = x~a;\n" ret-varnum (last arg-varnums)))
                     (gen-code func (+ indent i) "} else {\n")
                     (loop (cdr clauses) (+ i 1))))))))
-    (let loop ((i 0))
-      (if (< i (- (length form) 1))
-          (begin
-            (gen-code func (+ indent (length form) (- i) -2) "}\n")
-            (loop (+ i 1)))))
+    (let ((have-else (eq? 'else (car (last form)))))
+      (let loop ((i 0))
+        (if (< i (- (length form) 1 (if have-else 1 0)))
+            (begin
+              (gen-code func (+ indent (length form) (- i) (if have-else -1 0) -2) "}\n")
+              (loop (+ i 1))))))
     ret-varnum))
 
 (define (compile-case func indent form)
