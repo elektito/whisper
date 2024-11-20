@@ -341,7 +341,7 @@
   (let loop ((i 0) (symbols (program-symbols program)))
     (if (not (null? symbols))
         (begin
-          (format output "#define sym~a ~a\n" (mangle-name (car symbols)) i)
+          (format output "#define sym~a SYMBOL(~a)\n" (mangle-name (car symbols)) i)
           (loop (+ i 1) (cdr symbols))))))
 
 (define (gen-symbol-table-init program output)
