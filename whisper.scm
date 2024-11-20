@@ -736,7 +736,8 @@
         (if (not (eq? rest-param #f))
             (begin
               (gen-code new-func 1 "value ~a = NIL;\n" (mangle-name rest-param))
-              (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))))
+              (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))
+              (gen-code new-func 1 "~a = reverse_list(~a, NIL);\n" (mangle-name rest-param) (mangle-name rest-param))))
 
         (gen-code new-func 1 "\n")
 
