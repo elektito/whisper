@@ -1079,7 +1079,8 @@
          (if (func-parent func) (make-meaning 'local #f) (make-meaning 'global #f)))
         (else (let loop ((func func))
                 (if func
-                    (cond ((func-has-param func identifier)
+                    (cond ((and (func-has-param func identifier)
+                                (func-parent func)) ; only "free" if not top-level
                            (make-meaning 'free #f))
                           ((eq? identifier (func-self-name func))
                            (make-meaning 'free #f))
