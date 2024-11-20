@@ -38,7 +38,14 @@
                                ((#\|) (read-char port)
                                       (skip-block-comment port)
                                       (loop (peek-char port)))
-                               (else (unread-char next-char port)))))
+                               ;; read the last character so we can
+                               ;; unread the two in the right order.
+                               ;; notice that two "unread" operations is
+                               ;; not guaranteed to be supported on all
+                               ;; platforms.
+                               (else (read-char port)
+                                     (unread-char next-char port)
+                                     (unread-char ch port)))))
           (else (void)))))
 
 (define (skip-line-comment port)
@@ -198,7 +205,7 @@
     (cond ((char-is-separator? ch) (sym-or-num s))
           ((eq? #\\ ch) (if (not first-iter) (read-char port))
                         (let ((escaped-char (read-escaped-char port)))
-                          (loop #f (peek-char port) (string-append s escaped-char))))
+                          (loop #f (peek-char port) (string-append-char s escaped-char))))
           (else (if (not first-iter)
                     (read-char port))
                 (loop #f (peek-char port) (string-append-char s ch))))))
