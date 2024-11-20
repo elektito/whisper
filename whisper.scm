@@ -792,7 +792,7 @@
           (let ((func-varnum (compile-lambda func indent (append (list 'lambda (reverse params)) body) name)))
             (if name
                 (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum))
-            (let ((arg-varnums (compile-list-of-forms func indent init-forms)))
+            (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
               (let ((ret-varnum (func-next-varnum func)))
                 (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
                           ret-varnum
