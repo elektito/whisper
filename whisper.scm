@@ -812,6 +812,9 @@
   (if (and (symbol? (cadr form))
            (> (length form) 3))
       (compile-error "malformed define: ~s" form))
+  (if (and (list? (cadr form))
+           (< (length form) 3))
+      (compile-error "malformed define: ~s" form))
 
   ;; we could technically allow this, and then further on, declare the
   ;; variable in-place as opposed to setting the global variable.
