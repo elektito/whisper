@@ -831,7 +831,7 @@
       (compile-error "define currently only supported at the top-level"))
 
   ;; convert the function form to normal form
-  (let ((form (if (list? (cadr form))
+  (let ((form (if (pair? (cadr form))
                   (list 'define
                         (caadr form)
                         (append (list 'lambda (cdadr form)) (cddr form)))
