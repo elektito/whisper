@@ -1004,7 +1004,10 @@ static value primcall_string_append(environment env, enum call_flags flags, int 
     int total_size = 0;
     init_args();
     for (int i = 0; i < nargs; ++i) {
-        struct string *str = GET_STRING(next_arg());
+        value arg = next_arg();
+        if (!IS_STRING(arg)) { RAISE("string-append argument is not a string"); }
+
+        struct string *str = GET_STRING(arg);
         total_size += str->len;
     }
 
