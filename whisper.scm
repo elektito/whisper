@@ -407,6 +407,7 @@
                     parent
                     rest-param
                     '() ; freevars
+                    #f  ; self-name (for named let)
                     )))
     (list-set! program 1 (cons func (program-funcs program)))
     func))
@@ -442,6 +443,12 @@
 
 (define (func-freevars-set! func freevars)
   (list-set! func 7 freevars))
+
+(define (func-self-name func)
+  (list-ref func 8))
+
+(define (func-self-name-set! func name)
+  (list-set! func 8 name))
 
 (define (func-add-freevar func var)
   (let ((new-freevars (append (func-freevars func) (list var))))
@@ -705,7 +712,9 @@
         ;; if there's a "self-name" (in a named let block) reserve
         ;; freevar zero for it. compile-let will later assign its value
         (if self-name
-            (func-add-freevar new-func self-name))
+            (begin
+              (func-self-name-set! new-func self-name)
+              (func-add-freevar new-func self-name)))
         (if (eq? rest-param #f)
             (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch\");\n" (length params))
             (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function\");\n" (length params)))
@@ -1024,28 +1033,28 @@
   ;;
   ;;  - unknown: neither of the previous ones
 
-  (if (func-has-param func identifier)
-      (if (func-parent func) (make-meaning 'local #f) (make-meaning 'global #f))
-      (let loop ((freevars (func-freevars func)))
-        (if (not (null? freevars))
-            (if (eq? (car freevars) identifier)
-                (make-meaning 'free #f)
-                (loop (cdr freevars)))
-            (let loop ((func (func-parent func)))
-              (if func
-                  (if (func-has-param func identifier)
-                      (if (func-parent func) (make-meaning 'free #f) (make-meaning 'global #f))
-                      (loop (func-parent func)))
-                  ;;(cond ((lookup-primcall identifier) => (lambda (x) (make-meaning 'primcall x))
-                  ;;      ((lookup-special identifier) => (lambda (x) (make-meaning 'special x)))
-                  ;;      (else 'global))))))
-                  (let ((primcall-info (lookup-primcall identifier)))
-                    (if primcall-info
-                        (make-meaning 'primcall primcall-info)
-                        (let ((special-info (lookup-special identifier)))
-                          (if special-info
-                              (make-meaning 'special special-info)
-                              (make-meaning 'unknown #f)))))))))))
+  (cond ((func-has-param func identifier)
+         (if (func-parent func) (make-meaning 'local #f) (make-meaning 'global #f)))
+        (else (let loop ((func func))
+                (if func
+                    (cond ((func-has-param func identifier)
+                           (make-meaning 'free #f))
+                          ((eq? identifier (func-self-name func))
+                           (make-meaning 'free #f))
+                          ((func-find-freevar func identifier)
+                           (make-meaning 'free #f))
+                          (else (loop (func-parent func))))
+                    ;;(cond ((lookup-primcall identifier) => (lambda (x) (make-meaning 'primcall x))
+                    ;;      ((lookup-special identifier) => (lambda (x) (make-meaning 'special x)))
+                    ;;      (else 'global))))))
+                    (let ((primcall-info (lookup-primcall identifier)))
+                      (if primcall-info
+                          (make-meaning 'primcall primcall-info)
+                          (let ((special-info (lookup-special identifier)))
+                            (if special-info
+                                (make-meaning 'special special-info)
+                                (make-meaning 'unknown #f))))))))))
+
 
 (define (compile-list func indent form)
   (if (not (symbol? (car form)))
