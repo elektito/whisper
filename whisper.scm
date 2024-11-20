@@ -590,7 +590,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(and case cond define if include lambda let quasiquote quote))
+(define *specials* '(and begin case cond define if include lambda let quasiquote quote))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -962,9 +962,23 @@
             (loop (cdr values)))))
     ret-varnum))
 
+(define (compile-begin func indent form)
+  (let ((ret-varnum (func-next-varnum func)))
+    (if (= 1 (length form))
+        (if (eq? (func-parent func) #f)
+            (gen-code func indent "value x~a = VOID;\n" ret-varnum)
+            (compile-error "empty begin expression is not allowed"))
+        (let loop ((exprs (cdr form)))
+          (let ((expr-varnum (compile-form func indent (car exprs))))
+            (if (null? (cdr exprs))
+                (gen-code func indent "value x~a = x~a;\n" ret-varnum expr-varnum)
+                (loop (cdr exprs))))))
+    ret-varnum))
+
 (define (compile-special func indent form kind)
   (case kind
     ((and) (compile-and func indent form))
+    ((begin) (compile-begin func indent form))
     ((case) (compile-case func indent form))
     ((cond) (compile-cond func indent form))
     ((define) (compile-define func indent form))
