@@ -269,6 +269,14 @@
   (list-set! x 2 'abc)
   (equal? '(1 2 abc 4 5) x))
 
+(let ((x '(1 2 3)))
+  (set-car! x 10)
+  (equal? x '(10 2 3)))
+
+(let ((x '(1 2 3)))
+  (set-cdr! x 10)
+  (equal? x '(1 . 10)))
+
 ;; equality
 
 (not (eq? (gensym) (gensym)))
@@ -375,3 +383,117 @@
 (not (char-numeric? #\A))
 (not (char-numeric? #\space))
 (not (char-numeric? #\tab))
+
+(eq? (char->integer #\A) 65)
+(eq? (integer->char 32) #\space)
+
+;; string
+
+;(string=? "Hello" "H\x65;llo")
+;(string=? "foobar" "foo\
+;                    bar")
+(char=? #\tab (string-ref "\t" 0))
+(char=? #\newline (string-ref "\n" 0))
+(char=? #\return (string-ref "\r" 0))
+(char=? #\alarm (string-ref "\a" 0))
+(char=? #\backspace (string-ref "\b" 0))
+(char=? #\" (string-ref "\"" 0))
+;(char=? #\x7c (string-ref "\|" 0))
+;(char=? #\null (string-ref "\x0;" 0))
+
+(string=? (make-string 10 #\A) "AAAAAAAAAA")
+(eq? 10 (string-length (make-string 10 #\A)))
+(eq? 10 (string-length (make-string 10)))
+
+(string=? "" (string))
+(string=? "A" (string #\A))
+(string=? "ABC" (string #\A #\B #\C))
+
+(eq? #\A (string-ref "ABC" 0))
+(eq? #\B (string-ref "ABC" 1))
+(eq? #\C (string-ref "ABC" 2))
+
+(let ((s (make-string 3 #\space)))
+  (string-set! s 0 #\X)
+  (string-set! s 2 #\Z)
+  (string=? s "X Z"))
+
+(equal? "cde" (substring "abcdefg" 2 5))
+(equal? "" (substring "abcdefg" 4 4))
+
+(equal? "cde" (string-copy "abcdefg" 2 5))
+(equal? "" (string-copy "abcdefg" 4 4))
+(equal? "cdefg" (string-copy "abcdefg" 2))
+(let ((s "abcd"))
+  (let ((r (string-copy s)))
+    (and (equal? s r)
+         (not (eq? s r)))))
+
+(equal? "" (string-append))
+(let ((s "12"))
+  (let ((a (string-append s)))
+    (and (not (eq? s a)) ;; the return value should be a newly allocated string
+         (equal? "12" a))))
+(equal? "123456" (string-append "12" "" "3456"))
+
+;; make sure primitive functions are available as normal functions
+
+(procedure? cons)
+(equal? '(1 2) (apply cons '(1 (2))))
+
+(procedure? car)
+(equal? 1 (apply car '((1 2))))
+
+(procedure? cdr)
+(equal? '(2) (apply cdr '((1 2))))
+
+(procedure? +)
+(equal? 3 (apply + '(1 2)))
+
+(procedure? -)
+(equal? -1 (apply - '(1 2)))
+
+(procedure? *)
+(equal? 2 (apply * '(1 2)))
+
+(procedure? /)
+(equal? 2 (apply / '(4 2)))
+
+(procedure? <)
+(apply < '(1 2))
+
+(procedure? <=)
+(apply <= '(1 1))
+
+(procedure? eq?)
+(apply eq? '(foo foo))
+
+(procedure? gensym)
+(symbol? (apply gensym '()))
+
+(procedure? char->integer)
+(equal? 65 (apply char->integer '(#\A)))
+
+(procedure? integer->char)
+(equal? #\A (apply integer->char '(65)))
+
+(procedure? char-upcase)
+(equal? #\A (apply char-upcase '(#\a)))
+
+(procedure? char-downcase)
+(equal? #\a (apply char-downcase '(#\A)))
+
+(procedure? make-string)
+(equal? "AAA" (apply make-string '(3 #\A)))
+(equal? 3 (string-length (apply make-string '(3))))
+
+(procedure? string-ref)
+(equal? #\C (string-ref "ABCD" 2))
+
+(procedure? string-set!)
+(let ((x (make-string 4 #\A)))
+  (apply string-set! (list x 2 #\X))
+  (equal? "AAXA" x))
+
+(procedure? string-length)
+(equal? 4 (apply string-length '("AAAA")))

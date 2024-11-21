@@ -244,6 +244,17 @@
 (define (string-append-char str ch)
   (string-append str (make-string 1 ch)))
 
+(define (%string s chars i)
+  (if (null? chars)
+      s
+      (begin
+        (string-set! s i (car chars))
+        (%string s (cdr chars) (+ i 1)))))
+
+(define (string . chars)
+  (let ((s (make-string (length chars))))
+    (%string s chars 0)))
+
 (define (print . x)
   (let loop ((x x))
     (if (null? x)
