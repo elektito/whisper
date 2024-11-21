@@ -109,7 +109,6 @@ read_token(struct lexer *lexer)
         lexer->ptr++;
 
         while (*lexer->ptr != '"' && lexer->ptr < program_end) {
-            lexer->ptr++;
             if (*lexer->ptr == '\\') {
                 if (lexer->ptr >= program_end) {
                     fprintf(stderr, "eof in the middle of string\n");
@@ -117,6 +116,8 @@ read_token(struct lexer *lexer)
                 }
 
                 lexer->ptr++;
+                lexer->ptr++;
+            } else {
                 lexer->ptr++;
             }
         }
