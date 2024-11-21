@@ -264,6 +264,8 @@
         '() ; interned symbols
         #f  ; init func, to be set later
         '() ; referenced variables
+        #f  ; is test suite?
+        0   ; test counter
         ))
 
 (define (program-ports program)
@@ -271,6 +273,11 @@
 
 (define (program-port program)
   (caar program))
+
+(define (program-is-main-file program)
+  ;; returns true if we are not inside an included file.
+  ;; we check if there's only one input port.
+  (null? (cdr (program-ports program))))
 
 (define (program-push-port program port)
   (let ((ports (list-ref program 0)))
@@ -305,6 +312,20 @@
 
 (define (program-referenced-vars-set! program vars)
   (list-set! program 5 vars))
+
+(define (program-is-test-suite program)
+  (list-ref program 6))
+
+(define (program-is-test-suite-set! program value)
+  (list-set! program 6 value))
+
+(define (program-test-counter program)
+  (list-ref program 7))
+
+(define (program-test-counter-inc! program)
+  (let ((c (+ 1 (program-test-counter program))))
+    (list-set! program 7 c)
+    c))
 
 (define (program-add-referenced-var program var)
   (let loop ((vars (program-referenced-vars program)))
@@ -1174,12 +1195,17 @@
     (let loop ((form (read (program-port program))))
       (if (eof-object? form)
           (if (= (length (program-ports program)) 1)
-              (gen-code func 1 "return VOID;\n")
+              (begin
+                (if (program-is-test-suite program)
+                    (gen-code func 1 "printf(\"\\n\");\n"))
+                (gen-code func 1 "return VOID;\n"))
               (begin
                 (program-pop-port program)
                 (loop (read (program-port program)))))
-          (begin
-            (compile-form func 1 form)
+          (let ((varnum (compile-form func 1 form)))
+            (if (and (program-is-test-suite program)
+                     (program-is-main-file program))
+                (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
             (loop (read (program-port program))))))
     ;; check for undefined referenced variables
     (let loop ((vars (program-referenced-vars program)))
@@ -1196,6 +1222,7 @@
         #f ; run
         #f ; output file
         #f ; input file
+        #f ; test
         ))
 
 (define (cmdline-just-compile cl)
@@ -1222,6 +1249,12 @@
 (define (cmdline-input-file-set! cl value)
   (list-set! cl 3 value))
 
+(define (cmdline-test cl)
+  (list-ref cl 4))
+
+(define (cmdline-test-set! cl value)
+  (list-set! cl 4 value))
+
 (define (command-line-error fmt . args)
   (apply format (current-error-port) fmt args)
   (newline (current-error-port))
@@ -1229,7 +1262,7 @@
 
 (define (parse-command-line-args)
   (let ((args (create-cmdline-args)))
-    (let loop ((cl (command-line)))
+    (let loop ((cl (cdr (command-line))))
       (cond ((null? cl) args)
             ((string=? (car cl) "-h")
              (print-usage))
@@ -1241,6 +1274,9 @@
             ((string=? (car cl) "-r")
              (cmdline-run-set! args #t)
              (loop (cdr cl)))
+            ((string=? (car cl) "-t")
+             (cmdline-test-set! args #t)
+             (loop (cdr cl)))
             ((string=? (car cl) "-o")
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -o")
@@ -1250,7 +1286,7 @@
             (else (if (cmdline-input-file args)
                       (command-line-error "unexpected argument: ~a" (car cl))
                       (begin
-                        (cmdline-input-file-set! args (car args))
+                        (cmdline-input-file-set! args (car cl))
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
@@ -1260,6 +1296,7 @@
  -c\tonly compile a c file
  -o\tthe name of the output file. defaults to b.c or b.out depending on
 \twhether -c is passed or not.
+ -t\tcompile the program as a test suite
 " (car (command-line)))
   (exit 0)
   )
@@ -1278,5 +1315,7 @@
   (postprocess-cmdline args)
   (let ((port (open-input-file (cmdline-input-file args))))
     (let ((program (create-program port)))
+      (if (cmdline-test args)
+          (program-is-test-suite-set! program #t))
       (compile-program program)
       (output-program-code program))))
