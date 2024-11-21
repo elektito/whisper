@@ -1181,12 +1181,94 @@
                 (compile-error "undefined variable: ~a" (car vars)))
             (loop (cdr vars)))))))
 
+;;;;;; command-line parsing ;;;;;;
+
+(define (create-cmdline-args)
+  (list #f ; just compile
+        #f ; run
+        #f ; output file
+        #f ; input file
+        ))
+
+(define (cmdline-just-compile cl)
+  (list-ref cl 0))
+
+(define (cmdline-just-compile-set! cl value)
+  (list-set! cl 0 value))
+
+(define (cmdline-run cl)
+  (list-ref cl 1))
+
+(define (cmdline-run-set! cl value)
+  (list-set! cl 1 value))
+
+(define (cmdline-output-file cl)
+  (list-ref cl 2))
+
+(define (cmdline-output-file-set! cl value)
+  (list-set! cl 2 value))
+
+(define (cmdline-input-file cl)
+  (list-ref cl 3))
+
+(define (cmdline-input-file-set! cl value)
+  (list-set! cl 3 value))
+
+(define (command-line-error fmt . args)
+  (apply format (current-error-port) fmt args)
+  (newline (current-error-port))
+  (exit 1))
+
+(define (parse-command-line-args)
+  (let ((args (create-cmdline-args)))
+    (let loop ((cl (command-line)))
+      (cond ((null? cl) args)
+            ((string=? (car cl) "-h")
+             (print-usage))
+            ((string=? (car cl) "-?")
+             (print-usage))
+            ((string=? (car cl) "-c")
+             (cmdline-just-compile-set! args #t)
+             (loop (cdr cl)))
+            ((string=? (car cl) "-r")
+             (cmdline-run-set! args #t)
+             (loop (cdr cl)))
+            ((string=? (car cl) "-o")
+             (if (null? (cdr cl))
+                 (command-line-error "missing argument to -o")
+                 (begin
+                   (cmdline-output-file-set! args (cadr args))
+                   (loop (cddr cl)))))
+            (else (if (cmdline-input-file args)
+                      (command-line-error "unexpected argument: ~a" (car cl))
+                      (begin
+                        (cmdline-input-file-set! args (car args))
+                        (loop (cdr cl)))))))))
+
+(define (print-usage)
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-o output-file]
+
+ -r\tcompile and run the program
+ -c\tonly compile a c file
+ -o\tthe name of the output file. defaults to b.c or b.out depending on
+\twhether -c is passed or not.
+" (car (command-line)))
+  (exit 0)
+  )
+
+(define (postprocess-cmdline args)
+  (if (not (cmdline-input-file args))
+      (command-line-error "missing input file"))
+  (if (not (cmdline-output-file args))
+      (if (cmdline-just-compile args)
+          (cmdline-output-file-set! args "b.c")
+          (cmdline-output-file-set! args "b.out"))))
+
 ;;;;;; main ;;;;;;
 
-(if (not (= 2 (length (command-line))))
-    (compile-error "usage: ~a input-file" (car (command-line))))
-
-(let ((port (open-input-file (cadr (command-line)))))
-  (let ((program (create-program port)))
-    (compile-program program)
-    (output-program-code program)))
+(let ((args (parse-command-line-args)))
+  (postprocess-cmdline args)
+  (let ((port (open-input-file (cmdline-input-file args))))
+    (let ((program (create-program port)))
+      (compile-program program)
+      (output-program-code program))))
