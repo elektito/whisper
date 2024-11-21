@@ -578,6 +578,7 @@
                       (pair? "pair_q" 1 1)
                       (peek-char "peek_char" 0 1)
                       (port? "port_q" 1 1)
+                      (procedure? "procedure_q" 1 1)
                       (read-char "read_char" 0 1)
                       (read-line "read_line" 0 1)
                       (set-car! "set_car_b" 2 2)
