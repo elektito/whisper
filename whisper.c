@@ -1752,6 +1752,7 @@ struct {
     { "string-append", "string_append", 0, -1 },
     { "string-length", "string_length", 1, 1 },
     { "string-ref", "string_ref", 2, 2 },
+    { "string-set!", "string_set_b", 3, 3 },
     { "string=?", "string_eq_q", 1, -1 },
     { "string?", "string_q", 1, 1 },
     { "substring", "substring", 3, 3 },

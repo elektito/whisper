@@ -1075,6 +1075,21 @@ static value primcall_string_ref(environment env, enum call_flags flags, int nar
     return CHAR(GET_STRING(str)->s[GET_FIXNUM(idx)]);
 }
 
+static value primcall_string_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { RAISE("string-set! needs three arguments"); }
+    init_args();
+    value str = next_arg();
+    value idx = next_arg();
+    value ch = next_arg();
+    free_args();
+    if (!IS_STRING(str)) { RAISE("string-set! first argument is not a string"); }
+    if (!IS_FIXNUM(idx)) { RAISE("string-set! second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE("string-ref index is out of range"); }
+    if (!IS_CHAR(ch)) { RAISE("string-set! third argument is not a char"); }
+    GET_STRING(str)->s[GET_FIXNUM(idx)] = GET_CHAR(ch);
+    return VOID;
+}
+
 static value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs == 0) { RAISE("string=? needs at least one argument"); }
     if (nargs == 1) return TRUE;
