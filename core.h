@@ -409,7 +409,7 @@ static void _write_char_literal(value v, value port) {
         if (ch >= 32 && ch < 127)
             sprintf(buf, "#\\%c", ch);
         else
-            sprintf(buf, "#\\x%02x", (int) ch);
+            sprintf(buf, "#\\x%02x", (int)(uint8_t) ch);
         text = buf;
     }
 
@@ -603,7 +603,7 @@ static value primcall_char_to_integer(environment env, enum call_flags flags, in
     value ch = next_arg();
     free_args();
     if (!IS_CHAR(ch)) { RAISE("char->integer argument is not a char") }
-    return FIXNUM((int) GET_CHAR(ch));
+    return FIXNUM((int)(uint8_t) GET_CHAR(ch));
 }
 
 static value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
