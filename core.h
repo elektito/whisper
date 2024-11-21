@@ -1166,6 +1166,21 @@ static value primcall_unread_char(environment env, enum call_flags flags, int na
     return VOID;
 }
 
+static value primcall_urandom(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("urandom needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    if (!IS_FIXNUM(n)) { RAISE("urandom argument is not a number"); }
+    free_args();
+
+    FILE *fp = fopen("/dev/urandom", "r");
+    value s = alloc_string(GET_FIXNUM(n), '\0');
+    int nread = fread(GET_STRING(s)->s, 1, GET_FIXNUM(n), fp);
+    if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
+
+    return s;
+}
+
 static value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("void accepts no arguments"); }
     return VOID;

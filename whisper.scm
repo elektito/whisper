@@ -597,6 +597,7 @@
                       (symbol? "symbol_q" 1 1)
                       (uninterned-symbol? "uninterned_symbol_q" 1 1)
                       (unread-char "unread_char" 1 2)
+                      (urandom "urandom" 1 1)
                       (void "void" 0 0)
                       (write "write" 1 2)
                       (write-char "write_char" 1 2)
@@ -1225,6 +1226,9 @@
         #f ; output file
         #f ; input file
         #f ; test
+        #f ; c output file
+        #f ; executable output file
+        #f ; delete executable
         ))
 
 (define (cmdline-just-compile cl)
@@ -1256,6 +1260,24 @@
 
 (define (cmdline-test-set! cl value)
   (list-set! cl 4 value))
+
+(define (cmdline-c-file cl)
+  (list-ref cl 5))
+
+(define (cmdline-c-file-set! cl value)
+  (list-set! cl 5 value))
+
+(define (cmdline-executable-file cl)
+  (list-ref cl 6))
+
+(define (cmdline-executable-file-set! cl value)
+  (list-set! cl 6 value))
+
+(define (cmdline-delete-executable cl)
+  (list-ref cl 7))
+
+(define (cmdline-delete-executable-set! cl value)
+  (list-set! cl 7 value))
 
 (define (command-line-error fmt . args)
   (apply format (current-error-port) fmt args)
@@ -1303,13 +1325,36 @@
   (exit 0)
   )
 
+(define (hex-encode s)
+  (let loop ((i 0) (x ""))
+    (if (= i (string-length s))
+        x
+        (let ((c (char->integer (string-ref s i))))
+          (if (< c 16)
+              (loop (+ i 1) (format "~a0~x" x c))
+              (loop (+ i 1) (format "~a~x" x c)))))))
+
+(define (temp-filename)
+  (format "/tmp/~a" (hex-encode (urandom 6))))
+
 (define (postprocess-cmdline args)
   (if (not (cmdline-input-file args))
       (command-line-error "missing input file"))
   (if (not (cmdline-output-file args))
-      (if (cmdline-just-compile args)
-          (cmdline-output-file-set! args "b.c")
-          (cmdline-output-file-set! args "b.out"))))
+      (begin
+        (cmdline-delete-executable-set! args #t)
+        (if (cmdline-just-compile args)
+            (cmdline-output-file-set! args "b.c")
+            (if (cmdline-run args)
+                (begin
+                  (cmdline-output-file-set! args (temp-filename))
+                  (cmdline-delete-executable-set! args #t))
+                (cmdline-output-file-set! args "b.out")))))
+  (if (cmdline-just-compile args)
+      (cmdline-c-file-set! args (cmdline-output-file args))
+      (begin
+        (cmdline-c-file-set! args (string-append (temp-filename) ".c"))
+        (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 ;;;;;; main ;;;;;;
 

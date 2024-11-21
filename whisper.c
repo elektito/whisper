@@ -1759,6 +1759,7 @@ struct {
     { "symbol?", "symbol_q", 1, 1 },
     { "uninterned-symbol?", "uninterned_symbol_q", 1, 1 },
     { "unread-char", "unread_char", 1, 2 },
+    { "urandom", "urandom", 1, 1 },
     { "void", "void", 0, 0 },
     { "write", "write", 1, 2 },
     { "write-char", "write_char", 1, 2 },
