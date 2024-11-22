@@ -1235,6 +1235,7 @@
         #f ; c output file
         #f ; executable output file
         #f ; delete executable
+        "" ; cflags
         ))
 
 (define (cmdline-just-compile cl)
@@ -1285,6 +1286,12 @@
 (define (cmdline-delete-executable-set! cl value)
   (list-set! cl 7 value))
 
+(define (cmdline-cflags cl)
+  (list-ref cl 7))
+
+(define (cmdline-cflags-set! cl value)
+  (list-set! cl 7 value))
+
 (define (command-line-error fmt . args)
   (apply format (current-error-port) fmt args)
   (newline (current-error-port))
@@ -1307,6 +1314,12 @@
             ((string=? (car cl) "-t")
              (cmdline-test-set! args #t)
              (loop (cdr cl)))
+            ((string=? (car cl) "-f")
+             (if (null? (cdr cl))
+                 (command-line-error "missing argument to -f")
+                 (begin
+                   (cmdline-cflags-set! args (cadr cl))
+                   (loop (cddr cl)))))
             ((string=? (car cl) "-o")
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -o")
@@ -1320,12 +1333,13 @@
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-o output-file]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-o output-file] [-f cflags]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
  -o\tthe name of the output file. defaults to b.c or b.out depending on
 \twhether -c is passed or not.
+ -f\tuse the given options when invoking the C compiler
  -t\tcompile the program as a test suite
 " (car (command-line)))
   (exit 0)
@@ -1380,7 +1394,7 @@
       (if (not (cmdline-just-compile args))
           (let ((cc (get-environment-variable "CC")))
             (let ((cc (if cc cc "gcc")))
-              (let ((cmd (format "~a -I. -o ~a ~a" cc (cmdline-executable-file args) (cmdline-c-file args))))
+              (let ((cmd (format "~a -I. -o ~a ~a ~a" cc (cmdline-executable-file args) (cmdline-cflags args) (cmdline-c-file args))))
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))
