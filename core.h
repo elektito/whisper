@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 enum call_flags {
     NO_CALL_FLAGS = 0,
@@ -42,11 +43,17 @@ struct symbol {
 enum object_type {
     OBJ_PORT,
     OBJ_SYMBOL, /* uninterned symbol */
+    OBJ_ERROR,
 };
 
 enum port_direction {
     PORT_DIR_READ,
     PORT_DIR_WRITE,
+};
+
+enum error_type {
+    ERR_OTHER,
+    ERR_FILE, /* satisfies file-error? */
 };
 
 struct object {
@@ -67,6 +74,10 @@ struct object {
             void (*write_char)(value port, value ch);
             void (*printf)(value port, const char *fmt, ...);
         } port;
+        struct {
+            enum error_type type;
+            int err_no;
+        } error;
         struct symbol symbol; /* used for uninterned symbols */
     };
 };
@@ -128,6 +139,7 @@ struct object {
 #define IS_EOFOBJ(v) ((uint64_t)(v) == EOFOBJ_TAG)
 #define IS_OBJECT(v) (((uint64_t)(v) & TAG_MASK) == OBJECT_TAG)
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
+#define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 
 #define RAISE(...) { fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
 
@@ -190,6 +202,13 @@ static value make_string(const char *s, size_t len) {
     memcpy(p->s, s, len);
     p->s[len] = 0;
     return STRING(p);
+}
+
+static char *strz(value str) {
+    char *buf = malloc(GET_STRING(str)->len + 1);
+    memcpy(buf, GET_STRING(str)->s, GET_STRING(str)->len);
+    buf[GET_STRING(str)->len] = 0;
+    return buf;
 }
 
 static value file_read_line(value port) {
@@ -306,6 +325,9 @@ static void print_unprintable(value v, value port) {
         } else {
             GET_OBJECT(port)->port.printf(port, "#<%s-%sport>", dir, kind);
         }
+    } else if (IS_ERROR(v)) {
+        const char *kind = GET_OBJECT(v)->error.type == ERR_FILE ? "file-" : "";
+        GET_OBJECT(port)->port.printf(port, "#<%serror>", kind);
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
     }
@@ -662,6 +684,28 @@ static value primcall_current_output_port(environment env, enum call_flags flags
     return OBJECT(&current_output_port);
 }
 
+static value primcall_delete_file(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("delete-file needs a single argument"); }
+    init_args();
+    value filename = next_arg();
+    if (!IS_STRING(filename)) { RAISE("delete-file argument is not a string"); }
+    free_args();
+
+    char *filenamez = strz(filename);
+    int ret = unlink(filenamez);
+    free(filenamez);
+
+    if (ret) {
+        struct object *err = malloc(sizeof(struct object));
+        err->type = OBJ_ERROR;
+        err->error.type = ERR_FILE;
+        err->error.err_no = errno;
+        return OBJECT(err);
+    }
+
+    return VOID;
+}
+
 static value primcall_display(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { RAISE("display needs one or two arguments"); }
     init_args();
@@ -705,6 +749,14 @@ static value primcall_error(environment env, enum call_flags flags, int nargs, .
     return VOID;
 }
 
+static value primcall_error_object_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("error-object? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR);
+}
+
 static value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("exit needs zero or one argument"); }
     init_args();
@@ -724,6 +776,14 @@ static value primcall_exit(environment env, enum call_flags flags, int nargs, ..
     }
 
     return VOID;
+}
+
+static value primcall_file_error_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("file-error? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR && GET_OBJECT(v)->error.type == ERR_FILE);
 }
 
 static value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
@@ -751,6 +811,27 @@ static value primcall_gensym(environment env, enum call_flags flags, int nargs, 
     free_args();
 
     return OBJECT(sym);
+}
+
+static value primcall_get_environment_variable(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("get-environment-variable needs a single argument"); }
+    init_args();
+    value name = next_arg();
+    if (!IS_STRING(name)) { RAISE("get-environment-variable argument is not a string"); }
+    free_args();
+
+    char *namez = strz(name);
+    char *valz = getenv(namez);
+    free(namez);
+
+    value v;
+    if (valz) {
+        v = make_string(valz, strlen(valz));
+    } else {
+        v = FALSE;
+    }
+
+    return OBJECT(v);
 }
 
 static value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...) {
@@ -1143,6 +1224,18 @@ static value primcall_symbol_q(environment env, enum call_flags flags, int nargs
     value v = next_arg();
     free_args();
     return BOOL(IS_SYMBOL(v));
+}
+
+static value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("system needs a single argument"); }
+    init_args();
+    value cmd = next_arg();
+    free_args();
+    if (!IS_STRING(cmd)) { RAISE("system argument is not a string"); }
+    char *cmdz = strz(cmd);
+    int ret = system(cmdz);
+    free(cmdz);
+    return FIXNUM(ret);
 }
 
 static value primcall_uninterned_symbol_q(environment env, enum call_flags flags, int nargs, ...) {
