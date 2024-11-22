@@ -1311,7 +1311,7 @@
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -o")
                  (begin
-                   (cmdline-output-file-set! args (cadr args))
+                   (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
             (else (if (cmdline-input-file args)
                       (command-line-error "unexpected argument: ~a" (car cl))
@@ -1346,7 +1346,12 @@
 (define (postprocess-cmdline args)
   (if (not (cmdline-input-file args))
       (command-line-error "missing input file"))
-  (if (not (cmdline-output-file args))
+  (if (cmdline-output-file args)
+      (if (cmdline-just-compile args)
+          (cmdline-c-file-set! args (cmdline-output-file args))
+          (begin
+            (cmdline-c-file-set! args (string-append (temp-filename) ".c"))
+            (cmdline-executable-file-set! args (cmdline-output-file args))))
       (begin
         (cmdline-delete-executable-set! args #t)
         (if (cmdline-just-compile args)
