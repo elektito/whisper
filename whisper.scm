@@ -1287,10 +1287,10 @@
   (list-set! cl 7 value))
 
 (define (cmdline-cflags cl)
-  (list-ref cl 7))
+  (list-ref cl 8))
 
 (define (cmdline-cflags-set! cl value)
-  (list-set! cl 7 value))
+  (list-set! cl 8 value))
 
 (define (command-line-error fmt . args)
   (apply format (current-error-port) fmt args)
