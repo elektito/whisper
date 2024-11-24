@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -159,6 +160,160 @@ static struct object current_error_port;
 static int cmdline_argc;
 static const char **cmdline_argv;
 
+static void *stack_start;
+
+/**************** memory management *****************/
+
+#define POOL_SIZE 1024
+
+static struct pair **pair_pools;
+static int n_pair_pools;
+static struct object **object_pools;
+static int n_object_pools;
+static struct string **string_pools;
+static int n_string_pools;
+
+static struct pair **free_pairs;
+static int n_free_pairs;
+static int free_pairs_idx;
+
+static struct object **free_objects;
+static int n_free_objects;
+static int free_objects_idx;
+
+static struct string **free_strings;
+static int n_free_strings;
+static int free_strings_idx;
+
+static void *alloc_pool(int object_size) {
+    /* this is to make sure the pointers to each element of the array
+     * has its 3 low bits clear so we can use it for tagging. */
+    assert(object_size % 8 == 0);
+
+    return calloc(POOL_SIZE, object_size);
+}
+
+static void init_memory() {
+    n_pair_pools = 1;
+    pair_pools = malloc(1 * sizeof(struct pair *));
+    pair_pools[0] = alloc_pool(sizeof(struct pair));
+
+    n_free_pairs = POOL_SIZE;
+    free_pairs_idx = 0;
+    free_pairs = malloc(POOL_SIZE * sizeof(struct pair *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_pairs[i] = &pair_pools[0][i];
+    }
+
+    n_object_pools = 1;
+    object_pools = malloc(1 * sizeof(struct object *));
+    object_pools[0] = alloc_pool(sizeof(struct object));
+
+    n_free_objects = POOL_SIZE;
+    free_objects_idx = 0;
+    free_objects = malloc(POOL_SIZE * sizeof(struct object *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_objects[i] = &object_pools[0][i];
+    }
+
+    n_string_pools = 1;
+    string_pools = malloc(1 * sizeof(struct string *));
+    string_pools[0] = alloc_pool(sizeof(struct string));
+
+    n_free_strings = POOL_SIZE;
+    free_strings_idx = 0;
+    free_strings = malloc(POOL_SIZE * sizeof(struct string *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_strings[i] = &string_pools[0][i];
+    }
+}
+
+static struct pair *alloc_pair(void) {
+    struct pair *pair;
+
+    if (n_free_pairs == 0) {
+        n_pair_pools++;
+        pair_pools = realloc(pair_pools, n_pair_pools * sizeof(struct pair *));
+        pair_pools[n_pair_pools - 1] = alloc_pool(sizeof(struct pair));
+
+        n_free_pairs += POOL_SIZE;
+        free_pairs = realloc(free_pairs, (free_pairs_idx + POOL_SIZE) * sizeof(struct pair *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_pairs[free_pairs_idx + i] = &pair_pools[n_pair_pools - 1][i];
+        }
+    }
+
+    pair = free_pairs[free_pairs_idx++];
+    n_free_pairs--;
+
+    return pair;
+}
+
+static void free_pair(struct pair *pair) {
+    free_pairs[free_pairs_idx--] = pair;
+    n_free_pairs++;
+}
+
+static struct object *alloc_object(void) {
+    struct object *obj;
+
+    if (n_free_objects == 0) {
+        n_object_pools++;
+        object_pools = realloc(object_pools, n_object_pools * sizeof(struct object *));
+        object_pools[n_object_pools - 1] = alloc_pool(sizeof(struct object));
+
+        n_free_objects += POOL_SIZE;
+        free_objects = realloc(free_objects, (free_objects_idx + POOL_SIZE) * sizeof(struct object *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_objects[free_objects_idx + i] = &object_pools[n_object_pools - 1][i];
+        }
+    }
+
+    obj = free_objects[free_objects_idx++];
+    n_free_objects--;
+
+    return obj;
+}
+
+static void free_object(struct object *obj) {
+    free_objects[free_objects_idx--] = obj;
+    n_free_objects++;
+}
+
+static struct string *alloc_string(size_t len, char fill) {
+    struct string *str;
+
+    if (n_free_strings == 0) {
+        n_string_pools++;
+        string_pools = realloc(string_pools, n_string_pools * sizeof(struct string *));
+        string_pools[n_string_pools - 1] = alloc_pool(sizeof(struct string));
+
+        n_free_strings += POOL_SIZE;
+        free_strings = realloc(free_strings, (free_strings_idx + POOL_SIZE) * sizeof(struct string *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_strings[free_strings_idx + i] = &string_pools[n_string_pools - 1][i];
+        }
+    }
+
+    str = free_strings[free_strings_idx++];
+    n_free_strings--;
+
+    str->s = malloc(len);
+    str->len = len;
+    memset(str->s, fill, len);
+
+    return str;
+}
+
+static void free_string(struct string *str) {
+    free(str->s);
+    free_strings[free_strings_idx--] = str;
+    n_free_strings++;
+}
+}
+
+/****************************************************/
+
 static void cleanup(void) {}
 
 static value envget(environment env, int index) {
@@ -181,11 +336,12 @@ static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
 }
 
 static value make_pair(value car, value cdr) {
-    struct pair *pair = malloc(sizeof(struct pair));
+    struct pair *pair = alloc_pair();
     pair->car = car;
     pair->cdr = cdr;
     return PAIR(pair);
 }
+
 static value reverse_list(value list, value acc) {
     if (list == NIL) {
         return acc;
@@ -196,11 +352,8 @@ static value reverse_list(value list, value acc) {
 }
 
 static value make_string(const char *s, size_t len) {
-    struct string *p = malloc(sizeof(struct string));
-    p->s = malloc(len + 1);
-    p->len = len;
+    struct string *p = alloc_string(len, '\0');
     memcpy(p->s, s, len);
-    p->s[len] = 0;
     return STRING(p);
 }
 
@@ -517,14 +670,6 @@ static value symbol_to_string(value v) {
     return make_string(sym->name, sym->name_len);
 }
 
-static value alloc_string(size_t len, char fill) {
-    struct string *str = malloc(sizeof(struct string));
-    str->len = len;
-    str->s = malloc(len);
-    memset(str->s, fill, len);
-    return STRING(str);
-}
-
 static int string_cmp(struct string *s1, struct string *s2) {
     size_t min_len = s1->len < s2->len ? s1->len : s2->len;
     int cmp = memcmp(s1->s, s2->s, min_len);
@@ -696,7 +841,7 @@ static value primcall_delete_file(environment env, enum call_flags flags, int na
     free(filenamez);
 
     if (ret) {
-        struct object *err = malloc(sizeof(struct object));
+        struct object *err = alloc_object();
         err->type = OBJ_ERROR;
         err->error.type = ERR_FILE;
         err->error.err_no = errno;
@@ -790,7 +935,7 @@ static value primcall_gensym(environment env, enum call_flags flags, int nargs, 
     if (nargs != 0 && nargs != 1) { RAISE("gensym needs zero or one argument"); }
     init_args();
 
-    struct object *sym = malloc(sizeof(struct object));
+    struct object *sym = alloc_object();
     sym->type = OBJ_SYMBOL;
 
     if (nargs == 1) {
@@ -870,7 +1015,7 @@ static value primcall_make_string(environment env, enum call_flags flags, int na
     if (!IS_FIXNUM(n)) { RAISE("make-string first argument should be a number"); }
     if (GET_FIXNUM(n) < 0) { RAISE("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
-    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));
+    return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
 }
 
 static value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
@@ -924,7 +1069,7 @@ static value primcall_open_input_file(environment env, enum call_flags flags, in
     value filename = next_arg();
     free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     int filename_len = GET_STRING(filename)->len;
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
@@ -952,7 +1097,7 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
     snprintf(filenamez, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
     FILE *fp = fopen(filenamez, "w");
     if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
     obj->port.fp = fp;
@@ -963,7 +1108,7 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
 
 static value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("open-output-string accepts no arguments"); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
     obj->port.string = malloc(128);
@@ -1100,9 +1245,7 @@ static value primcall_string_append(environment env, enum call_flags flags, int 
         total_size += str->len;
     }
 
-    struct string *concat = malloc(sizeof(struct string));
-    concat->len = total_size;
-    concat->s = malloc(total_size);
+    struct string *concat = alloc_string(total_size, '\0');
 
     reset_args();
     size_t offset = 0;
@@ -1128,9 +1271,7 @@ static value primcall_string_copy(environment env, enum call_flags flags, int na
     if (!IS_FIXNUM(end)) { RAISE("string-copy third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("string-copy start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("string-copy end index is out of range"); }
-    struct string *result = calloc(1, sizeof(struct string));
-    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);
-    result->s = malloc(result->len);
+    struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
@@ -1211,9 +1352,7 @@ static value primcall_substring(environment env, enum call_flags flags, int narg
     if (!IS_FIXNUM(end)) { RAISE("substring third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("substring start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("substring end index is out of range"); }
-    struct string *result = calloc(1, sizeof(struct string));
-    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);
-    result->s = malloc(result->len);
+    struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
@@ -1267,7 +1406,7 @@ static value primcall_urandom(environment env, enum call_flags flags, int nargs,
     free_args();
 
     FILE *fp = fopen("/dev/urandom", "r");
-    value s = alloc_string(GET_FIXNUM(n), '\0');
+    value s = STRING(alloc_string(GET_FIXNUM(n), '\0'));
     int nread = fread(GET_STRING(s)->s, 1, GET_FIXNUM(n), fp);
     if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
 
