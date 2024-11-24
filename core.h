@@ -947,10 +947,9 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
     value filename = next_arg();
     free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
-    int filename_len = GET_STRING(filename)->len;
-    char *filenamez = malloc(filename_len + 1);
-    snprintf(filenamez, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
+    char *filenamez = strz(GET_STRING(filename));
     FILE *fp = fopen(filenamez, "w");
+    free(filenamez);
     if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
     struct object *obj = calloc(1, sizeof(struct object));
     obj->type = OBJ_PORT;
