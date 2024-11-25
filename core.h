@@ -23,7 +23,46 @@ struct closure {
     funcptr func;
     int n_args;
     int n_freevars;
-    value freevars[];
+    value *freevars;
+};
+
+struct closure0 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+};
+
+struct closure1 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[1];
+};
+
+struct closure2 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[2];
+};
+
+struct closure3 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[3];
+};
+
+struct closuren {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[];
 };
 
 struct pair {
@@ -160,8 +199,6 @@ static struct object current_error_port;
 static int cmdline_argc;
 static const char **cmdline_argv;
 
-static void *stack_start;
-
 /**************** memory management *****************/
 
 #define POOL_SIZE 1024
@@ -172,6 +209,16 @@ static struct object **object_pools;
 static int n_object_pools;
 static struct string **string_pools;
 static int n_string_pools;
+static struct closure0 **closure0_pools;
+static int n_closure0_pools;
+static struct closure1 **closure1_pools;
+static int n_closure1_pools;
+static struct closure2 **closure2_pools;
+static int n_closure2_pools;
+static struct closure3 **closure3_pools;
+static int n_closure3_pools;
+static struct closuren **closuren_pools;
+static int n_closuren_pools;
 
 static struct pair **free_pairs;
 static int n_free_pairs;
@@ -184,6 +231,26 @@ static int free_objects_idx;
 static struct string **free_strings;
 static int n_free_strings;
 static int free_strings_idx;
+
+static struct closure0 **free_closure0s;
+static int n_free_closure0s;
+static int free_closure0s_idx;
+
+static struct closure1 **free_closure1s;
+static int n_free_closure1s;
+static int free_closure1s_idx;
+
+static struct closure2 **free_closure2s;
+static int n_free_closure2s;
+static int free_closure2s_idx;
+
+static struct closure3 **free_closure3s;
+static int n_free_closure3s;
+static int free_closure3s_idx;
+
+static struct closuren **free_closurens;
+static int n_free_closurens;
+static int free_closurens_idx;
 
 static void *alloc_pool(int object_size) {
     /* this is to make sure the pointers to each element of the array
@@ -225,6 +292,61 @@ static void init_memory() {
     free_strings = malloc(POOL_SIZE * sizeof(struct string *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_strings[i] = &string_pools[0][i];
+    }
+
+    n_closure0_pools = 1;
+    closure0_pools = malloc(1 * sizeof(struct closure0 *));
+    closure0_pools[0] = alloc_pool(sizeof(struct closure0));
+
+    n_free_closure0s = POOL_SIZE;
+    free_closure0s_idx = 0;
+    free_closure0s = malloc(POOL_SIZE * sizeof(struct closure0 *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_closure0s[i] = &closure0_pools[0][i];
+    }
+
+    n_closure1_pools = 1;
+    closure1_pools = malloc(1 * sizeof(struct closure1 *));
+    closure1_pools[0] = alloc_pool(sizeof(struct closure1));
+
+    n_free_closure1s = POOL_SIZE;
+    free_closure1s_idx = 0;
+    free_closure1s = malloc(POOL_SIZE * sizeof(struct closure1 *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_closure1s[i] = &closure1_pools[0][i];
+    }
+
+    n_closure2_pools = 1;
+    closure2_pools = malloc(1 * sizeof(struct closure2 *));
+    closure2_pools[0] = alloc_pool(sizeof(struct closure2));
+
+    n_free_closure2s = POOL_SIZE;
+    free_closure2s_idx = 0;
+    free_closure2s = malloc(POOL_SIZE * sizeof(struct closure2 *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_closure2s[i] = &closure2_pools[0][i];
+    }
+
+    n_closure3_pools = 1;
+    closure3_pools = malloc(1 * sizeof(struct closure3 *));
+    closure3_pools[0] = alloc_pool(sizeof(struct closure3));
+
+    n_free_closure3s = POOL_SIZE;
+    free_closure3s_idx = 0;
+    free_closure3s = malloc(POOL_SIZE * sizeof(struct closure3 *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_closure3s[i] = &closure3_pools[0][i];
+    }
+
+    n_closuren_pools = 1;
+    closuren_pools = malloc(1 * sizeof(struct closuren *));
+    closuren_pools[0] = alloc_pool(sizeof(struct closuren));
+
+    n_free_closurens = POOL_SIZE;
+    free_closurens_idx = 0;
+    free_closurens = malloc(POOL_SIZE * sizeof(struct closuren *));
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        free_closurens[i] = &closuren_pools[0][i];
     }
 }
 
@@ -310,6 +432,183 @@ static void free_string(struct string *str) {
     free_strings[free_strings_idx--] = str;
     n_free_strings++;
 }
+
+static struct closure *alloc_closure0(void) {
+    struct closure0 *closure;
+
+    if (n_free_closure0s == 0) {
+        n_closure0_pools++;
+        closure0_pools = realloc(closure0_pools, n_closure0_pools * sizeof(struct closure0 *));
+        closure0_pools[n_closure0_pools - 1] = alloc_pool(sizeof(struct closure0));
+
+        n_free_closure0s += POOL_SIZE;
+        free_closure0s = realloc(free_closure0s, (free_closure0s_idx + POOL_SIZE) * sizeof(struct closure0 *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_closure0s[free_closure0s_idx + i] = &closure0_pools[n_closure0_pools - 1][i];
+        }
+    }
+
+    closure = free_closure0s[free_closure0s_idx++];
+    n_free_closure0s--;
+    closure->freevars = NULL;
+
+    return (struct closure *) closure;
+}
+
+static void free_closure0(struct closure0 *closure) {
+    free_closure0s[free_closure0s_idx--] = closure;
+    n_free_closure0s++;
+}
+
+static struct closure *alloc_closure1(void) {
+    struct closure1 *closure;
+
+    if (n_free_closure1s == 0) {
+        n_closure1_pools++;
+        closure1_pools = realloc(closure1_pools, n_closure1_pools * sizeof(struct closure1 *));
+        closure1_pools[n_closure1_pools - 1] = alloc_pool(sizeof(struct closure1));
+
+        n_free_closure1s += POOL_SIZE;
+        free_closure1s = realloc(free_closure1s, (free_closure1s_idx + POOL_SIZE) * sizeof(struct closure1 *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_closure1s[free_closure1s_idx + i] = &closure1_pools[n_closure1_pools - 1][i];
+        }
+    }
+
+    closure = free_closure1s[free_closure1s_idx++];
+    n_free_closure1s--;
+    closure->freevars = closure->_freevars;
+
+    return (struct closure *) closure;
+}
+
+static void free_closure1(struct closure1 *closure) {
+    free_closure1s[free_closure1s_idx--] = closure;
+    n_free_closure1s++;
+}
+
+static struct closure *alloc_closure2(void) {
+    struct closure2 *closure;
+
+    if (n_free_closure2s == 0) {
+        n_closure2_pools++;
+        closure2_pools = realloc(closure2_pools, n_closure2_pools * sizeof(struct closure2 *));
+        closure2_pools[n_closure2_pools - 1] = alloc_pool(sizeof(struct closure2));
+
+        n_free_closure2s += POOL_SIZE;
+        free_closure2s = realloc(free_closure2s, (free_closure2s_idx + POOL_SIZE) * sizeof(struct closure2 *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_closure2s[free_closure2s_idx + i] = &closure2_pools[n_closure2_pools - 1][i];
+        }
+    }
+
+    closure = free_closure2s[free_closure2s_idx++];
+    n_free_closure2s--;
+    closure->freevars = closure->_freevars;
+
+    return (struct closure *) closure;
+}
+
+static void free_closure2(struct closure2 *closure) {
+    free_closure2s[free_closure2s_idx--] = closure;
+    n_free_closure2s++;
+}
+
+static struct closure *alloc_closure3(void) {
+    struct closure3 *closure;
+
+    if (n_free_closure3s == 0) {
+        n_closure3_pools++;
+        closure3_pools = realloc(closure3_pools, n_closure3_pools * sizeof(struct closure3 *));
+        closure3_pools[n_closure3_pools - 1] = alloc_pool(sizeof(struct closure3));
+
+        n_free_closure3s += POOL_SIZE;
+        free_closure3s = realloc(free_closure3s, (free_closure3s_idx + POOL_SIZE) * sizeof(struct closure3 *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_closure3s[free_closure3s_idx + i] = &closure3_pools[n_closure3_pools - 1][i];
+        }
+    }
+
+    closure = free_closure3s[free_closure3s_idx++];
+    n_free_closure3s--;
+    closure->freevars = closure->_freevars;
+
+    return (struct closure *) closure;
+}
+
+static void free_closure3(struct closure3 *closure) {
+    free_closure3s[free_closure3s_idx--] = closure;
+    n_free_closure3s++;
+}
+
+static struct closure *alloc_closuren(int nfreevars) {
+    struct closuren *closure;
+
+    if (n_free_closurens == 0) {
+        n_closuren_pools++;
+        closuren_pools = realloc(closuren_pools, n_closuren_pools * sizeof(struct closuren *));
+        closuren_pools[n_closuren_pools - 1] = alloc_pool(sizeof(struct closuren));
+
+        n_free_closurens += POOL_SIZE;
+        free_closurens = realloc(free_closurens, (free_closurens_idx + POOL_SIZE) * sizeof(struct closuren *));
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            free_closurens[free_closurens_idx + i] = &closuren_pools[n_closuren_pools - 1][i];
+        }
+    }
+
+    closure = free_closurens[free_closurens_idx++];
+    n_free_closurens--;
+
+    closure->freevars = malloc(nfreevars * sizeof(value));
+
+    return (struct closure *) closure;
+}
+
+static void free_closuren(struct closuren *closure) {
+    free(closure->freevars);
+    free_closurens[free_closurens_idx--] = closure;
+    n_free_closurens++;
+}
+
+static struct closure *alloc_closure(int nfreevars) {
+    struct closure *closure;
+
+    switch (nfreevars) {
+    case 0:
+        return alloc_closure0();
+    case 1:
+        return alloc_closure1();
+    case 2:
+        return alloc_closure2();
+    case 3:
+        return alloc_closure3();
+    default:
+        return alloc_closuren(nfreevars);
+    }
+}
+
+static void free_closure(struct closure *closure) {
+    switch (closure->n_freevars) {
+    case 0:
+        free_closure0((struct closure0 *) closure);
+        break;
+
+    case 1:
+        free_closure1((struct closure1 *) closure);
+        break;
+
+    case 2:
+        free_closure2((struct closure2 *) closure);
+        break;
+
+    case 3:
+        free_closure3((struct closure3 *) closure);
+        break;
+
+    default:
+        free_closuren((struct closuren *) closure);
+        break;
+    }
 }
 
 /****************************************************/
@@ -323,7 +622,7 @@ static value envget(environment env, int index) {
 
 static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
     va_list args;
-    struct closure *closure = calloc(1, sizeof(struct closure) + nfreevars * sizeof(value));
+    struct closure *closure = alloc_closure(nfreevars);
     closure->func = func;
     closure->n_args = nargs;
     closure->n_freevars = nfreevars;
