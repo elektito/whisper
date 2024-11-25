@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 enum call_flags {
@@ -199,6 +200,8 @@ static struct object current_error_port;
 static int cmdline_argc;
 static const char **cmdline_argv;
 
+static void *stack_start;
+
 /**************** memory management *****************/
 
 #define POOL_SIZE 1024
@@ -251,6 +254,8 @@ static int free_closure3s_idx;
 static struct closuren **free_closurens;
 static int n_free_closurens;
 static int free_closurens_idx;
+
+static uint64_t gc_last_time = 0;
 
 static void *alloc_pool(int object_size) {
     /* this is to make sure the pointers to each element of the array
@@ -350,8 +355,67 @@ static void init_memory() {
     }
 }
 
+uint64_t now() {
+    /* return current monotonic time in milliseconds  */
+
+    struct timespec tp;
+    if (clock_gettime(CLOCK_MONOTONIC_COARSE, &tp)) {
+        fprintf(stderr, "error reading time: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    return tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
+}
+
+void gc(void) {
+    printf("GC!\n");
+    gc_last_time = now();
+}
+
+static void check_gc() {
+    /* run no more than once every 30 seconds (arbitrarily!) */
+    if (gc_last_time > 0 && now() - gc_last_time < 30000) {
+        return;
+    }
+
+    /* check the ratio of free objects for each class of objects. if
+     * less than a certain percentage, run gc. */
+
+    int total_pairs = n_pair_pools * POOL_SIZE;
+    double pair_ratio = (double) n_free_pairs / total_pairs;
+    int total_objects = n_object_pools * POOL_SIZE;
+    double object_ratio = (double) n_free_objects / total_objects;
+    int total_strings = n_string_pools * POOL_SIZE;
+    double string_ratio = (double) n_free_strings / total_strings;
+    int total_closure0s = n_closure0_pools * POOL_SIZE;
+    double closure0_ratio = (double) n_free_closure0s / total_closure0s;
+    int total_closure1s = n_closure1_pools * POOL_SIZE;
+    double closure1_ratio = (double) n_free_closure1s / total_closure1s;
+    int total_closure2s = n_closure2_pools * POOL_SIZE;
+    double closure2_ratio = (double) n_free_closure2s / total_closure2s;
+    int total_closure3s = n_closure3_pools * POOL_SIZE;
+    double closure3_ratio = (double) n_free_closure3s / total_closure3s;
+    int total_closurens = n_closuren_pools * POOL_SIZE;
+    double closuren_ratio = (double) n_free_closurens / total_closurens;
+
+    double min_ratio = 0.2;
+    if (pair_ratio < min_ratio ||
+        object_ratio < min_ratio ||
+        string_ratio < min_ratio ||
+        closure0_ratio < min_ratio ||
+        closure1_ratio < min_ratio ||
+        closure2_ratio < min_ratio ||
+        closure3_ratio < min_ratio ||
+        closuren_ratio < min_ratio)
+    {
+        gc();
+    }
+}
+
 static struct pair *alloc_pair(void) {
     struct pair *pair;
+
+    check_gc();
 
     if (n_free_pairs == 0) {
         n_pair_pools++;
@@ -379,6 +443,8 @@ static void free_pair(struct pair *pair) {
 static struct object *alloc_object(void) {
     struct object *obj;
 
+    check_gc();
+
     if (n_free_objects == 0) {
         n_object_pools++;
         object_pools = realloc(object_pools, n_object_pools * sizeof(struct object *));
@@ -404,6 +470,8 @@ static void free_object(struct object *obj) {
 
 static struct string *alloc_string(size_t len, char fill) {
     struct string *str;
+
+    check_gc();
 
     if (n_free_strings == 0) {
         n_string_pools++;
@@ -572,6 +640,8 @@ static void free_closuren(struct closuren *closure) {
 
 static struct closure *alloc_closure(int nfreevars) {
     struct closure *closure;
+
+    check_gc();
 
     switch (nfreevars) {
     case 0:
