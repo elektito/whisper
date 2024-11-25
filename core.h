@@ -23,6 +23,7 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 struct closure {
     funcptr func;
     int n_args;
+    int mark; /* for gc */
     int n_freevars;
     value *freevars;
 };
@@ -30,6 +31,7 @@ struct closure {
 struct closure0 {
     funcptr func;
     int n_args;
+    int mark; /* for gc */
     int n_freevars;
     value *freevars;
 };
@@ -37,6 +39,7 @@ struct closure0 {
 struct closure1 {
     funcptr func;
     int n_args;
+    int mark; /* for gc */
     int n_freevars;
     value *freevars;
     value _freevars[1];
@@ -45,6 +48,7 @@ struct closure1 {
 struct closure2 {
     funcptr func;
     int n_args;
+    int mark; /* for gc */
     int n_freevars;
     value *freevars;
     value _freevars[2];
@@ -53,6 +57,7 @@ struct closure2 {
 struct closure3 {
     funcptr func;
     int n_args;
+    int mark; /* for gc */
     int n_freevars;
     value *freevars;
     value _freevars[3];
@@ -61,6 +66,7 @@ struct closure3 {
 struct closuren {
     funcptr func;
     int n_args;
+    int mark; /* for gc */
     int n_freevars;
     value *freevars;
     value _freevars[];
@@ -69,11 +75,13 @@ struct closuren {
 struct pair {
     value car;
     value cdr;
+    int mark; /* for gc */
 };
 
 struct string {
     size_t len;
     char *s;
+    int mark; /* for gc */
 };
 
 struct symbol {
@@ -121,6 +129,8 @@ struct object {
         } error;
         struct symbol symbol; /* used for uninterned symbols */
     };
+
+    int mark; /* for gc */
 };
 
 #define FIXNUM_TAG 0x0
@@ -367,8 +377,92 @@ uint64_t now() {
     return tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
 }
 
+void gc_recurse(value v) {
+    if (IS_PAIR(v) && !GET_PAIR(v)->mark) {
+        GET_PAIR(v)->mark = 1;
+        gc_recurse(GET_PAIR(v)->car);
+        gc_recurse(GET_PAIR(v)->cdr);
+    } else if (IS_OBJECT(v) && !GET_OBJECT(v)->mark) {
+        GET_OBJECT(v)->mark = 1;
+        recurse_object();
+    } else if (IS_STRING(v) && !GET_STRING(v)->mark) {
+        GET_STRING(v)->mark = 1;
+    } else if (IS_CLOSURE(v) && !GET_CLOSURE(v)->mark) {
+        GET_CLOSURE(v)->mark = 1;
+    } else {
+        fprintf(stderr, "gc_recurse called with unknown object: %p\n", v);
+        exit(1);
+    }
+}
+
 void gc(void) {
     printf("GC!\n");
+
+    int ss;
+    void *cur_stack = &ss;
+
+    for (void *p = stack_start; p <= cur_stack; ++p) {
+        for (int i = 0; i < n_pair_pools; ++i) {
+            if (p >= (void*) &pair_pools[i] && p <= (void *) &pair_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_object_pools; ++i) {
+            if (p >= (void*) &object_pools[i] && p <= (void *) &object_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_string_pools; ++i) {
+            if (p >= (void*) &string_pools[i] && p <= (void *) &string_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure0_pools; ++i) {
+            if (p >= (void*) &closure0_pools[i] && p <= (void *) &closure0_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure1_pools; ++i) {
+            if (p >= (void*) &closure1_pools[i] && p <= (void *) &closure1_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure2_pools; ++i) {
+            if (p >= (void*) &closure2_pools[i] && p <= (void *) &closure2_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure3_pools; ++i) {
+            if (p >= (void*) &closure3_pools[i] && p <= (void *) &closure3_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closuren_pools; ++i) {
+            if (p >= (void*) &closuren_pools[i] && p <= (void *) &closuren_pools[i][POOL_SIZE - 1]) {
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+    }
+
+    free_all_marked();
+
+    reset_marks_to_zero(); // do we need to make sure they were zero at beginning?
+
     gc_last_time = now();
 }
 
