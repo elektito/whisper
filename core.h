@@ -169,6 +169,7 @@ struct object {
 #define EOFOBJ (value)(EOFOBJ_TAG)
 #define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)
 
+#define GET_POINTER(v) ((void *)((uint64_t)(v) & VALUE_MASK))
 #define GET_FIXNUM(v) ((int64_t)(v) >> 3)
 #define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))
 #define GET_BOOL(v) ((uint64_t)(v) >> 4)
@@ -235,35 +236,27 @@ static int n_closuren_pools;
 
 static struct pair **free_pairs;
 static int n_free_pairs;
-static int free_pairs_idx;
 
 static struct object **free_objects;
 static int n_free_objects;
-static int free_objects_idx;
 
 static struct string **free_strings;
 static int n_free_strings;
-static int free_strings_idx;
 
 static struct closure0 **free_closure0s;
 static int n_free_closure0s;
-static int free_closure0s_idx;
 
 static struct closure1 **free_closure1s;
 static int n_free_closure1s;
-static int free_closure1s_idx;
 
 static struct closure2 **free_closure2s;
 static int n_free_closure2s;
-static int free_closure2s_idx;
 
 static struct closure3 **free_closure3s;
 static int n_free_closure3s;
-static int free_closure3s_idx;
 
 static struct closuren **free_closurens;
 static int n_free_closurens;
-static int free_closurens_idx;
 
 static uint64_t gc_last_time = 0;
 
@@ -283,7 +276,6 @@ static void init_memory() {
     pair_pools[0] = alloc_pool(sizeof(struct pair));
 
     n_free_pairs = POOL_SIZE;
-    free_pairs_idx = 0;
     free_pairs = malloc(POOL_SIZE * sizeof(struct pair *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_pairs[i] = &pair_pools[0][i];
@@ -294,7 +286,6 @@ static void init_memory() {
     object_pools[0] = alloc_pool(sizeof(struct object));
 
     n_free_objects = POOL_SIZE;
-    free_objects_idx = 0;
     free_objects = malloc(POOL_SIZE * sizeof(struct object *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_objects[i] = &object_pools[0][i];
@@ -305,7 +296,6 @@ static void init_memory() {
     string_pools[0] = alloc_pool(sizeof(struct string));
 
     n_free_strings = POOL_SIZE;
-    free_strings_idx = 0;
     free_strings = malloc(POOL_SIZE * sizeof(struct string *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_strings[i] = &string_pools[0][i];
@@ -316,7 +306,6 @@ static void init_memory() {
     closure0_pools[0] = alloc_pool(sizeof(struct closure0));
 
     n_free_closure0s = POOL_SIZE;
-    free_closure0s_idx = 0;
     free_closure0s = malloc(POOL_SIZE * sizeof(struct closure0 *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_closure0s[i] = &closure0_pools[0][i];
@@ -327,7 +316,6 @@ static void init_memory() {
     closure1_pools[0] = alloc_pool(sizeof(struct closure1));
 
     n_free_closure1s = POOL_SIZE;
-    free_closure1s_idx = 0;
     free_closure1s = malloc(POOL_SIZE * sizeof(struct closure1 *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_closure1s[i] = &closure1_pools[0][i];
@@ -338,7 +326,6 @@ static void init_memory() {
     closure2_pools[0] = alloc_pool(sizeof(struct closure2));
 
     n_free_closure2s = POOL_SIZE;
-    free_closure2s_idx = 0;
     free_closure2s = malloc(POOL_SIZE * sizeof(struct closure2 *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_closure2s[i] = &closure2_pools[0][i];
@@ -349,7 +336,6 @@ static void init_memory() {
     closure3_pools[0] = alloc_pool(sizeof(struct closure3));
 
     n_free_closure3s = POOL_SIZE;
-    free_closure3s_idx = 0;
     free_closure3s = malloc(POOL_SIZE * sizeof(struct closure3 *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_closure3s[i] = &closure3_pools[0][i];
@@ -360,7 +346,6 @@ static void init_memory() {
     closuren_pools[0] = alloc_pool(sizeof(struct closuren));
 
     n_free_closurens = POOL_SIZE;
-    free_closurens_idx = 0;
     free_closurens = malloc(POOL_SIZE * sizeof(struct closuren *));
     for (int i = 0; i < POOL_SIZE; ++i) {
         free_closurens[i] = &closuren_pools[0][i];
@@ -378,9 +363,9 @@ static struct pair *alloc_pair(void) {
         pair_pools[n_pair_pools - 1] = alloc_pool(sizeof(struct pair));
 
         n_free_pairs += POOL_SIZE;
-        free_pairs = realloc(free_pairs, (free_pairs_idx + POOL_SIZE) * sizeof(struct pair *));
+        free_pairs = realloc(free_pairs, n_pair_pools * POOL_SIZE * sizeof(struct pair *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_pairs[free_pairs_idx + i] = &pair_pools[n_pair_pools - 1][i];
+            free_pairs[i] = &pair_pools[n_pair_pools - 1][i];
         }
     }
 
@@ -404,14 +389,13 @@ static struct object *alloc_object(void) {
         object_pools[n_object_pools - 1] = alloc_pool(sizeof(struct object));
 
         n_free_objects += POOL_SIZE;
-        free_objects = realloc(free_objects, (free_objects_idx + POOL_SIZE) * sizeof(struct object *));
+        free_objects = realloc(free_objects, n_object_pools * POOL_SIZE * sizeof(struct object *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_objects[free_objects_idx + i] = &object_pools[n_object_pools - 1][i];
+            free_objects[i] = &object_pools[n_object_pools - 1][i];
         }
     }
 
-    obj = free_objects[free_objects_idx++];
-    n_free_objects--;
+    obj = free_objects[--n_free_objects];
 
     return obj;
 }
@@ -434,8 +418,7 @@ static void free_object(struct object *obj) {
         break;
     }
 
-    free_objects[free_objects_idx--] = obj;
-    n_free_objects++;
+    free_objects[n_free_objects++] = obj;
 }
 
 static struct string *alloc_string(size_t len, char fill) {
@@ -449,14 +432,13 @@ static struct string *alloc_string(size_t len, char fill) {
         string_pools[n_string_pools - 1] = alloc_pool(sizeof(struct string));
 
         n_free_strings += POOL_SIZE;
-        free_strings = realloc(free_strings, (free_strings_idx + POOL_SIZE) * sizeof(struct string *));
+        free_strings = realloc(free_strings, n_string_pools * POOL_SIZE * sizeof(struct string *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_strings[free_strings_idx + i] = &string_pools[n_string_pools - 1][i];
+            free_strings[i] = &string_pools[n_string_pools - 1][i];
         }
     }
 
-    str = free_strings[free_strings_idx++];
-    n_free_strings--;
+    str = free_strings[--n_free_strings];
 
     str->s = malloc(len);
     str->len = len;
@@ -467,8 +449,7 @@ static struct string *alloc_string(size_t len, char fill) {
 
 static void free_string(struct string *str) {
     free(str->s);
-    free_strings[free_strings_idx--] = str;
-    n_free_strings++;
+    free_strings[n_free_strings++] = str;
 }
 
 static struct closure *alloc_closure0(void) {
@@ -480,22 +461,21 @@ static struct closure *alloc_closure0(void) {
         closure0_pools[n_closure0_pools - 1] = alloc_pool(sizeof(struct closure0));
 
         n_free_closure0s += POOL_SIZE;
-        free_closure0s = realloc(free_closure0s, (free_closure0s_idx + POOL_SIZE) * sizeof(struct closure0 *));
+        free_closure0s = realloc(free_closure0s, n_closure0_pools * POOL_SIZE * sizeof(struct closure0 *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_closure0s[free_closure0s_idx + i] = &closure0_pools[n_closure0_pools - 1][i];
+            free_closure0s[i] = &closure0_pools[n_closure0_pools - 1][i];
         }
     }
 
-    closure = free_closure0s[free_closure0s_idx++];
-    n_free_closure0s--;
+    closure = free_closure0s[--n_free_closure0s];
     closure->freevars = NULL;
+    closure->n_freevars = 0;
 
     return (struct closure *) closure;
 }
 
 static void free_closure0(struct closure0 *closure) {
-    free_closure0s[free_closure0s_idx--] = closure;
-    n_free_closure0s++;
+    free_closure0s[n_free_closure0s++] = closure;
 }
 
 static struct closure *alloc_closure1(void) {
@@ -507,22 +487,21 @@ static struct closure *alloc_closure1(void) {
         closure1_pools[n_closure1_pools - 1] = alloc_pool(sizeof(struct closure1));
 
         n_free_closure1s += POOL_SIZE;
-        free_closure1s = realloc(free_closure1s, (free_closure1s_idx + POOL_SIZE) * sizeof(struct closure1 *));
+        free_closure1s = realloc(free_closure1s, n_closure1_pools * POOL_SIZE * sizeof(struct closure1 *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_closure1s[free_closure1s_idx + i] = &closure1_pools[n_closure1_pools - 1][i];
+            free_closure1s[i] = &closure1_pools[n_closure1_pools - 1][i];
         }
     }
 
-    closure = free_closure1s[free_closure1s_idx++];
-    n_free_closure1s--;
+    closure = free_closure1s[--n_free_closure1s];
     closure->freevars = closure->_freevars;
+    closure->n_freevars = 1;
 
     return (struct closure *) closure;
 }
 
 static void free_closure1(struct closure1 *closure) {
-    free_closure1s[free_closure1s_idx--] = closure;
-    n_free_closure1s++;
+    free_closure1s[n_free_closure1s++] = closure;
 }
 
 static struct closure *alloc_closure2(void) {
@@ -534,22 +513,21 @@ static struct closure *alloc_closure2(void) {
         closure2_pools[n_closure2_pools - 1] = alloc_pool(sizeof(struct closure2));
 
         n_free_closure2s += POOL_SIZE;
-        free_closure2s = realloc(free_closure2s, (free_closure2s_idx + POOL_SIZE) * sizeof(struct closure2 *));
+        free_closure2s = realloc(free_closure2s, n_closure2_pools * POOL_SIZE * sizeof(struct closure2 *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_closure2s[free_closure2s_idx + i] = &closure2_pools[n_closure2_pools - 1][i];
+            free_closure2s[i] = &closure2_pools[n_closure2_pools - 1][i];
         }
     }
 
-    closure = free_closure2s[free_closure2s_idx++];
-    n_free_closure2s--;
+    closure = free_closure2s[--n_free_closure2s];
     closure->freevars = closure->_freevars;
+    closure->n_freevars = 2;
 
     return (struct closure *) closure;
 }
 
 static void free_closure2(struct closure2 *closure) {
-    free_closure2s[free_closure2s_idx--] = closure;
-    n_free_closure2s++;
+    free_closure2s[n_free_closure2s++] = closure;
 }
 
 static struct closure *alloc_closure3(void) {
@@ -561,22 +539,21 @@ static struct closure *alloc_closure3(void) {
         closure3_pools[n_closure3_pools - 1] = alloc_pool(sizeof(struct closure3));
 
         n_free_closure3s += POOL_SIZE;
-        free_closure3s = realloc(free_closure3s, (free_closure3s_idx + POOL_SIZE) * sizeof(struct closure3 *));
+        free_closure3s = realloc(free_closure3s, n_closure3_pools * POOL_SIZE * sizeof(struct closure3 *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_closure3s[free_closure3s_idx + i] = &closure3_pools[n_closure3_pools - 1][i];
+            free_closure3s[i] = &closure3_pools[n_closure3_pools - 1][i];
         }
     }
 
-    closure = free_closure3s[free_closure3s_idx++];
-    n_free_closure3s--;
+    closure = free_closure3s[--n_free_closure3s];
     closure->freevars = closure->_freevars;
+    closure->n_freevars = 3;
 
     return (struct closure *) closure;
 }
 
 static void free_closure3(struct closure3 *closure) {
-    free_closure3s[free_closure3s_idx--] = closure;
-    n_free_closure3s++;
+    free_closure3s[n_free_closure3s++] = closure;
 }
 
 static struct closure *alloc_closuren(int nfreevars) {
@@ -588,24 +565,26 @@ static struct closure *alloc_closuren(int nfreevars) {
         closuren_pools[n_closuren_pools - 1] = alloc_pool(sizeof(struct closuren));
 
         n_free_closurens += POOL_SIZE;
-        free_closurens = realloc(free_closurens, (free_closurens_idx + POOL_SIZE) * sizeof(struct closuren *));
+        free_closurens = realloc(free_closurens, n_closuren_pools * POOL_SIZE * sizeof(struct closuren *));
         for (int i = 0; i < POOL_SIZE; ++i) {
-            free_closurens[free_closurens_idx + i] = &closuren_pools[n_closuren_pools - 1][i];
+            free_closurens[i] = &closuren_pools[n_closuren_pools - 1][i];
         }
     }
 
-    closure = free_closurens[free_closurens_idx++];
-    n_free_closurens--;
+    closure = free_closurens[--n_free_closurens];
 
+    assert(nfreevars > 3);
     closure->freevars = malloc(nfreevars * sizeof(value));
+    closure->n_freevars = nfreevars;
 
     return (struct closure *) closure;
 }
 
 static void free_closuren(struct closuren *closure) {
+    printf("jjj %p %d\n", closure->freevars, closure->n_freevars);
+    assert(closure->n_freevars > 3);
     free(closure->freevars);
-    free_closurens[free_closurens_idx--] = closure;
-    n_free_closurens++;
+    free_closurens[n_free_closurens++] = closure;
 }
 
 static struct closure *alloc_closure(int nfreevars) {
@@ -664,103 +643,122 @@ uint64_t now() {
 }
 
 void gc_recurse(value v) {
-    if (IS_PAIR(v) && !GET_PAIR(v)->mark) {
-        printf("MARK PAIR!!!\n");
-        GET_PAIR(v)->mark = 1;
-        gc_recurse(GET_PAIR(v)->car);
-        gc_recurse(GET_PAIR(v)->cdr);
-    } else if (IS_OBJECT(v) && !GET_OBJECT(v)->mark) {
-        GET_OBJECT(v)->mark = 1;
-
-        switch (GET_OBJECT(v)->type) {
-        case OBJ_PORT:
-            break;
-        case OBJ_SYMBOL:
-            break;
-        case OBJ_ERROR:
-            break;
-        default:
-            fprintf(stderr, "unhandled object type in gc\n");
-            exit(1);
+    if (IS_PAIR(v)) {
+        if (!GET_PAIR(v)->mark) {
+            printf("MARK PAIR!!!\n");
+            GET_PAIR(v)->mark = 1;
+            printf("?? car=%p cdr=%p\n", GET_PAIR(v)->car, GET_PAIR(v)->cdr);
+            gc_recurse(GET_PAIR(v)->car);
+            gc_recurse(GET_PAIR(v)->cdr);
         }
-    } else if (IS_STRING(v) && !GET_STRING(v)->mark) {
-        GET_STRING(v)->mark = 1;
-    } else if (IS_CLOSURE(v) && !GET_CLOSURE(v)->mark) {
-        GET_CLOSURE(v)->mark = 1;
+    } else if (IS_OBJECT(v)) {
+        if (!GET_OBJECT(v)->mark) {
+            GET_OBJECT(v)->mark = 1;
+
+            switch (GET_OBJECT(v)->type) {
+            case OBJ_PORT:
+                break;
+            case OBJ_SYMBOL:
+                break;
+            case OBJ_ERROR:
+                break;
+            default:
+                fprintf(stderr, "unhandled object type in gc\n");
+                exit(1);
+            }
+        }
+    } else if (IS_STRING(v)) {
+        if (!GET_STRING(v)->mark) {
+            GET_STRING(v)->mark = 1;
+        }
+    } else if (IS_CLOSURE(v)) {
+        if (!GET_CLOSURE(v)->mark) {
+            GET_CLOSURE(v)->mark = 1;
+        }
+    } else if (IS_FIXNUM(v) || IS_CHAR(v) || IS_SYMBOL(v) || IS_BOOL(v) || IS_VOID(v) || IS_NIL(v)) {
+        /* nothing to do */
     } else {
         fprintf(stderr, "gc_recurse called with unknown object: %p\n", v);
         exit(1);
     }
 }
 
+__attribute__((no_sanitize("address")))
 static void gc(void) {
     printf("GC!\n");
 
-    int ss;
+    uint64_t ss;
     void *cur_stack = &ss;
 
-    for (void *p = cur_stack; p <= stack_start; ++p) {
+    if (cur_stack > stack_start) {
+        void *temp = cur_stack;
+        cur_stack = stack_start;
+        stack_start = temp;
+    }
+
+    printf("^^^^^ %p .. %p\n", cur_stack, stack_start);
+    for (void **p = cur_stack; p <= (void**) stack_start; ++p) {
         for (int i = 0; i < n_pair_pools; ++i) {
-            printf("?? %p .. %p .. %p\n", (void*) &pair_pools[i], *(void**)p, (void *) &pair_pools[i][POOL_SIZE - 1]);
-            if (p >= (void*) &pair_pools[i] && p <= (void *) &pair_pools[i][POOL_SIZE - 1]) {
-                printf("xx1000");
-                gc_recurse((value) p);
+            printf("------- p=%p\n", p);
+            if (IS_PAIR(*p) && GET_POINTER(*p) >= (void*) &pair_pools[i] && GET_POINTER(*p) <= (void *) &pair_pools[i][POOL_SIZE - 1]) {
+                printf("xx1000 %p ?=%d\n", *p, IS_PAIR(*p));
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_object_pools; ++i) {
-            if (p >= (void*) &object_pools[i] && p <= (void *) &object_pools[i][POOL_SIZE - 1]) {
-                printf("xx2000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &object_pools[i] && GET_POINTER(*p) <= (void *) &object_pools[i][POOL_SIZE - 1]) {
+                printf("xx2000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_string_pools; ++i) {
-            if (p >= (void*) &string_pools[i] && p <= (void *) &string_pools[i][POOL_SIZE - 1]) {
-                printf("xx3000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &string_pools[i] && GET_POINTER(*p) <= (void *) &string_pools[i][POOL_SIZE - 1]) {
+                printf("xx3000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_closure0_pools; ++i) {
-            if (p >= (void*) &closure0_pools[i] && p <= (void *) &closure0_pools[i][POOL_SIZE - 1]) {
-                printf("xx4000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &closure0_pools[i] && GET_POINTER(*p) <= (void *) &closure0_pools[i][POOL_SIZE - 1]) {
+                printf("xx4000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_closure1_pools; ++i) {
-            if (p >= (void*) &closure1_pools[i] && p <= (void *) &closure1_pools[i][POOL_SIZE - 1]) {
-                printf("xx5000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &closure1_pools[i] && GET_POINTER(*p) <= (void *) &closure1_pools[i][POOL_SIZE - 1]) {
+                printf("xx5000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_closure2_pools; ++i) {
-            if (p >= (void*) &closure2_pools[i] && p <= (void *) &closure2_pools[i][POOL_SIZE - 1]) {
-                printf("xx6000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &closure2_pools[i] && GET_POINTER(*p) <= (void *) &closure2_pools[i][POOL_SIZE - 1]) {
+                printf("xx6000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_closure3_pools; ++i) {
-            if (p >= (void*) &closure3_pools[i] && p <= (void *) &closure3_pools[i][POOL_SIZE - 1]) {
-                printf("xx7000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &closure3_pools[i] && GET_POINTER(*p) <= (void *) &closure3_pools[i][POOL_SIZE - 1]) {
+                printf("xx7000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
 
         for (int i = 0; i < n_closuren_pools; ++i) {
-            if (p >= (void*) &closuren_pools[i] && p <= (void *) &closuren_pools[i][POOL_SIZE - 1]) {
-                printf("xx8000");
-                gc_recurse((value) p);
+            if (GET_POINTER(*p) >= (void*) &closuren_pools[i] && GET_POINTER(*p) <= (void *) &closuren_pools[i][POOL_SIZE - 1]) {
+                printf("xx8000\n");
+                gc_recurse((value) *p);
                 continue;
             }
         }
