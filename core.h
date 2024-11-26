@@ -267,6 +267,8 @@ static int free_closurens_idx;
 
 static uint64_t gc_last_time = 0;
 
+static void check_gc(void);
+
 static void *alloc_pool(int object_size) {
     /* this is to make sure the pointers to each element of the array
      * has its 3 low bits clear so we can use it for tagging. */
@@ -365,147 +367,6 @@ static void init_memory() {
     }
 }
 
-uint64_t now() {
-    /* return current monotonic time in milliseconds  */
-
-    struct timespec tp;
-    if (clock_gettime(CLOCK_MONOTONIC_COARSE, &tp)) {
-        fprintf(stderr, "error reading time: %s\n", strerror(errno));
-        exit(1);
-    }
-
-    return tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
-}
-
-void gc_recurse(value v) {
-    if (IS_PAIR(v) && !GET_PAIR(v)->mark) {
-        GET_PAIR(v)->mark = 1;
-        gc_recurse(GET_PAIR(v)->car);
-        gc_recurse(GET_PAIR(v)->cdr);
-    } else if (IS_OBJECT(v) && !GET_OBJECT(v)->mark) {
-        GET_OBJECT(v)->mark = 1;
-        recurse_object();
-    } else if (IS_STRING(v) && !GET_STRING(v)->mark) {
-        GET_STRING(v)->mark = 1;
-    } else if (IS_CLOSURE(v) && !GET_CLOSURE(v)->mark) {
-        GET_CLOSURE(v)->mark = 1;
-    } else {
-        fprintf(stderr, "gc_recurse called with unknown object: %p\n", v);
-        exit(1);
-    }
-}
-
-void gc(void) {
-    printf("GC!\n");
-
-    int ss;
-    void *cur_stack = &ss;
-
-    for (void *p = stack_start; p <= cur_stack; ++p) {
-        for (int i = 0; i < n_pair_pools; ++i) {
-            if (p >= (void*) &pair_pools[i] && p <= (void *) &pair_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_object_pools; ++i) {
-            if (p >= (void*) &object_pools[i] && p <= (void *) &object_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_string_pools; ++i) {
-            if (p >= (void*) &string_pools[i] && p <= (void *) &string_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_closure0_pools; ++i) {
-            if (p >= (void*) &closure0_pools[i] && p <= (void *) &closure0_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_closure1_pools; ++i) {
-            if (p >= (void*) &closure1_pools[i] && p <= (void *) &closure1_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_closure2_pools; ++i) {
-            if (p >= (void*) &closure2_pools[i] && p <= (void *) &closure2_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_closure3_pools; ++i) {
-            if (p >= (void*) &closure3_pools[i] && p <= (void *) &closure3_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-
-        for (int i = 0; i < n_closuren_pools; ++i) {
-            if (p >= (void*) &closuren_pools[i] && p <= (void *) &closuren_pools[i][POOL_SIZE - 1]) {
-                gc_recurse((value) p);
-                continue;
-            }
-        }
-    }
-
-    free_all_marked();
-
-    reset_marks_to_zero(); // do we need to make sure they were zero at beginning?
-
-    gc_last_time = now();
-}
-
-static void check_gc() {
-    /* run no more than once every 30 seconds (arbitrarily!) */
-    if (gc_last_time > 0 && now() - gc_last_time < 30000) {
-        return;
-    }
-
-    /* check the ratio of free objects for each class of objects. if
-     * less than a certain percentage, run gc. */
-
-    int total_pairs = n_pair_pools * POOL_SIZE;
-    double pair_ratio = (double) n_free_pairs / total_pairs;
-    int total_objects = n_object_pools * POOL_SIZE;
-    double object_ratio = (double) n_free_objects / total_objects;
-    int total_strings = n_string_pools * POOL_SIZE;
-    double string_ratio = (double) n_free_strings / total_strings;
-    int total_closure0s = n_closure0_pools * POOL_SIZE;
-    double closure0_ratio = (double) n_free_closure0s / total_closure0s;
-    int total_closure1s = n_closure1_pools * POOL_SIZE;
-    double closure1_ratio = (double) n_free_closure1s / total_closure1s;
-    int total_closure2s = n_closure2_pools * POOL_SIZE;
-    double closure2_ratio = (double) n_free_closure2s / total_closure2s;
-    int total_closure3s = n_closure3_pools * POOL_SIZE;
-    double closure3_ratio = (double) n_free_closure3s / total_closure3s;
-    int total_closurens = n_closuren_pools * POOL_SIZE;
-    double closuren_ratio = (double) n_free_closurens / total_closurens;
-
-    double min_ratio = 0.2;
-    if (pair_ratio < min_ratio ||
-        object_ratio < min_ratio ||
-        string_ratio < min_ratio ||
-        closure0_ratio < min_ratio ||
-        closure1_ratio < min_ratio ||
-        closure2_ratio < min_ratio ||
-        closure3_ratio < min_ratio ||
-        closuren_ratio < min_ratio)
-    {
-        gc();
-    }
-}
-
 static struct pair *alloc_pair(void) {
     struct pair *pair;
 
@@ -523,15 +384,13 @@ static struct pair *alloc_pair(void) {
         }
     }
 
-    pair = free_pairs[free_pairs_idx++];
-    n_free_pairs--;
+    pair = free_pairs[--n_free_pairs];
 
     return pair;
 }
 
 static void free_pair(struct pair *pair) {
-    free_pairs[free_pairs_idx--] = pair;
-    n_free_pairs++;
+    free_pairs[n_free_pairs++] = pair;
 }
 
 static struct object *alloc_object(void) {
@@ -558,6 +417,23 @@ static struct object *alloc_object(void) {
 }
 
 static void free_object(struct object *obj) {
+    switch (obj->type) {
+    case OBJ_PORT:
+        if (obj->port.filename)
+            free(obj->port.filename);
+        if (obj->port.string)
+            free(obj->port.string);
+        if (obj->port.fp)
+            fclose(obj->port.fp);
+        break;
+    case OBJ_SYMBOL:
+        break;
+    case OBJ_ERROR:
+        break;
+    default:
+        break;
+    }
+
     free_objects[free_objects_idx--] = obj;
     n_free_objects++;
 }
@@ -772,6 +648,282 @@ static void free_closure(struct closure *closure) {
     default:
         free_closuren((struct closuren *) closure);
         break;
+    }
+}
+
+uint64_t now() {
+    /* return current monotonic time in milliseconds  */
+
+    struct timespec tp;
+    if (clock_gettime(CLOCK_MONOTONIC_COARSE, &tp)) {
+        fprintf(stderr, "error reading time: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    return tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
+}
+
+void gc_recurse(value v) {
+    if (IS_PAIR(v) && !GET_PAIR(v)->mark) {
+        printf("MARK PAIR!!!\n");
+        GET_PAIR(v)->mark = 1;
+        gc_recurse(GET_PAIR(v)->car);
+        gc_recurse(GET_PAIR(v)->cdr);
+    } else if (IS_OBJECT(v) && !GET_OBJECT(v)->mark) {
+        GET_OBJECT(v)->mark = 1;
+
+        switch (GET_OBJECT(v)->type) {
+        case OBJ_PORT:
+            break;
+        case OBJ_SYMBOL:
+            break;
+        case OBJ_ERROR:
+            break;
+        default:
+            fprintf(stderr, "unhandled object type in gc\n");
+            exit(1);
+        }
+    } else if (IS_STRING(v) && !GET_STRING(v)->mark) {
+        GET_STRING(v)->mark = 1;
+    } else if (IS_CLOSURE(v) && !GET_CLOSURE(v)->mark) {
+        GET_CLOSURE(v)->mark = 1;
+    } else {
+        fprintf(stderr, "gc_recurse called with unknown object: %p\n", v);
+        exit(1);
+    }
+}
+
+static void gc(void) {
+    printf("GC!\n");
+
+    int ss;
+    void *cur_stack = &ss;
+
+    for (void *p = cur_stack; p <= stack_start; ++p) {
+        for (int i = 0; i < n_pair_pools; ++i) {
+            printf("?? %p .. %p .. %p\n", (void*) &pair_pools[i], *(void**)p, (void *) &pair_pools[i][POOL_SIZE - 1]);
+            if (p >= (void*) &pair_pools[i] && p <= (void *) &pair_pools[i][POOL_SIZE - 1]) {
+                printf("xx1000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_object_pools; ++i) {
+            if (p >= (void*) &object_pools[i] && p <= (void *) &object_pools[i][POOL_SIZE - 1]) {
+                printf("xx2000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_string_pools; ++i) {
+            if (p >= (void*) &string_pools[i] && p <= (void *) &string_pools[i][POOL_SIZE - 1]) {
+                printf("xx3000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure0_pools; ++i) {
+            if (p >= (void*) &closure0_pools[i] && p <= (void *) &closure0_pools[i][POOL_SIZE - 1]) {
+                printf("xx4000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure1_pools; ++i) {
+            if (p >= (void*) &closure1_pools[i] && p <= (void *) &closure1_pools[i][POOL_SIZE - 1]) {
+                printf("xx5000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure2_pools; ++i) {
+            if (p >= (void*) &closure2_pools[i] && p <= (void *) &closure2_pools[i][POOL_SIZE - 1]) {
+                printf("xx6000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closure3_pools; ++i) {
+            if (p >= (void*) &closure3_pools[i] && p <= (void *) &closure3_pools[i][POOL_SIZE - 1]) {
+                printf("xx7000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+
+        for (int i = 0; i < n_closuren_pools; ++i) {
+            if (p >= (void*) &closuren_pools[i] && p <= (void *) &closuren_pools[i][POOL_SIZE - 1]) {
+                printf("xx8000");
+                gc_recurse((value) p);
+                continue;
+            }
+        }
+    }
+
+    /* free all non-marked and reset all marks to zero */
+    int total_freed = 0;
+    int n_freed_pairs = 0;
+    int n_freed_objects = 0;
+    int n_freed_strings = 0;
+    int n_freed_closure0s = 0;
+    int n_freed_closure1s = 0;
+    int n_freed_closure2s = 0;
+    int n_freed_closure3s = 0;
+    int n_freed_closurens = 0;
+    int cc = 0;
+    for (int i = 0; i < n_pair_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!pair_pools[i][j].mark) {
+                free_pair(&pair_pools[i][j]);
+                total_freed++;
+                n_freed_pairs++;
+            }
+
+            pair_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_object_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!object_pools[i][j].mark) {
+                free_object(&object_pools[i][j]);
+                total_freed++;
+                n_freed_objects++;
+            }
+
+            object_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_string_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!string_pools[i][j].mark) {
+                free_string(&string_pools[i][j]);
+                total_freed++;
+                n_freed_strings++;
+            }
+
+            string_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_closure0_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!closure0_pools[i][j].mark) {
+                free_closure0(&closure0_pools[i][j]);
+                total_freed++;
+                n_freed_closure0s++;
+            }
+
+            closure0_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_closure1_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!closure1_pools[i][j].mark) {
+                free_closure1(&closure1_pools[i][j]);
+                total_freed++;
+                n_freed_closure1s++;
+            }
+
+            closure1_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_closure2_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!closure2_pools[i][j].mark) {
+                free_closure2(&closure2_pools[i][j]);
+                total_freed++;
+                n_freed_closure2s++;
+            }
+
+            closure2_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_closure3_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!closure3_pools[i][j].mark) {
+                free_closure3(&closure3_pools[i][j]);
+                total_freed++;
+                n_freed_closure3s++;
+            }
+
+            closure3_pools[i][j].mark = 0;
+        }
+    }
+
+    for (int i = 0; i < n_closuren_pools; ++i) {
+        for (int j = 0; j < POOL_SIZE; ++j) {
+            if (!closuren_pools[i][j].mark) {
+                free_closuren(&closuren_pools[i][j]);
+                total_freed++;
+                n_freed_closurens++;
+            }
+
+            closuren_pools[i][j].mark = 0;
+        }
+    }
+
+    printf("==== gc report ====\n");
+    printf("freed:\n");
+    printf("    pairs: %d\n", n_freed_pairs);
+    printf("    objects: %d\n", n_freed_objects);
+    printf("    strings: %d\n", n_freed_strings);
+    printf("    closure0s: %d\n", n_freed_closure0s);
+    printf("    closure1s: %d\n", n_freed_closure1s);
+    printf("    closure2s: %d\n", n_freed_closure2s);
+    printf("    closure3s: %d\n", n_freed_closure3s);
+    printf("    closurens: %d\n", n_freed_closurens);
+
+    gc_last_time = now();
+}
+
+static void check_gc(void) {
+    /* run no more than once every 30 seconds (arbitrarily!) */
+    if (gc_last_time > 0 && now() - gc_last_time < 30000) {
+        return;
+    }
+
+    /* check the ratio of free objects for each class of objects. if
+     * less than a certain percentage, run gc. */
+
+    int total_pairs = n_pair_pools * POOL_SIZE;
+    double pair_ratio = (double) n_free_pairs / total_pairs;
+    int total_objects = n_object_pools * POOL_SIZE;
+    double object_ratio = (double) n_free_objects / total_objects;
+    int total_strings = n_string_pools * POOL_SIZE;
+    double string_ratio = (double) n_free_strings / total_strings;
+    int total_closure0s = n_closure0_pools * POOL_SIZE;
+    double closure0_ratio = (double) n_free_closure0s / total_closure0s;
+    int total_closure1s = n_closure1_pools * POOL_SIZE;
+    double closure1_ratio = (double) n_free_closure1s / total_closure1s;
+    int total_closure2s = n_closure2_pools * POOL_SIZE;
+    double closure2_ratio = (double) n_free_closure2s / total_closure2s;
+    int total_closure3s = n_closure3_pools * POOL_SIZE;
+    double closure3_ratio = (double) n_free_closure3s / total_closure3s;
+    int total_closurens = n_closuren_pools * POOL_SIZE;
+    double closuren_ratio = (double) n_free_closurens / total_closurens;
+
+    double min_ratio = 0.2;
+    if (pair_ratio < min_ratio ||
+        object_ratio < min_ratio ||
+        string_ratio < min_ratio ||
+        closure0_ratio < min_ratio ||
+        closure1_ratio < min_ratio ||
+        closure2_ratio < min_ratio ||
+        closure3_ratio < min_ratio ||
+        closuren_ratio < min_ratio)
+    {
+        gc();
     }
 }
 
