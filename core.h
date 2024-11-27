@@ -159,6 +159,30 @@ static struct object current_error_port;
 static int cmdline_argc;
 static const char **cmdline_argv;
 
+/************ memory management ***********/
+
+static struct pair *alloc_pair(void) {
+    return calloc(1, sizeof(struct pair));
+}
+
+static struct object *alloc_object(void) {
+    return calloc(1, sizeof(struct object));
+}
+
+static struct string *alloc_string(size_t len, char fill) {
+    struct string *str = malloc(sizeof(struct string));
+    str->len = len;
+    str->s = malloc(len);
+    memset(str->s, fill, len);
+    return str;
+}
+
+static struct closure *alloc_closure(int nfreevars) {
+    return calloc(1, sizeof(struct closure) + nfreevars * sizeof(value));
+}
+
+/******************************************/
+
 static void cleanup(void) {}
 
 static value envget(environment env, int index) {
@@ -168,7 +192,7 @@ static value envget(environment env, int index) {
 
 static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
     va_list args;
-    struct closure *closure = calloc(1, sizeof(struct closure) + nfreevars * sizeof(value));
+    struct closure *closure = alloc_closure(nfreevars);
     closure->func = func;
     closure->n_args = nargs;
     closure->n_freevars = nfreevars;
@@ -181,7 +205,7 @@ static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
 }
 
 static value make_pair(value car, value cdr) {
-    struct pair *pair = malloc(sizeof(struct pair));
+    struct pair *pair = alloc_pair();
     pair->car = car;
     pair->cdr = cdr;
     return PAIR(pair);
@@ -196,9 +220,7 @@ static value reverse_list(value list, value acc) {
 }
 
 static value make_string(const char *s, size_t len) {
-    struct string *p = malloc(sizeof(struct string));
-    p->s = malloc(len + 1);
-    p->len = len;
+    struct string *p = alloc_string(len + 1, '\0');
     memcpy(p->s, s, len);
     p->s[len] = 0;
     return STRING(p);
@@ -517,14 +539,6 @@ static value symbol_to_string(value v) {
     return make_string(sym->name, sym->name_len);
 }
 
-static value alloc_string(size_t len, char fill) {
-    struct string *str = malloc(sizeof(struct string));
-    str->len = len;
-    str->s = malloc(len);
-    memset(str->s, fill, len);
-    return STRING(str);
-}
-
 static int string_cmp(struct string *s1, struct string *s2) {
     size_t min_len = s1->len < s2->len ? s1->len : s2->len;
     int cmp = memcmp(s1->s, s2->s, min_len);
@@ -696,7 +710,7 @@ static value primcall_delete_file(environment env, enum call_flags flags, int na
     free(filenamez);
 
     if (ret) {
-        struct object *err = malloc(sizeof(struct object));
+        struct object *err = alloc_object();
         err->type = OBJ_ERROR;
         err->error.type = ERR_FILE;
         err->error.err_no = errno;
@@ -790,7 +804,7 @@ static value primcall_gensym(environment env, enum call_flags flags, int nargs, 
     if (nargs != 0 && nargs != 1) { RAISE("gensym needs zero or one argument"); }
     init_args();
 
-    struct object *sym = malloc(sizeof(struct object));
+    struct object *sym = alloc_object();
     sym->type = OBJ_SYMBOL;
 
     if (nargs == 1) {
@@ -870,7 +884,7 @@ static value primcall_make_string(environment env, enum call_flags flags, int na
     if (!IS_FIXNUM(n)) { RAISE("make-string first argument should be a number"); }
     if (GET_FIXNUM(n) < 0) { RAISE("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
-    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));
+    return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
 }
 
 static value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
@@ -924,7 +938,7 @@ static value primcall_open_input_file(environment env, enum call_flags flags, in
     value filename = next_arg();
     free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     int filename_len = GET_STRING(filename)->len;
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
@@ -951,7 +965,7 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
     FILE *fp = fopen(filenamez, "w");
     free(filenamez);
     if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
     obj->port.fp = fp;
@@ -962,7 +976,7 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
 
 static value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("open-output-string accepts no arguments"); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
     obj->port.string = malloc(128);
@@ -1095,9 +1109,7 @@ static value primcall_string_append(environment env, enum call_flags flags, int 
         total_size += str->len;
     }
 
-    struct string *concat = malloc(sizeof(struct string));
-    concat->len = total_size;
-    concat->s = malloc(total_size);
+    struct string *concat = alloc_string(total_size, '\0');
 
     reset_args();
     size_t offset = 0;
@@ -1123,9 +1135,7 @@ static value primcall_string_copy(environment env, enum call_flags flags, int na
     if (!IS_FIXNUM(end)) { RAISE("string-copy third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("string-copy start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("string-copy end index is out of range"); }
-    struct string *result = calloc(1, sizeof(struct string));
-    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);
-    result->s = malloc(result->len);
+    struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
@@ -1206,9 +1216,7 @@ static value primcall_substring(environment env, enum call_flags flags, int narg
     if (!IS_FIXNUM(end)) { RAISE("substring third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("substring start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("substring end index is out of range"); }
-    struct string *result = calloc(1, sizeof(struct string));
-    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);
-    result->s = malloc(result->len);
+    struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
@@ -1262,7 +1270,7 @@ static value primcall_urandom(environment env, enum call_flags flags, int nargs,
     free_args();
 
     FILE *fp = fopen("/dev/urandom", "r");
-    value s = alloc_string(GET_FIXNUM(n), '\0');
+    value s = STRING(alloc_string(GET_FIXNUM(n), '\0'));
     int nread = fread(GET_STRING(s)->s, 1, GET_FIXNUM(n), fp);
     if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
 
