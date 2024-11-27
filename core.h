@@ -1,3 +1,4 @@
+#include <bits/time.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -5,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 enum call_flags {
@@ -22,7 +24,38 @@ struct closure {
     funcptr func;
     int n_args;
     int n_freevars;
-    value freevars[];
+    value *freevars;
+};
+
+struct closure0 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+};
+
+struct closure1 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[1];
+};
+
+struct closure2 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[2];
+};
+
+struct closure3 {
+    funcptr func;
+    int n_args;
+    int n_freevars;
+    value *freevars;
+    value _freevars[3];
 };
 
 struct pair {
@@ -159,6 +192,319 @@ static struct object current_error_port;
 static int cmdline_argc;
 static const char **cmdline_argv;
 
+/************ memory management ***********/
+
+#define POOL_SIZE 1048576
+#define ALIGN16(n) (((n) + 15) & ~15)
+
+/* minimum time between gc runs in nanoseconds */
+#define GC_MIN_INTERVAL 10000000000
+
+/* this is used as a header for all objects we allocate in a pool */
+struct block {
+    uint8_t in_use;
+    uint8_t mark; /* for gc */
+};
+
+struct pool {
+    struct pool *next;
+    struct pool *prev;
+    int in_use_count;
+    int block_size; /* header plus actual object, aligned */
+    int next_index; /* next index alloc_from_heap better start searching at */
+    void *start;
+    void *end;
+};
+
+/* we're gonna call a linked list of pools, a heap. */
+static struct pool *pairs_heap;
+static struct pool *objects_heap;
+static struct pool *strings_heap;
+static struct pool *closure0s_heap;
+static struct pool *closure1s_heap;
+static struct pool *closure2s_heap;
+static struct pool *closure3s_heap;
+static struct pool *closures_heap;
+
+/* the stack address at the start of main function (used for gc) */
+static void *stack_start;
+
+static uint64_t last_gc_time = 0;
+
+/* return rough (monotonic) current time in nanoseconds */
+static uint64_t now(void) {
+    struct timespec tp;
+    int ret = clock_gettime(CLOCK_MONOTONIC_COARSE, &tp);
+    if (ret) {
+        fprintf(stderr, "could not read time\n");
+        exit(1);
+    }
+
+    return tp.tv_sec * 1000000000 + tp.tv_nsec;
+}
+
+static struct pool *create_heap(int object_size) {
+    int block_size = ALIGN16(sizeof(struct block)) + ALIGN16(object_size);
+
+    int total_size = sizeof(struct pool) + block_size * POOL_SIZE;
+    struct pool *pool = calloc(1, total_size);
+    pool->prev = NULL;
+    pool->next = NULL;
+    pool->in_use_count = 0;
+    pool->block_size = block_size;
+    pool->start = pool + 1; /* one struct pool ahead */
+    pool->end = (void*) pool + total_size;
+
+    return pool;
+}
+
+static struct pool *add_pool(struct pool *pool) {
+    while (pool->next) pool = pool->next;
+
+    int header_size = ALIGN16(sizeof(struct pool));
+    int total_size = header_size + pool->block_size * POOL_SIZE;
+    struct pool *new_pool = calloc(1, total_size);
+    pool->next = new_pool;
+    new_pool->prev = pool;
+    new_pool->next = NULL;
+    new_pool->in_use_count = 0;
+    new_pool->block_size = pool->block_size;
+    new_pool->next_index = 0;
+    new_pool->start = (void*) new_pool + header_size;
+    new_pool->end = (void*) new_pool + total_size;
+    return new_pool;
+}
+
+static void init_memory(void) {
+    pairs_heap = create_heap(sizeof(struct pair));
+    objects_heap = create_heap(sizeof(struct object));
+    strings_heap = create_heap(sizeof(struct string));
+    closure0s_heap = create_heap(sizeof(struct closure0));
+    closure1s_heap = create_heap(sizeof(struct closure1));
+    closure2s_heap = create_heap(sizeof(struct closure2));
+    closure3s_heap = create_heap(sizeof(struct closure3));
+    closures_heap = create_heap(sizeof(struct closure));
+
+    /* if you add more heaps, remember to update the list of heaps in
+     * gc() function too */
+}
+
+static void gc_recurse(value v) {
+    if (!IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v)) {
+        return;
+    }
+
+    struct block *block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
+    if (!block->in_use || block->mark) {
+        return;
+    }
+
+    if (IS_PAIR(v)) {
+        block->mark = 1;
+        gc_recurse(GET_PAIR(v)->car);
+        gc_recurse(GET_PAIR(v)->cdr);
+    } else if (IS_OBJECT(v)) {
+        block->mark = 1;
+    } else if (IS_STRING(v)) {
+        block->mark = 1;
+    } else if (IS_CLOSURE(v)) {
+        block->mark = 1;
+    } else if (IS_STRING(v)) {
+        block->mark = 1;
+    }
+}
+
+static int is_valid_value(void *ptr, struct pool *heap) {
+    /* the pointer should have a valid address and a correct tag to be a
+     * valid value */
+
+    struct pool *pool = heap;
+    int found = 0;
+    while (pool) {
+        if (ptr >= pool->start && ptr < pool->end) {
+            void *block_start = (void*)((uint64_t)ptr & VALUE_MASK) - ALIGN16(sizeof(struct block));
+            if ((block_start - pool->start) % pool->block_size == 0) {
+                found = 1;
+                break;
+            }
+        }
+
+        pool = pool->next;
+    }
+
+    if (!found)
+        return 0;
+
+    /* 5 (binary 101), is the tag used for misc kinds of objects whose
+     * value is in the pointer, like nil, #t, #f, void, characters,
+     * etc. */
+    if (IS_PAIR(ptr) ||
+        IS_OBJECT(ptr) ||
+        IS_STRING(ptr) ||
+        IS_CLOSURE(ptr) ||
+        ((uint64_t)ptr & TAG_MASK) == 5)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* this function would cause a false positive stack-buffer-overflow with
+ * address sanitizer. address sanitizer itself says this about the issue:
+ *
+ * HINT: this may be a false positive if your program uses some custom
+      stack unwind mechanism, swapcontext or vfork (longjmp and C++
+      exceptions *are* supported)
+
+ * since we are indeed doing some sort of custom stack unwinding, this
+ * seems to fall exactly into this category. */
+__attribute__((no_sanitize("address")))
+static void gc(void) {
+    uint64_t ss;
+    void *cur_stack = &ss;
+
+    if (now() - last_gc_time < GC_MIN_INTERVAL) {
+        return;
+    }
+
+    struct pool *heaps[] = {
+        pairs_heap,
+        objects_heap,
+        strings_heap,
+        closure0s_heap,
+        closure1s_heap,
+        closure2s_heap,
+        closure3s_heap,
+        closures_heap,
+    };
+    int n_heaps = sizeof(heaps) / sizeof(heaps[0]);
+
+    for (void **p = cur_stack; p < (void**) stack_start; p++) {
+        for (int i = 0; i < n_heaps; ++i) {
+            if (is_valid_value(*p, heaps[i])) {
+                gc_recurse(*p);
+            }
+        }
+    }
+
+    /* free unmarked objects and reset marks */
+    for (int i = 0; i < n_heaps; ++i) {
+        struct pool *pool = heaps[i];
+        while (pool) {
+            for (void *p = pool->start; p < pool->end; p += pool->block_size) {
+                struct block *block = p;
+
+                if (block->in_use && !block->mark) {
+                    void *obj = p + ALIGN16(sizeof(struct block));
+                    if (heaps[i] == strings_heap) {
+                        free(((struct string *) obj)->s);
+                    } else if (heaps[i] == closures_heap) {
+                        free(((struct closure *) obj)->freevars);
+                    } else if (heaps[i] == objects_heap) {
+                        free(((struct object *) obj)->port.filename);
+                        free(((struct object *) obj)->port.string);
+                        free(((struct object *) obj)->symbol.name);
+                    }
+
+                    block->in_use = 0;
+                    pool->in_use_count--;
+                }
+
+                block->mark = 0;
+            }
+
+            pool = pool->next;
+        }
+    }
+
+    /* TODO maybe free empty pools? */
+
+    last_gc_time = now();
+}
+
+static void *alloc_from_heap(struct pool *head) {
+    struct pool *pool = head;
+    while (pool->next && pool->in_use_count == POOL_SIZE) pool = pool->next;
+
+    if (pool->in_use_count > POOL_SIZE * 0.8) {
+        gc();
+    }
+
+    if (pool->in_use_count == POOL_SIZE) { /* reached the last pool */
+        pool = add_pool(pool);
+    }
+
+    for (;;) { /* in case the pool is actually full but the flag not set */
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            int j = (i + pool->next_index) % POOL_SIZE;
+            struct block *block = pool->start + pool->block_size * j;
+            if (!block->in_use) {
+                block->in_use = 1;
+                pool->in_use_count++;
+
+                pool->next_index = (j + 1) % POOL_SIZE;
+
+                /* actual object starts after the block header (i.e. one
+                 * struct block ahead) */
+                return ((void*) block) + ALIGN16(sizeof(struct block));
+            }
+        }
+
+        /* last pool is actually full */
+        pool = add_pool(pool);
+    }
+}
+
+static struct pair *alloc_pair(void) {
+    return alloc_from_heap(pairs_heap);
+}
+
+static struct object *alloc_object(void) {
+    return alloc_from_heap(objects_heap);
+}
+
+static struct string *alloc_string(size_t len, char fill) {
+    struct string *str = alloc_from_heap(strings_heap);
+    str->len = len;
+    str->s = malloc(len);
+    memset(str->s, fill, len);
+    return str;
+}
+
+static struct closure *alloc_closure(int nfreevars) {
+    struct closure *closure;
+    struct closure0 *closure0;
+    struct closure1 *closure1;
+    struct closure2 *closure2;
+    struct closure3 *closure3;
+
+    switch (nfreevars) {
+    case 0:
+        closure0 = alloc_from_heap(closure0s_heap);
+        closure0->freevars = NULL;
+        return (struct closure *) closure0;
+    case 1:
+        closure1 = alloc_from_heap(closure1s_heap);
+        closure1->freevars = closure1->_freevars;
+        return (struct closure *) closure1;
+    case 2:
+        closure2 = alloc_from_heap(closure2s_heap);
+        closure2->freevars = closure2->_freevars;
+        return (struct closure *) closure2;
+    case 3:
+        closure3 = alloc_from_heap(closure3s_heap);
+        closure3->freevars = closure3->_freevars;
+        return (struct closure *) closure3;
+    default:
+        closure = alloc_from_heap(closures_heap);
+        closure->freevars = calloc(1, nfreevars * sizeof(value));
+        return closure;
+    }
+}
+
+/******************************************/
+
 static void cleanup(void) {}
 
 static value envget(environment env, int index) {
@@ -168,7 +514,7 @@ static value envget(environment env, int index) {
 
 static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
     va_list args;
-    struct closure *closure = calloc(1, sizeof(struct closure) + nfreevars * sizeof(value));
+    struct closure *closure = alloc_closure(nfreevars);
     closure->func = func;
     closure->n_args = nargs;
     closure->n_freevars = nfreevars;
@@ -181,7 +527,7 @@ static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
 }
 
 static value make_pair(value car, value cdr) {
-    struct pair *pair = malloc(sizeof(struct pair));
+    struct pair *pair = alloc_pair();
     pair->car = car;
     pair->cdr = cdr;
     return PAIR(pair);
@@ -196,11 +542,8 @@ static value reverse_list(value list, value acc) {
 }
 
 static value make_string(const char *s, size_t len) {
-    struct string *p = malloc(sizeof(struct string));
-    p->s = malloc(len + 1);
-    p->len = len;
+    struct string *p = alloc_string(len, '\0');
     memcpy(p->s, s, len);
-    p->s[len] = 0;
     return STRING(p);
 }
 
@@ -517,14 +860,6 @@ static value symbol_to_string(value v) {
     return make_string(sym->name, sym->name_len);
 }
 
-static value alloc_string(size_t len, char fill) {
-    struct string *str = malloc(sizeof(struct string));
-    str->len = len;
-    str->s = malloc(len);
-    memset(str->s, fill, len);
-    return STRING(str);
-}
-
 static int string_cmp(struct string *s1, struct string *s2) {
     size_t min_len = s1->len < s2->len ? s1->len : s2->len;
     int cmp = memcmp(s1->s, s2->s, min_len);
@@ -696,7 +1031,7 @@ static value primcall_delete_file(environment env, enum call_flags flags, int na
     free(filenamez);
 
     if (ret) {
-        struct object *err = malloc(sizeof(struct object));
+        struct object *err = alloc_object();
         err->type = OBJ_ERROR;
         err->error.type = ERR_FILE;
         err->error.err_no = errno;
@@ -790,7 +1125,7 @@ static value primcall_gensym(environment env, enum call_flags flags, int nargs, 
     if (nargs != 0 && nargs != 1) { RAISE("gensym needs zero or one argument"); }
     init_args();
 
-    struct object *sym = malloc(sizeof(struct object));
+    struct object *sym = alloc_object();
     sym->type = OBJ_SYMBOL;
 
     if (nargs == 1) {
@@ -870,7 +1205,7 @@ static value primcall_make_string(environment env, enum call_flags flags, int na
     if (!IS_FIXNUM(n)) { RAISE("make-string first argument should be a number"); }
     if (GET_FIXNUM(n) < 0) { RAISE("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
-    return alloc_string(GET_FIXNUM(n), GET_CHAR(ch));
+    return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
 }
 
 static value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
@@ -924,7 +1259,7 @@ static value primcall_open_input_file(environment env, enum call_flags flags, in
     value filename = next_arg();
     free_args();
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     int filename_len = GET_STRING(filename)->len;
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
@@ -951,7 +1286,7 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
     FILE *fp = fopen(filenamez, "w");
     free(filenamez);
     if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
     obj->port.fp = fp;
@@ -962,7 +1297,7 @@ static value primcall_open_output_file(environment env, enum call_flags flags, i
 
 static value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("open-output-string accepts no arguments"); }
-    struct object *obj = calloc(1, sizeof(struct object));
+    struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
     obj->port.string = malloc(128);
@@ -1095,9 +1430,7 @@ static value primcall_string_append(environment env, enum call_flags flags, int 
         total_size += str->len;
     }
 
-    struct string *concat = malloc(sizeof(struct string));
-    concat->len = total_size;
-    concat->s = malloc(total_size);
+    struct string *concat = alloc_string(total_size, '\0');
 
     reset_args();
     size_t offset = 0;
@@ -1123,9 +1456,7 @@ static value primcall_string_copy(environment env, enum call_flags flags, int na
     if (!IS_FIXNUM(end)) { RAISE("string-copy third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("string-copy start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("string-copy end index is out of range"); }
-    struct string *result = calloc(1, sizeof(struct string));
-    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);
-    result->s = malloc(result->len);
+    struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
@@ -1206,9 +1537,7 @@ static value primcall_substring(environment env, enum call_flags flags, int narg
     if (!IS_FIXNUM(end)) { RAISE("substring third argument is not a number"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("substring start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("substring end index is out of range"); }
-    struct string *result = calloc(1, sizeof(struct string));
-    result->len = GET_FIXNUM(end) - GET_FIXNUM(start);
-    result->s = malloc(result->len);
+    struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
@@ -1262,7 +1591,7 @@ static value primcall_urandom(environment env, enum call_flags flags, int nargs,
     free_args();
 
     FILE *fp = fopen("/dev/urandom", "r");
-    value s = alloc_string(GET_FIXNUM(n), '\0');
+    value s = STRING(alloc_string(GET_FIXNUM(n), '\0'));
     int nread = fread(GET_STRING(s)->s, 1, GET_FIXNUM(n), fp);
     if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
 
