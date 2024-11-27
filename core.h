@@ -175,6 +175,7 @@ struct pool {
     struct pool *prev;
     int is_full;
     int block_size; /* header plus actual object, aligned */
+    int next_index; /* next index alloc_from_heap better start searching at */
     void *start;
 };
 
@@ -183,11 +184,10 @@ struct pool *pairs_heap;
 struct pool *objects_heap;
 struct pool *strings_heap;
 
-static struct pool *create_heap(int object_size) {
-    int block_size = sizeof(struct block) + object_size;
+#define ALIGN16(n) (((n) + 15) & ~15)
 
-    /* align block size to 16 */
-    block_size = (block_size + 15) & ~15;
+static struct pool *create_heap(int object_size) {
+    int block_size = ALIGN16(sizeof(struct block)) + ALIGN16(object_size);
 
     struct pool *pool = calloc(1, sizeof(struct pool) + block_size * POOL_SIZE);
     pool->prev = NULL;
@@ -202,12 +202,15 @@ static struct pool *create_heap(int object_size) {
 static struct pool *add_pool(struct pool *pool) {
     while (pool->next) pool = pool->next;
 
-    struct pool *new_pool = calloc(1, sizeof(struct pool) + pool->block_size * POOL_SIZE);
+    int header_size = ALIGN16(sizeof(struct pool));
+    struct pool *new_pool = calloc(1, header_size + pool->block_size * POOL_SIZE);
+    pool->next = new_pool;
     new_pool->prev = pool;
     new_pool->next = NULL;
     new_pool->is_full = 0;
     new_pool->block_size = pool->block_size;
-    new_pool->start = pool + 1;
+    new_pool->next_index = 0;
+    new_pool->start = ((void*) pool) + header_size;
     return new_pool;
 }
 
@@ -222,20 +225,24 @@ static void *alloc_from_heap(struct pool *head) {
         pool = add_pool(pool);
     }
 
-    for (int i = 0; i < POOL_SIZE; ++i) {
-        struct block *block = pool->start + pool->block_size * i;
-        if (!block->in_use) {
-            block->in_use = 1;
+    for (;;) { /* in case the pool is actually full but the flag not set */
+        for (int i = 0; i < POOL_SIZE; ++i) {
+            struct block *block = pool->start + pool->block_size * i;
+            if (!block->in_use) {
+                block->in_use = 1;
 
-            /* actual object starts after the block header (i.e. one
-             * struct block ahead) */
-            return block + 1;
+                pool->next_index = (i + 1) % POOL_SIZE;
+
+                /* actual object starts after the block header (i.e. one
+                 * struct block ahead) */
+                return ((void*) block) + ALIGN16(sizeof(struct block));
+            }
         }
-    }
 
-    /* we should never reach here (famous last words!) */
-    fprintf(stderr, "a pool is full, but is_full is not set!\n");
-    exit(1);
+        /* last pool is actually full */
+        pool->is_full = 1;
+        pool = add_pool(pool);
+    }
 }
 
 static struct pair *alloc_pair(void) {
