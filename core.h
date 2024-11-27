@@ -1058,11 +1058,7 @@ static value primcall_string_to_number(environment env, enum call_flags flags, i
     if (!IS_FIXNUM(base)) { RAISE("string->number second argument must be a number"); }
     if (GET_STRING(str_v)->len == 0) return FALSE;
 
-    /* create a zero terminated version of the string for strtoll */
-    char *str = malloc(GET_STRING(str_v)->len + 1);
-    memcpy(str, GET_STRING(str_v)->s, GET_STRING(str_v)->len);
-    str[GET_STRING(str_v)->len] = 0;
-
+    char *str = strz(str_v);
     char *endptr;
     int64_t result = strtoll(str, &endptr, GET_FIXNUM(base));
     if (endptr != str + GET_STRING(str_v)->len) { free(str); return FALSE; }
