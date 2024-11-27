@@ -297,9 +297,8 @@ static value reverse_list(value list, value acc) {
 }
 
 static value make_string(const char *s, size_t len) {
-    struct string *p = alloc_string(len + 1, '\0');
+    struct string *p = alloc_string(len, '\0');
     memcpy(p->s, s, len);
-    p->s[len] = 0;
     return STRING(p);
 }
 
