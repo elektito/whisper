@@ -161,8 +161,85 @@ static const char **cmdline_argv;
 
 /************ memory management ***********/
 
+/* number of blocks/objects in a pool */
+#define POOL_SIZE 1024
+
+/* this is used as a header for all objects we allocate in a pool */
+struct block {
+    uint8_t in_use;
+    uint8_t mark; /* for gc */
+};
+
+struct pool {
+    struct pool *next;
+    struct pool *prev;
+    int is_full;
+    int block_size; /* header plus actual object, aligned */
+    void *start;
+};
+
+/* we're gonna call a linked list of pools, a heap. */
+struct pool *pairs_heap;
+struct pool *objects_heap;
+struct pool *strings_heap;
+
+static struct pool *create_heap(int object_size) {
+    int block_size = sizeof(struct block) + object_size;
+
+    /* align block size to 16 */
+    block_size = (block_size + 15) & ~15;
+
+    struct pool *pool = calloc(1, sizeof(struct pool) + block_size * POOL_SIZE);
+    pool->prev = NULL;
+    pool->next = NULL;
+    pool->is_full = 0;
+    pool->block_size = block_size;
+    pool->start = pool + 1; /* one struct pool ahead */
+
+    return pool;
+}
+
+static struct pool *add_pool(struct pool *pool) {
+    while (pool->next) pool = pool->next;
+
+    struct pool *new_pool = calloc(1, sizeof(struct pool) + pool->block_size * POOL_SIZE);
+    new_pool->prev = pool;
+    new_pool->next = NULL;
+    new_pool->is_full = 0;
+    new_pool->block_size = pool->block_size;
+    new_pool->start = pool + 1;
+    return new_pool;
+}
+
+static void init_memory(void) {
+    pairs_heap = create_heap(sizeof(struct pair));
+}
+
+static void *alloc_from_heap(struct pool *head) {
+    struct pool *pool = head;
+    while (pool->next && pool->is_full) pool = pool->next;
+    if (pool->is_full) { /* reached the last pool */
+        pool = add_pool(pool);
+    }
+
+    for (int i = 0; i < POOL_SIZE; ++i) {
+        struct block *block = pool->start + pool->block_size * i;
+        if (!block->in_use) {
+            block->in_use = 1;
+
+            /* actual object starts after the block header (i.e. one
+             * struct block ahead) */
+            return block + 1;
+        }
+    }
+
+    /* we should never reach here (famous last words!) */
+    fprintf(stderr, "a pool is full, but is_full is not set!\n");
+    exit(1);
+}
+
 static struct pair *alloc_pair(void) {
-    return calloc(1, sizeof(struct pair));
+    return alloc_from_heap(pairs_heap);
 }
 
 static struct object *alloc_object(void) {

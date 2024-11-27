@@ -2037,6 +2037,8 @@ compile_program(struct compiler *compiler)
 
     fprintf(fp, "\n");
     fprintf(fp, "int main(int argc, const char *argv[]) {\n");
+    fprintf(fp, "    init_memory();\n");
+    fprintf(fp, "\n");
 
     fprintf(fp, "    n_symbols = %d;\n", compiler->n_symbols);
     fprintf(fp, "    symbols = malloc(sizeof(struct symbol) * %d);\n", compiler->n_symbols);
