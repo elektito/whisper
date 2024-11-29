@@ -163,6 +163,19 @@
 (define (map func . arg-lists)
   (%map func arg-lists '()))
 
+(define (%member obj list compare)
+  (if (null? list)
+      #f
+      (if (compare obj (car list))
+          list
+          (%member obj (cdr list) compare))))
+
+(define (memq obj ls)
+  (%member obj ls eq?))
+
+(define (memv obj ls)
+  (%member obj ls eqv?))
+
 ;; utility
 
 ;; apply the given function to pairs of the given list and return the results as

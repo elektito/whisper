@@ -707,9 +707,7 @@
       (compile-quoted-item func indent (cadr form))))
 
 (define (compile-quasiquote func indent form)
-  (if (!= (length form) 2)
-      (compile-error "quasiquote expects a single argument")
-      (compile-form func indent (qq-quasiquote (cadr form)))))
+  (compile-form func indent (qq-quasiquote form)))
 
 (define (parse-lambda-params form)
   ;; given a lambda form, parse its arguments and return a list with two
