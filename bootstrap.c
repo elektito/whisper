@@ -774,10 +774,17 @@ compile_identifier(struct function *func, int indent, struct value *form)
 
     for (int i = 0; i < func->n_params; ++i) {
         if (func->params[i] == form->identifier.interned) {
-            gen_code(func, indent, "value x%d = %.*s;\n",
-                     varnum,
-                     func->compiler->reader->interned_mangled_len[form->identifier.interned],
-                     func->compiler->reader->interned_mangled[form->identifier.interned]);
+            if (func->parent == NULL) {
+                gen_code(func, indent, "value x%d = symbols[symidx%.*s].value;\n",
+                         varnum,
+                         func->compiler->reader->interned_mangled_len[form->identifier.interned],
+                         func->compiler->reader->interned_mangled[form->identifier.interned]);
+            } else {
+                gen_code(func, indent, "value x%d = %.*s;\n",
+                         varnum,
+                         func->compiler->reader->interned_mangled_len[form->identifier.interned],
+                         func->compiler->reader->interned_mangled[form->identifier.interned]);
+            }
             found = 1;
             break;
         }
@@ -814,7 +821,7 @@ compile_identifier(struct function *func, int indent, struct value *form)
             }
 
             /* it's a global variable */
-            gen_code(func, indent, "value x%d = %.*s;\n", varnum,
+            gen_code(func, indent, "value x%d = symbols[symidx%.*s].value;\n", varnum,
                      func->compiler->reader->interned_mangled_len[form->identifier.interned],
                      func->compiler->reader->interned_mangled[form->identifier.interned]);
 
@@ -1316,6 +1323,10 @@ compile_define(struct function *func, int indent, struct value *form)
         func->params = realloc(func->params, func->n_params * sizeof(interned_string));
         func->params[func->n_params - 1] = var_name;
 
+        /* all global variable names are added to symbol table because their value is
+         * stored and read from the symbol table */
+        add_compiled_symbol(func->compiler, var_name);
+
         if (form->list.length == 2) {
             /* define the variable with a void initial value */
             gen_code(func, indent, "%.*s = VOID;\n", mangled_len, mangled_str);
@@ -1336,7 +1347,7 @@ compile_define(struct function *func, int indent, struct value *form)
         if (func->parent == NULL) {
             /* the variable is only set here, not declared, because it will
              * later be declared as a global variable. */
-            gen_code(func, indent, "%.*s = x%d;\n", mangled_len, mangled_str, varnum);
+            gen_code(func, indent, "symbols[symidx%.*s].value = x%d;\n", mangled_len, mangled_str, varnum);
         } else {
             gen_code(func, indent, "value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
         }
@@ -1360,11 +1371,15 @@ compile_define(struct function *func, int indent, struct value *form)
     func->params = realloc(func->params, func->n_params * sizeof(interned_string));
     func->params[func->n_params - 1] = var_name;
 
+    /* all global variable names are added to symbol table because their value is
+         * stored and read from the symbol table */
+    add_compiled_symbol(func->compiler, var_name);
+
     varnum = compile_function(func, indent, form, 1);
 
     if (func->parent == NULL) {
         /* we are setting a global variable, so no new variable is defined here. */
-        gen_code(func, indent, "%.*s = x%d;\n", mangled_len, mangled_str, varnum);
+        gen_code(func, indent, "symbols[symidx%.*s].value = x%d;\n", mangled_len, mangled_str, varnum);
     } else {
         gen_code(func, indent, "value %.*s = x%d;\n", mangled_len, mangled_str, varnum);
     }
@@ -2011,20 +2026,16 @@ compile_program(struct compiler *compiler)
                 compiler->reader->interned_mangled_len[compiler->symbols[i]],
                 compiler->reader->interned_mangled[compiler->symbols[i]],
                 i);
+        fprintf(fp, "#define symidx%.*s %d\n",
+                compiler->reader->interned_mangled_len[compiler->symbols[i]],
+                compiler->reader->interned_mangled[compiler->symbols[i]],
+                i);
     }
     fprintf(fp, "\n");
 
     /* add function prototypes */
     for (int i = 0; i < compiler->n_functions; ++i) {
         fprintf(fp, "static value %s(environment env, enum call_flags flags, int nargs, ...);\n", compiler->functions[i]->name);
-    }
-    fprintf(fp, "\n");
-
-    /* add startup func variables as globals */
-    for (int i = 0; i < startup_func->n_params; ++i) {
-        fprintf(fp, "static value %.*s;\n",
-                compiler->reader->interned_mangled_len[startup_func->params[i]],
-                compiler->reader->interned_mangled[startup_func->params[i]]);
     }
     fprintf(fp, "\n");
 
@@ -2049,6 +2060,7 @@ compile_program(struct compiler *compiler)
                 compiler->reader->interned_name_len[compiler->symbols[i]],
                 compiler->reader->interned_name[compiler->symbols[i]]);
         fprintf(fp, "    symbols[%d].name_len = %d;\n", i, compiler->reader->interned_name_len[compiler->symbols[i]]);
+        fprintf(fp, "    symbols[%d].value = VOID;\n", i);
     }
     fprintf(fp, "\n");
 

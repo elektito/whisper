@@ -356,6 +356,7 @@
     (if (not (null? symbols))
         (begin
           (format output "#define sym~a SYMBOL(~a)\n" (mangle-name (car symbols)) i)
+          (format output "#define symidx~a ~a\n" (mangle-name (car symbols)) i)
           (loop (+ i 1) (cdr symbols))))))
 
 (define (gen-symbol-table-init program output)
@@ -367,22 +368,13 @@
           (begin
             (format output "    symbols[~a].name = \"~a\";\n" i (symbol->string (car symbols)))
             (format output "    symbols[~a].name_len = ~a;\n" i (string-length (symbol->string (car symbols))))
+            (format output "    symbols[~a].value = VOID;\n" i)
             (loop (+ i 1) (cdr symbols)))))))
-
-(define (gen-global-vars program output)
-  (let ((func (program-init-func program)))
-    (let loop ((params (func-params func)))
-      (if (not (null? params))
-          (begin
-            (format output "static value ~a = VOID;\n" (mangle-name (car params)))
-            (loop (cdr params)))))))
 
 (define (output-program-code program filename)
   (let ((port (open-output-file filename)))
     (display "#include \"core.h\"\n\n" port)
     (gen-symbol-defines program port)
-    (newline port)
-    (gen-global-vars program port)
     (newline port)
     (gen-func-prototypes program port)
     (newline port)
@@ -882,6 +874,10 @@
                 (compile-error "re-defining: ~a" name)
                 (loop (cdr params)))))
 
+      ;; top-level variable names are all interned, since the values of
+      ;; global variables are stored in the symbol table.
+      (intern (func-program func) name)
+
       ;; add the name to the list of current function parameters
       (func-add-param func name)
 
@@ -891,7 +887,7 @@
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
         (if init-form
-            (gen-code func indent "~a = x~a;\n" (mangle-name name) init-varnum))
+            (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum))
         init-varnum))))
 
 (define (compile-if func indent form)
@@ -1159,8 +1155,10 @@
   (let ((meaning (lookup-identifier func form))
         (varnum (func-next-varnum func)))
     (case (meaning-kind meaning)
-      ((local global)
+      ((local)
        (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form)))
+      ((global)
+       (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form)))
       ((free)
        (let ((freevar-idx (func-find-freevar func form)))
          (let ((freevar-idx (if freevar-idx
@@ -1181,7 +1179,7 @@
       ((unknown) (if (func-parent func)
                      (begin
                        (program-add-referenced-var (func-program func) form)
-                       (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form)))
+                       (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form)))
                      (compile-error "unbound identifier: ~a" form)))
 
       (else (error (format "unknown meaning kind: ~a" (meaning-kind meaning)))))

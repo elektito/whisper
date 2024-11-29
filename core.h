@@ -71,6 +71,7 @@ struct string {
 struct symbol {
     size_t name_len;
     char *name;
+    value value;
 };
 
 enum object_type {
