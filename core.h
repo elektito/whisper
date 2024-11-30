@@ -604,6 +604,7 @@ static value make_pair(value car, value cdr) {
     pair->cdr = cdr;
     return PAIR(pair);
 }
+
 static value reverse_list(value list, value acc) {
     if (list == NIL) {
         return acc;
