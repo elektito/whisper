@@ -1563,7 +1563,7 @@ static value primcall_string_set_b(environment env, enum call_flags flags, int n
     free_args();
     if (!IS_STRING(str)) { RAISE("string-set! first argument is not a string"); }
     if (!IS_FIXNUM(idx)) { RAISE("string-set! second argument is not a number"); }
-    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE("string-ref index is out of range"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE("string-set! index is out of range"); }
     if (!IS_CHAR(ch)) { RAISE("string-set! third argument is not a char"); }
     GET_STRING(str)->s[GET_FIXNUM(idx)] = GET_CHAR(ch);
     return VOID;
