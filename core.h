@@ -372,6 +372,9 @@ static void gc_recurse(value v) {
         block->mark = 1;
     } else if (IS_CLOSURE(v)) {
         block->mark = 1;
+        for (int i = 0; i < GET_CLOSURE(v)->n_freevars; ++i) {
+            gc_recurse(GET_CLOSURE(v)->freevars[i]);
+        }
     } else if (IS_STRING(v)) {
         block->mark = 1;
     }
@@ -431,6 +434,11 @@ static void gc(void) {
         return;
     }
 
+    /* recursively mark values accessible from global symbols */
+    for (int i = 0; i < n_symbols; ++i) {
+        gc_recurse(symbols[i].value);
+    }
+
     struct pool *heaps[] = {
         pairs_heap,
         objects_heap,
@@ -443,6 +451,7 @@ static void gc(void) {
     };
     int n_heaps = sizeof(heaps) / sizeof(heaps[0]);
 
+    /* look for values that look like valid pointers on the stack */
     for (void **p = cur_stack; p < (void**) stack_start; p++) {
         for (int i = 0; i < n_heaps; ++i) {
             if (is_valid_value(*p, heaps[i])) {
