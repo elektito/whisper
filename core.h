@@ -175,7 +175,7 @@ struct object {
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 
-#define RAISE(...) { fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
+#define RAISE(...) { print_stacktrace(); fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
 
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
@@ -192,6 +192,68 @@ static struct object current_error_port;
 
 static int cmdline_argc;
 static const char **cmdline_argv;
+
+/*************** stack trace **************/
+
+#ifdef DEBUG
+
+static funcptr *stacktrace = NULL;
+static int stacktrace_size = 0;
+static int stacktrace_cap = 0;
+
+static void enter_proc(funcptr func) {
+    if (stacktrace_size == stacktrace_cap) {
+        stacktrace_cap *= 2;
+        if (stacktrace_cap == 0) {
+            stacktrace_cap = 16;
+        }
+
+        stacktrace = realloc(stacktrace, stacktrace_cap * sizeof(funcptr));
+    }
+
+    stacktrace[stacktrace_size++] = func;
+}
+
+static void leave_proc(void) {
+    stacktrace_size--;
+}
+
+/* unlike most our functions, this one is not static so hopefully it
+ * won't be inlined and be still availble in the debugger, in case we
+ * want to call it directly. */
+void print_stacktrace(void) {
+    if (stacktrace_size == 0) {
+        fprintf(stderr, "Stacktrace is empty.\n");
+        return;
+    }
+
+    fprintf(stderr, "NOTE: unnamed lambdas will not show up in the stack trace.\n");
+
+    int idx = 1;
+    for (int i = 0; i < stacktrace_size; ++i) {
+        char *name;
+        int name_len = 0;
+        for (int j = 0; j < n_symbols; ++j) {
+            if (IS_CLOSURE(symbols[j].value) && GET_CLOSURE(symbols[j].value)->func == stacktrace[i]) {
+                name_len = symbols[j].name_len;
+                name = symbols[j].name;
+                break;
+            }
+        }
+
+        /* unknown names are either let blocks, or unnamed lambdas.
+         * would have been nice if we could detect the difference and
+         * for the lambda's show an entry in the stacktrace. */
+        if (name_len == 0)
+            continue;
+
+        fprintf(stderr, "[%d] %.*s\n", idx++, name_len, name);
+    }
+}
+
+#else
+void print_stacktrace(void) {}
+#endif /* DEBUG */
 
 /************ memory management ***********/
 

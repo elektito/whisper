@@ -266,6 +266,7 @@
         '() ; referenced variables
         #f  ; is test suite?
         0   ; test counter
+        #f  ; debug instrumentation
         ))
 
 (define (program-ports program)
@@ -327,6 +328,12 @@
     (list-set! program 7 c)
     c))
 
+(define (program-debug program)
+  (list-ref program 8))
+
+(define (program-debug-set! program value)
+  (list-set! program 8 value))
+
 (define (program-add-referenced-var program var)
   (let loop ((vars (program-referenced-vars program)))
     (if (null? vars)
@@ -346,6 +353,8 @@
     (if (not (null? funcs))
         (begin
           (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...) {\n" (func-name (car funcs)))
+          (if (program-debug program)
+              (format output "    enter_proc(~a);\n" (func-name (car funcs))))
           (display (get-output-string (func-port (car funcs))) output)
           (format output "}\n")
           (format output "\n")
@@ -771,6 +780,8 @@
           (if (null? body)
               (begin
                 (gen-code new-func 1 "free_args();\n")
+                (if (program-debug (func-program func))
+                    (gen-code new-func 1 "    leave_proc();\n"))
                 (gen-code new-func 1 "return x~a;\n" varnum))
               (let ((form (car body)))
                 (loop (cdr body) (compile-form new-func 1 form)))))
@@ -1235,6 +1246,7 @@
         #f ; c output file
         #f ; executable output file
         #f ; delete executable
+        #f ; debug
         "" ; cflags
         ))
 
@@ -1286,11 +1298,17 @@
 (define (cmdline-delete-executable-set! cl value)
   (list-set! cl 7 value))
 
-(define (cmdline-cflags cl)
+(define (cmdline-debug cl)
   (list-ref cl 8))
 
-(define (cmdline-cflags-set! cl value)
+(define (cmdline-debug-set! cl value)
   (list-set! cl 8 value))
+
+(define (cmdline-cflags cl)
+  (list-ref cl 9))
+
+(define (cmdline-cflags-set! cl value)
+  (list-set! cl 9 value))
 
 (define (command-line-error fmt . args)
   (apply format (current-error-port) fmt args)
@@ -1333,7 +1351,7 @@
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-o output-file] [-f cflags]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
@@ -1341,6 +1359,7 @@
 \twhether -c is passed or not.
  -f\tuse the given options when invoking the C compiler
  -t\tcompile the program as a test suite
+ -g\tadd debug instrumentation
 " (car (command-line)))
   (exit 0)
   )
@@ -1389,12 +1408,15 @@
     (let ((program (create-program port)))
       (if (cmdline-test args)
           (program-is-test-suite-set! program #t))
+      (if (cmdline-debug args)
+          (program-debug-set! program #t))
       (compile-program program)
       (output-program-code program (cmdline-c-file args))
       (if (not (cmdline-just-compile args))
           (let ((cc (get-environment-variable "CC")))
-            (let ((cc (if cc cc "gcc")))
-              (let ((cmd (format "~a -I. -o ~a ~a ~a" cc (cmdline-executable-file args) (cmdline-cflags args) (cmdline-c-file args))))
+            (let ((cc (if cc cc "gcc"))
+                  (own-cflags (if (program-debug program) " -DDEBUG" "")))
+              (let ((cmd (format "~a -I.~a -o ~a ~a ~a" cc own-cflags (cmdline-executable-file args) (cmdline-cflags args) (cmdline-c-file args))))
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))
