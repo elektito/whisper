@@ -79,6 +79,7 @@ enum object_type {
     OBJ_SYMBOL, /* uninterned symbol */
     OBJ_ERROR,
     OBJ_VECTOR,
+    OBJ_WRAPPED,
 };
 
 enum port_direction {
@@ -117,6 +118,10 @@ struct object {
             value *data;
             int64_t len;
         } vector;
+        struct {
+            value value;
+            value kind;
+        } wrapped;
         struct symbol symbol; /* used for uninterned symbols */
     };
 };
@@ -180,6 +185,7 @@ struct object {
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 #define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
+#define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
 
 #define RAISE(...) { print_stacktrace(); fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
 
@@ -378,6 +384,9 @@ static void gc_recurse(value v) {
             for (int i = 0; i < GET_OBJECT(v)->vector.len; ++i) {
                 gc_recurse(GET_OBJECT(v)->vector.data[i]);
             }
+        } else if (GET_OBJECT(v)->type == OBJ_WRAPPED) {
+            gc_recurse(GET_OBJECT(v)->wrapped.value);
+            gc_recurse(GET_OBJECT(v)->wrapped.kind);
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -759,6 +768,7 @@ static void string_printf(value port, const char *fmt, ...) {
     va_end(args);
 }
 
+static void _write(value v, value port);
 static void print_unprintable(value v, value port) {
     if (IS_CLOSURE(v)) {
         GET_OBJECT(port)->port.printf(port, "#<procedure-%d>", GET_CLOSURE(v)->n_args);
@@ -776,6 +786,12 @@ static void print_unprintable(value v, value port) {
     } else if (IS_ERROR(v)) {
         const char *kind = GET_OBJECT(v)->error.type == ERR_FILE ? "file-" : "";
         GET_OBJECT(port)->port.printf(port, "#<%serror>", kind);
+    } else if (IS_WRAPPED(v)) {
+        GET_OBJECT(port)->port.printf(port, "#<wrapped kind=");
+        _write(GET_OBJECT(v)->wrapped.kind, port);
+        GET_OBJECT(port)->port.printf(port, " value=");
+        _write(GET_OBJECT(v)->wrapped.value, port);
+        GET_OBJECT(port)->port.printf(port, ">");
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
     }
@@ -840,7 +856,6 @@ static void _display(value v, value port) {
     }
 }
 
-static void _write(value v, value port);
 static void _write_pair(struct pair *v, value port, int in_the_middle) {
     if (!in_the_middle) GET_OBJECT(port)->port.printf(port, "(");
     _write(v->car, port);
@@ -1740,6 +1755,16 @@ static value primcall_urandom(environment env, enum call_flags flags, int nargs,
     return s;
 }
 
+static value primcall_unwrap(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("unwrap needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    if (!IS_WRAPPED(v)) { RAISE("unwrap argument is not a wrapped object"); }
+    return GET_OBJECT(v)->wrapped.value;
+}
+
 static value primcall_vecotr_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("vector? needs a single argument"); }
     init_args();
@@ -1786,6 +1811,38 @@ static value primcall_vector_set_b(environment env, enum call_flags flags, int n
 static value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("void accepts no arguments"); }
     return VOID;
+}
+
+static value primcall_wrap(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("wrap needs two arguments"); }
+    init_args();
+    value v = next_arg();
+    value kind = next_arg();
+    free_args();
+
+    struct object *w = alloc_object();
+    w->type = OBJ_WRAPPED;
+    w->wrapped.value = v;
+    w->wrapped.kind = kind;
+    return OBJECT(w);
+}
+
+static value primcall_wrapped_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("wrapped? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_WRAPPED(v));
+}
+
+static value primcall_wrapped_kind(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("wrapped-kind needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    if (!IS_WRAPPED(v)) { RAISE("wrapped-kind argument is not a wrapped object"); }
+    return GET_OBJECT(v)->wrapped.kind;
 }
 
 static value primcall_write(environment env, enum call_flags flags, int nargs, ...) {
