@@ -781,7 +781,7 @@
               (begin
                 (gen-code new-func 1 "free_args();\n")
                 (if (program-debug (func-program func))
-                    (gen-code new-func 1 "    leave_proc();\n"))
+                    (gen-code new-func 1 "leave_proc();\n"))
                 (gen-code new-func 1 "return x~a;\n" varnum))
               (let ((form (car body)))
                 (loop (cdr body) (compile-form new-func 1 form)))))
@@ -1331,6 +1331,9 @@
              (loop (cdr cl)))
             ((string=? (car cl) "-t")
              (cmdline-test-set! args #t)
+             (loop (cdr cl)))
+            ((string=? (car cl) "-g")
+             (cmdline-debug-set! args #t)
              (loop (cdr cl)))
             ((string=? (car cl) "-f")
              (if (null? (cdr cl))
