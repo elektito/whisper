@@ -116,7 +116,6 @@ struct object {
         struct {
             value *data;
             int64_t len;
-            int64_t cap;
         } vector;
         struct symbol symbol; /* used for uninterned symbols */
     };
@@ -480,15 +479,28 @@ static void gc(void) {
                 struct block *block = p;
 
                 if (block->in_use && !block->mark) {
-                    void *obj = p + ALIGN16(sizeof(struct block));
+                    void *v = p + ALIGN16(sizeof(struct block));
                     if (heaps[i] == strings_heap) {
-                        free(((struct string *) obj)->s);
+                        free(((struct string *) v)->s);
                     } else if (heaps[i] == closures_heap) {
-                        free(((struct closure *) obj)->freevars);
+                        free(((struct closure *) v)->freevars);
                     } else if (heaps[i] == objects_heap) {
-                        free(((struct object *) obj)->port.filename);
-                        free(((struct object *) obj)->port.string);
-                        free(((struct object *) obj)->symbol.name);
+                        struct object *obj = (struct object *) v;
+                        switch (obj->type) {
+                        case OBJ_PORT:
+                            free(obj->port.filename);
+                            free(obj->port.string);
+                            break;
+                        case OBJ_SYMBOL:
+                            free(obj->symbol.name);
+                            break;
+                        case OBJ_VECTOR:
+                            free(obj->vector.data);
+                            break;
+                        default:
+                            /* do nothing */
+                            break;
+                        }
                     }
 
                     block->in_use = 0;
@@ -596,19 +608,6 @@ static value envget(environment env, int index) {
     return vars[index];
 }
 
-static uint64_t next_power_of_two(uint64_t n) {
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    n |= n >> 32;
-    n++;
-
-    return n;
-}
-
 static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
     va_list args;
     struct closure *closure = alloc_closure(nfreevars);
@@ -649,8 +648,7 @@ static value make_vector(size_t len, value fill) {
     struct object *obj = alloc_object();
     obj->type = OBJ_VECTOR;
     obj->vector.len = len;
-    obj->vector.cap = next_power_of_two(len);
-    obj->vector.data = calloc(obj->vector.cap, sizeof(value));
+    obj->vector.data = calloc(obj->vector.len, sizeof(value));
     return OBJECT(obj);
 }
 
