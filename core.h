@@ -78,6 +78,7 @@ enum object_type {
     OBJ_PORT,
     OBJ_SYMBOL, /* uninterned symbol */
     OBJ_ERROR,
+    OBJ_VECTOR,
 };
 
 enum port_direction {
@@ -112,6 +113,11 @@ struct object {
             enum error_type type;
             int err_no;
         } error;
+        struct {
+            value *data;
+            int64_t len;
+            int64_t cap;
+        } vector;
         struct symbol symbol; /* used for uninterned symbols */
     };
 };
@@ -174,6 +180,7 @@ struct object {
 #define IS_OBJECT(v) (((uint64_t)(v) & TAG_MASK) == OBJECT_TAG)
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
+#define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
 
 #define RAISE(...) { print_stacktrace(); fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
 
@@ -368,6 +375,11 @@ static void gc_recurse(value v) {
         gc_recurse(GET_PAIR(v)->cdr);
     } else if (IS_OBJECT(v)) {
         block->mark = 1;
+        if (GET_OBJECT(v)->type == OBJ_VECTOR) {
+            for (int i = 0; i < GET_OBJECT(v)->vector.len; ++i) {
+                gc_recurse(GET_OBJECT(v)->vector.data[i]);
+            }
+        }
     } else if (IS_STRING(v)) {
         block->mark = 1;
     } else if (IS_CLOSURE(v)) {
@@ -584,6 +596,19 @@ static value envget(environment env, int index) {
     return vars[index];
 }
 
+static uint64_t next_power_of_two(uint64_t n) {
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n |= n >> 32;
+    n++;
+
+    return n;
+}
+
 static value make_closure(funcptr func, int nargs, int nfreevars, ...) {
     va_list args;
     struct closure *closure = alloc_closure(nfreevars);
@@ -618,6 +643,15 @@ static value make_string(const char *s, size_t len) {
     struct string *p = alloc_string(len, '\0');
     memcpy(p->s, s, len);
     return STRING(p);
+}
+
+static value make_vector(size_t len, value fill) {
+    struct object *obj = alloc_object();
+    obj->type = OBJ_VECTOR;
+    obj->vector.len = len;
+    obj->vector.cap = next_power_of_two(len);
+    obj->vector.data = calloc(obj->vector.cap, sizeof(value));
+    return OBJECT(obj);
 }
 
 static char *strz(value str) {
@@ -773,6 +807,17 @@ static void _display_pair(struct pair *v, value port, int in_the_middle) {
     }
 }
 
+static void _display_vector(struct object *vec, value port) {
+    GET_OBJECT(port)->port.printf(port, "#(");
+    for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
+        _display(GET_OBJECT(vec)->vector.data[i], port);
+        if (i != GET_OBJECT(vec)->vector.len - 1) {
+            GET_OBJECT(port)->port.printf(port, " ");
+        }
+    }
+    GET_OBJECT(port)->port.printf(port, ")");
+}
+
 static void _display(value v, value port) {
     if (IS_FIXNUM(v)) {
         GET_OBJECT(port)->port.printf(port, "%ld", GET_FIXNUM(v));
@@ -790,6 +835,8 @@ static void _display(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "()");
     } else if (IS_PAIR(v)) {
         _display_pair(GET_PAIR(v), port, 0);
+    } else if (IS_VECTOR(v)) {
+        _display_vector(GET_OBJECT(v), port);
     } else {
         print_unprintable(v, port);
     }
@@ -809,6 +856,17 @@ static void _write_pair(struct pair *v, value port, int in_the_middle) {
         _write(v->cdr, port);
         GET_OBJECT(port)->port.printf(port, ")");
     }
+}
+
+static void _write_vector(struct object *vec, value port) {
+    GET_OBJECT(port)->port.printf(port, "#(");
+    for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
+        _write(GET_OBJECT(vec)->vector.data[i], port);
+        if (i != GET_OBJECT(vec)->vector.len - 1) {
+            GET_OBJECT(port)->port.printf(port, " ");
+        }
+    }
+    GET_OBJECT(port)->port.printf(port, ")");
 }
 
 static void _write_char_literal(value v, value port) {
@@ -908,6 +966,8 @@ static void _write(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "()");
     } else if (IS_PAIR(v)) {
         _write_pair(GET_PAIR(v), port, 0);
+    } else if (IS_VECTOR(v)) {
+        _write_vector(GET_OBJECT(v), port);
     } else {
         print_unprintable(v, port);
     }
@@ -1279,6 +1339,17 @@ static value primcall_make_string(environment env, enum call_flags flags, int na
     if (GET_FIXNUM(n) < 0) { RAISE("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
     return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
+}
+
+static value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { RAISE("make-vector needs one or two arguments"); }
+    init_args();
+    value n = next_arg();
+    value fill = nargs == 1 ? VOID : next_arg();
+    free_args();
+    if (!IS_FIXNUM(n)) { RAISE("make-vector first argument should be a number"); }
+    if (GET_FIXNUM(n) < 0) { RAISE("make-vector first argument is negative"); }
+    return make_vector(GET_FIXNUM(n), fill);
 }
 
 static value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
@@ -1669,6 +1740,49 @@ static value primcall_urandom(environment env, enum call_flags flags, int nargs,
     if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
 
     return s;
+}
+
+static value primcall_vecotr_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("vector? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_VECTOR(v));
+}
+
+static value primcall_vector_length(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("vector-length needs a single argument"); }
+    init_args();
+    value vec = next_arg();
+    free_args();
+    if (!IS_VECTOR(vec)) { RAISE("vector-length argument is not a vector"); }
+    return FIXNUM(GET_OBJECT(vec)->vector.len);
+}
+
+static value primcall_vector_ref(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("vector-ref needs two arguments"); }
+    init_args();
+    value vec = next_arg();
+    value idx = next_arg();
+    free_args();
+    if (!IS_VECTOR(vec)) { RAISE("vector-ref first argument is not a vector"); }
+    if (!IS_FIXNUM(idx)) { RAISE("vector-ref second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { RAISE("vector-ref index is out of range"); }
+    return GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)];
+}
+
+static value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { RAISE("vector-set! needs three arguments"); }
+    init_args();
+    value vec = next_arg();
+    value idx = next_arg();
+    value v = next_arg();
+    free_args();
+    if (!IS_VECTOR(vec)) { RAISE("vector-set! first argument is not a vector"); }
+    if (!IS_FIXNUM(idx)) { RAISE("vector-set! second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { RAISE("vector index is out of range"); }
+    GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)] = v;
+    return VOID;
 }
 
 static value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
