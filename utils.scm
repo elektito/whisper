@@ -277,3 +277,12 @@
           (display #\space)
           (loop (cdr x)))))
   (newline))
+
+(define (vector . args)
+  (let ((vec (make-vector (length args))))
+    (let loop ((args args) (i 0))
+      (if (pair? args)
+          (begin
+            (vector-set! vec i (car args))
+            (loop (cdr args) (+ i 1)))))
+    vec))
