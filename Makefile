@@ -15,6 +15,6 @@ whisper-v2: stage1 core.h $(SRC_FILES)
 	diff stage1 whisper-v2
 
 clean:
-	rm -f whisper-v1 bootstrap stage0 stage1
+	rm -f whisper-v2 stage0 stage1
 
 .PHONY: all clean
