@@ -1,6 +1,7 @@
 (include "utils.scm")
 (include "format.scm")
 (include "qq.scm")
+(include "macro.scm")
 
 (define *indent-size* 4)
 
@@ -589,7 +590,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(and begin case cond define define-record-type if include lambda let or quasiquote quote))
+(define *specials* '(and begin case cond define define-record-type define-syntax if include lambda let or quasiquote quote syntax-rules))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -1068,6 +1069,22 @@
                                                (vector-set! (unwrap x) ,idx value))))
               (loop (cdr fields) (+ idx 1))))))))
 
+(define (compile-define-syntax func indent form)
+  (if (func-parent func)
+      (error "define-syntax only supported at the top-level at the moment"))
+  (if (!= (length form) 3)
+      (compile-error "invalid define-syntax"))
+  (let ((name (cadr form))
+        (transformer (caddr form)))
+    (if (or (not (list? transformer))
+            (not (pair? transformer))
+            (not (symbol? (car transformer))))
+        (compile-error "invalid macro transformer"))
+    (let ((transformer (compile-form func indent transformer)))
+      (if (not (transformer? transformer))
+          (compile-error "invalid macro transformer"))
+      (func-add-binding func name (make-meaning 'macro transformer)))))
+
 (define (compile-special func indent form kind)
   (case kind
     ((and) (compile-and func indent form))
@@ -1076,6 +1093,7 @@
     ((cond) (compile-cond func indent form))
     ((define) (compile-define func indent form))
     ((define-record-type) (compile-define-record-type func indent form))
+    ((define-syntax) (compile-define-syntax func indent form))
     ((include) (compile-include func indent form))
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
@@ -1083,6 +1101,7 @@
     ((or) (compile-or func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
     ((quote) (compile-quote func indent form))
+    ((syntax-rules) (compile-syntax-rules form))
     (else -1)))
 
 (define (compile-call func indent form)
@@ -1179,6 +1198,8 @@
           ((unknown) (if (func-parent func)
                          (compile-call func indent form)
                          (compile-error "unbound identifier: ~a" (car form))))
+          ((macro) (let ((transformer (meaning-info meaning)))
+                     (compile-form func indent ((transformer-func transformer) form))))
           (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
 
 (define (compile-identifier func indent form)

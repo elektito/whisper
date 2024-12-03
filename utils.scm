@@ -24,6 +24,16 @@
 (define (zero? x)
   (eq? x 0))
 
+(define (min . args)
+  (if (null? args)
+      (error "not enough arguments to min")
+      (if (null? (cdr args))
+          (car args)
+          (let ((min-rest (apply min (cdr args))))
+            (if (< (car args) min-rest)
+                (car args)
+                min-rest)))))
+
 (define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
 (define (cdar x) (cdr (car x)))
@@ -132,6 +142,17 @@
               (%append (reverse (car lists)) (cadr lists))
               (%append (reverse (car lists))
                        (apply append (cdr lists)))))))
+
+(define (make-list . args)
+  ;; case-lambda
+  (cond ((= (length args) 1)
+         (make-list (car args) (void)))
+        ((= (length args) 2)
+         (let loop ((n (car args)) (ls '()))
+           (if (zero? n)
+               ls
+               (loop (- n 1) (cons (cadr args) ls)))))
+        (else (error "invalid number of arguments to make-list"))))
 
 (define (any? values)
   (if (null? values)
@@ -307,6 +328,46 @@
             (loop (cdr args) (+ i 1)))))
     vec))
 
+(define (vector-map proc . args)
+  ;; let*
+  (let ((shortest (apply min (map vector-length args))))
+    (let ((result (make-vector shortest)))
+      (let loop ((i 0))
+        (if (= i shortest)
+            result
+            (begin
+              (vector-set! result i (apply proc (mapcar (lambda (x) (vector-ref x i)) args)))
+              (loop (+ i 1))))))))
+
+(define (%vector-copy vector start end)
+  (let ((n (- end start)))
+    (let loop ((r (make-vector n))
+               (vidx start)
+               (ridx 0))
+      (if (= ridx n)
+          r
+          (begin
+            (vector-set! r ridx (vector-ref vector vidx))
+            (loop r (+ 1 vidx) (+ 1 ridx)))))))
+
+(define (vector-copy . args)
+  ;; case-lambda
+  (cond ((= (length args) 1)
+         (%vector-copy vector 0 (vector-length (car args))))
+        ((= (length args) 2)
+         (%vector-copy vector (cadr args) (vector-length (car args))))
+        ((= (length args) 3)
+         (%vector-copy (car args) (cadr args) (caddr args)))
+        (else (error "invalid number of arguments to vector-copy"))))
+
+(define (vector->list vec)
+  (let ((result '()))
+    (let loop ((i 0)
+               (result '()))
+      (if (< i (vector-length vec))
+          (loop (+ i 1) (cons (vector-ref vec i) result))
+          (reverse result)))))
+
 (define (list->vector ls)
   (if (not (list? ls))
       (error "list->vector needs a proper list"))
@@ -316,3 +377,50 @@
         (begin
           (vector-set! vec i (car ls))
           (loop (+ i 1) (cdr ls) vec)))))
+
+(define (%vector-append v1 v2)
+  (let ((result (make-vector (+ (vector-length v1) (vector-length v2)))))
+    (vector-copy! result 0 v1)
+    (vector-copy! result (vector-length v1) v2)))
+
+(define (vector-append . args)
+  ;; case-lambda
+  (cond ((= (length args) 0)
+         #())
+        ((= (length args) 1)
+         (vector-copy (car args)))
+        ((= (length args) 2)
+         (%vector-append (car args) (cadr args)))
+        (else (%vector-append (%vector-append (car args) (cadr args))
+                              (apply vector-append (cddr args))))))
+
+(define (%vector-copy! to at from start end)
+  (let ((n (- end start)))
+    (let loop ((from-idx start) (to-idx at))
+      (if (= from-idx end)
+          to
+          (begin
+            (vector-set! to to-idx (vector-ref from from-idx))
+            (loop (+ from-idx 1) (+ to-idx 1)))))))
+
+(define (vector-copy! . args)
+  ;; case-lambda
+  (cond ((= (length args) 3)
+         (let ((to (car args))
+               (at (cadr args))
+               (from (caddr args)))
+           (%vector-copy! to at from 0 (vector-length from))))
+        ((= (length args) 4)
+         (let ((to (list-ref args 0))
+               (at (list-ref args 1))
+               (from (list-ref args 2))
+               (start (list-ref args 3)))
+           (%vector-copy! to at from start (vector-length from))))
+        ((= (length args) 5)
+         (let ((to (list-ref args 0))
+               (at (list-ref args 1))
+               (from (list-ref args 2))
+               (start (list-ref args 3))
+               (end (list-ref args 4)))
+           (%vector-copy! to at from start end)))
+        (else (error "invalid number of arguments to vector-copy!"))))
