@@ -126,7 +126,7 @@
         ((vector? pattern) (let loop ((results '()) (i 0))
                              (if (= i (vector-length pattern))
                                  results
-                                 (loop (vector-append results (get-all-pattern-vars (vector-ref pattern i) literals ellipsis))
+                                 (loop (append results (get-all-pattern-vars (vector-ref pattern i) literals ellipsis))
                                        (+ i 1)))))
         (else '())))
 
@@ -156,8 +156,9 @@
               (merge-stores store (reverse stores) var literals ellipsis)
               #t)
             (begin
-              (m (car x) sub-store)
-              (loop (cdr x) (new-store) (cons sub-store stores))))))))
+              (if (m (car x) sub-store)
+                  (loop (cdr x) (new-store) (cons sub-store stores))
+                  #f)))))))
 
 (define (compile-pair pair literals ellipsis)
   (if (starts-with-seq? pair ellipsis)
@@ -237,8 +238,8 @@
 ;;(let ((m (compile-pattern '#(a #(x ...) b) '(else) '...)))
 ;;  (print (m '#(1 #(2 3 4 5) 6) (new-store))))
 
-(let ((m (compile-pattern '((a x ... b)...) '(else) '...))
+(let ((m (compile-pattern '(#(a x ... b)...) '(else) '...))
       (s (new-store)))
-  (print (m '((1 2 3 4 5 6) (10 20 30) (a b c d)) s))
+  (print (m '(#(1 2 3 4 5 6) #(10 20 30) #(a b c d)) s))
   (print s)
   )
