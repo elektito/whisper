@@ -35,8 +35,8 @@
   (print "store-add-value" var value)
   (let ((p (assq var (store-vars store))))
     (if p
-        (sequence-add! (cdr p) value)
-        (store-vars-set! store (cons `(,var . ,(sequence value)) (store-vars store))))))
+        (error "duplicate variable")
+        (store-vars-set! store (cons `(,var . ,value) (store-vars store))))))
 
 (define (store-get-var store var)
   (let ((p (assq var (store-vars store))))
@@ -117,16 +117,23 @@
     (store-add-value store var x)
     #t))
 
+(define (merge-stores main subs)
+  (print "MAIN:" (store-vars main))
+  (print "    SUBS:" (length subs) (map (lambda (s) (store-vars s)) subs)))
+
 (define (compile-seq var literals ellipsis)
-  (if (symbol? var)
-      (lambda (x store)
-        (store-add-seq var x)
-        #t)
-      (let ((m (compile-pattern var literals ellipsis)))
-        (lambda (x store)
-          (if (vector? x)
-              (all? (vector->list (vector-map (lambda (x) (m x store)) x)))
-              (all? (map (lambda (x) (m x store)) x)))))))
+  (let ((m (compile-pattern var literals ellipsis)))
+    (lambda (x store)
+      (let loop ((x (if (vector? x) (vector->list x) x))
+                 (sub-store (new-store))
+                 (stores '()))
+        (if (null? x)
+            (begin
+              (merge-stores store stores)
+              #t)
+            (begin
+              (m (car x) sub-store)
+              (loop (cdr x) (new-store) (cons sub-store stores))))))))
 
 (define (compile-pair pair literals ellipsis)
   (if (starts-with-seq? pair ellipsis)
