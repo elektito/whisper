@@ -1,6 +1,50 @@
 (import (trick))
 
-(define (store-add-value x v)
+(define-record-type <sequence>
+  (make-sequence)
+  sequence?
+  (items sequence-items sequence-items-set!))
+
+(define (new-sequence)
+  (let ((seq (make-sequence)))
+    (sequence-items-set! seq #())
+    seq))
+
+(define (sequence-add! seq value)
+  (sequence-items-set! seq (vector-append (sequence-items seq) (vector value))))
+
+(define (sequence . items)
+  (let loop ((seq (new-sequence)) (items items))
+    (if (null? items)
+        seq
+        (begin
+          (sequence-add! seq (car items))
+          (loop seq (cdr items))))))
+
+(define-record-type <store>
+  (make-store)
+  store?
+  (vars store-vars store-vars-set!))
+
+(define (new-store)
+  (let ((store (make-store)))
+    (store-vars-set! store '())
+    store))
+
+(define (store-add-value store var value)
+  (print "store-add-value" var value)
+  (let ((p (assq var (store-vars store))))
+    (if p
+        (sequence-add! (cdr p) value)
+        (store-vars-set! store (cons `(,var . ,(sequence value)) (store-vars store))))))
+
+(define (store-get-var store var)
+  (let ((p (assq var (store-vars store))))
+    (if p
+        (cdr p)
+        #f)))
+
+(define (x-store-add-value x v)
   (if (not (symbol? x))
       (error "store-add-value variable name not a symbol"))
   (print "store-add-value" x v))
@@ -52,7 +96,7 @@
 
 (define (compile-variable var)
   (lambda (x store)
-    (store-add-value var x)
+    (store-add-value store var x)
     #t))
 
 (define (compile-seq var literals ellipsis)
@@ -138,7 +182,8 @@
         ((atom? pat) (compile-literal pat))
         (else (compile-pair pat literals ellipsis))))
 
-(let ((m (compile-pattern #(a (b x) ... c) '(else) '...)))
-  (print (m #(1 (2 3) (4 5) 6) '())))
-;(let ((m (compile-pattern '#(a #(x ...) b) '(else) '...)))
-;  (print (m '#(1 #(2 3 4 5) 6) '())))
+(let ((m (compile-pattern #(a (b x ...) ... c) '(else) '...)))
+  (print (m #(1 (2 3 a b) (4 5 foo bar spam) 6) (new-store))))
+
+;;(let ((m (compile-pattern '#(a #(x ...) b) '(else) '...)))
+;;  (print (m '#(1 #(2 3 4 5) 6) (new-store))))
