@@ -232,6 +232,52 @@
         ((atom? pat) (compile-literal pat))
         (else (compile-pair pat literals ellipsis))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (expand-sequence element store ellipsis)
+  (let ((lens (map (lambda (var)
+                     (let ((value (store-get-var store var)))
+                       (and (sequence? value)
+                            (sequence-length value))))
+                   (store-get-all-vars store))))
+    (unless (all? lens)
+      (error "non-sequence variable spliced in template"))
+    (unless (apply = lens)
+      (error "not all sequences are the same length"))
+    xxxxx))
+
+(define (expand-vector vec store ellipsis)
+  (let loop ((result #()) (i 0) (veclen (vector-length vec)))
+    (if (= i veclen)
+        result
+        (if (and (< i (- veclen 1))
+                 (eq? ellipsis (vector-ref vec (+ i 1))))
+            (let ((expanded (expand-sequence (vector-ref vec i) store ellipsis)))
+              (loop (vector-append result (list->vector expanded))
+                    (+ i 1)
+                    veclen))
+            (let ((expanded (expand (vector-ref vec i) store ellipsis)))
+              (loop (vector-append result (vector expanded)) (+ i 1) veclen))))))
+
+(define (expand-pair pair store ellipsis)
+  (let loop ((result '()) (pair pair))
+    (if (atom? pair)
+        (append result pair)
+        (if (and (pair? (cdr pair))
+                 (eq? ellipsis (cadr pair)))
+            (let ((expanded (expand-sequence (car pair) store ellipsis)))
+              (loop (append result expanded) (cdr pair)))
+            (let ((expanded (expand (car pair) store ellipsis)))
+              (loop (append result (list expanded)) (cdr pair)))))))
+
+(define (expand template store ellipsis)
+  (cond ((store-has-var store template) (store-get-var store template))
+        ((vector? template) (expand-vector template store ellipsis))
+        ((atom? template) template)
+        (else (expand-pair template store ellipsis))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;;(let ((m (compile-pattern #(a (b x ...) ... c) '(else) '...)))
 ;;  (print (m #(1 (2 3 a b) (4 5 foo bar spam) 6) (new-store))))
 
