@@ -60,7 +60,25 @@
        (eq? ellipsis (cadr ls))))
 
 (define (sublist ls start end)
-  (vector->list (vector-copy (list->vector ls) start end)))
+  (when (negative? start)
+    (error "sublist: start is negative"))
+  (when (< end start)
+    (error "sublist: start is greater than end"))
+  (let loop ((result '()) (i 0) (ls ls))
+    (cond ((null? ls) (if (= i end)
+                          (reverse result)
+                          (error "sublist: list is too short")))
+          ((atom? ls) (if (= i end)
+                          (reverse result)
+                          (error "sublist indices can't span an improper tail")))
+          (else (if (= i end)
+                    (reverse result)
+                    (if (>= i start)
+                        (loop (cons (car ls) result) (+ i 1) (cdr ls))
+                        (loop result (+ i 1) (cdr ls))))))))
+
+;;(define (sublist ls start end)
+;;  (vector->list (vector-copy (list->vector ls) start end)))
 
 ;; length, including the last cdr
 ;; so:
