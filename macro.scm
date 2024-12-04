@@ -117,9 +117,33 @@
     (store-add-value store var x)
     #t))
 
-(define (merge-stores main subs)
-  (print "MAIN:" (store-vars main))
-  (print "    SUBS:" (length subs) (map (lambda (s) (store-vars s)) subs)))
+(define (get-all-pattern-vars pattern literals ellipsis)
+  (cond ((eq? ellipsis pattern) '())
+        ((memq pattern literals) '())
+        ((symbol? pattern) (list pattern))
+        ((pair? pattern) (append (get-all-pattern-vars (car pattern) literals ellipsis)
+                                 (get-all-pattern-vars (cdr pattern) literals ellipsis)))
+        ((vector? pattern) (let loop ((results '()) (i 0))
+                             (if (= i (vector-length pattern))
+                                 results
+                                 (loop (vector-append results (get-all-pattern-vars (vector-ref pattern i) literals ellipsis))
+                                       (+ i 1)))))
+        (else '())))
+
+(define (merge-stores main subs pattern literals ellipsis)
+  (let* ((vars (get-all-pattern-vars pattern literals ellipsis))
+         (seqs (make-list (length vars) (sequence))))
+    (let lp1 ((vars vars) (seq (sequence)))
+      (if (null? vars)
+          (void)
+          (let lp2 ((subs subs))
+            (if (null? subs)
+                (begin
+                  (store-add-value main (car vars) seq)
+                  (lp1 (cdr vars) (sequence)))
+                (begin
+                  (sequence-add! seq (store-get-var (car subs) (car vars)))
+                  (lp2 (cdr subs)))))))))
 
 (define (compile-seq var literals ellipsis)
   (let ((m (compile-pattern var literals ellipsis)))
@@ -129,7 +153,7 @@
                  (stores '()))
         (if (null? x)
             (begin
-              (merge-stores store stores)
+              (merge-stores store (reverse stores) var literals ellipsis)
               #t)
             (begin
               (m (car x) sub-store)
@@ -207,8 +231,14 @@
         ((atom? pat) (compile-literal pat))
         (else (compile-pair pat literals ellipsis))))
 
-(let ((m (compile-pattern #(a (b x ...) ... c) '(else) '...)))
-  (print (m #(1 (2 3 a b) (4 5 foo bar spam) 6) (new-store))))
+;;(let ((m (compile-pattern #(a (b x ...) ... c) '(else) '...)))
+;;  (print (m #(1 (2 3 a b) (4 5 foo bar spam) 6) (new-store))))
 
 ;;(let ((m (compile-pattern '#(a #(x ...) b) '(else) '...)))
 ;;  (print (m '#(1 #(2 3 4 5) 6) (new-store))))
+
+(let ((m (compile-pattern '((a x ... b)...) '(else) '...))
+      (s (new-store)))
+  (print (m '((1 2 3 4 5 6) (10 20 30) (a b c d)) s))
+  (print s)
+  )
