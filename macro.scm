@@ -18,10 +18,13 @@
 (define (sublist ls start end)
   (vector->list (vector-copy (list->vector ls) start end)))
 
+;; length, including the last cdr
+;; so:
+;; (improper-length '(1 2 . 3)) => 3
+;; (improper-length '(1 2 3)) => 4
 (define (improper-length ls)
-  (cond ((null? ls) 0)
-        ((pair? ls) (+ 1 (improper-length (cdr ls))))
-        (else 1)))
+  (cond ((atom? ls) 1)
+        (else (+ 1 (improper-length (cdr ls))))))
 
 (define (%improper-reverse ls acc)
   (if (atom? ls)
@@ -58,15 +61,10 @@
         (store-add-seq var x)
         #t)
       (let ((m (compile-pattern var literals ellipsis)))
-        (if (vector? var)
-            (lambda (x store)
-              (and (vector? x)
-                   (let ((r (vector-map (lambda (x) (m x store)) x)))
-                     (all? (vector->list r)))))
-            (lambda (x store)
-              (and (or (pair? x) (null? x))
-                   (let ((r (map (lambda (x) (m x store)) x)))
-                     (all? r))))))))
+        (lambda (x store)
+          (if (vector? x)
+              (all? (vector->list (vector-map (lambda (x) (m x store)) x)))
+              (all? (map (lambda (x) (m x store)) x)))))))
 
 (define (compile-pair pair literals ellipsis)
   (if (starts-with-seq? pair ellipsis)
@@ -88,7 +86,7 @@
          (rev-matcher (compile-pattern rev literals ellipsis))
          (seq-matcher (compile-seq (car pair) literals ellipsis)))
     (lambda (x store)
-      (let ((n-left (- (improper-length x) rest-len -1)))
+      (let ((n-left (- (improper-length x) rest-len)))
         (and (>= n-left 0)
              (let ((x-end-rev (sublist (improper-reverse x) 0 rest-len))
                    (x-start (sublist x 0 n-left)))
@@ -141,4 +139,6 @@
         (else (compile-pair pat literals ellipsis))))
 
 (let ((m (compile-pattern #(a (b x) ... c) '(else) '...)))
-  (print (m #(1 (2 3) (4 5 6)) '())))
+  (print (m #(1 (2 3) (4 5) 6) '())))
+;(let ((m (compile-pattern '#(a #(x ...) b) '(else) '...)))
+;  (print (m '#(1 #(2 3 4 5) 6) '())))
