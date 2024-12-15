@@ -32,6 +32,9 @@
 (define (sequence->list seq)
   (vector->list (sequence-items seq)))
 
+(define (sequence-ref seq idx)
+  (vector-ref (sequence-items seq) idx))
+
 (define-record-type <store>
   (make-store)
   store?
@@ -279,29 +282,37 @@
         (else (append (get-sequence-vars (car element) store)
                       (get-sequence-vars (cdr element) store)))))
 
-(define (multiply-seqs store vars)
-  (when (null? vars)
-    (error "multiply-seqs cannot be called with zero variables"))
+(define (index-seqs item idx)
+  (cond ((sequence? item) (sequence-ref item idx))
+        ((pair? item) (cons (index-seqs (car item) idx)
+                            (index-seqs (cdr item) idx)))
+        ((vector? item) (vector-map (lambda (x) (index-seqs x idx)) item))
+        (else item)))
 
-  (let ((lens (map (lambda (x) (and (sequence? (store-get-var store x))
-                                    (sequence-length (store-get-var store x))))
-                   vars)))
-    (unless (and (all? lens)
-                 (or (< (length lens) 2)
-                     (apply = lens)))
-      (error "not all sequences are of the same size")))
+(define (find-all-seqs item)
+  (cond ((sequence? item) (list item))
+        ((pair? item) (append (find-all-seqs (car item))
+                              (find-all-seqs (cdr item))))
+        ((vector? item) (apply append (vector->list (vector-map find-all-seqs item))))
+        (else '())))
 
-  (let* ((seqs (map (lambda (x) (store-get-var store x)) vars))
-         (lists (map (lambda (x) (sequence->list x)) seqs))
-         (mult (apply map (lambda args args) lists)))
-    (let loop ((mult mult) (result '()))
-      (if (null? mult)
-          (reverse result)
-          (let ((sub-store (store-copy store)))
-            (store-update-from-alist sub-store
-                                     (map (lambda (x y) (cons x y))
-                                          vars (car mult)))
-            (loop (cdr mult) (cons sub-store result)))))))
+(define (multiply-seqs item)
+  ;; find all sequences in item
+  ;; error if none
+  ;; error if not all have the same length
+  ;; perform a cartesian multiplication: (1 [2 3] [a b]) => (1 2 a) (1 3 b)
+  (let ((seqs (find-all-seqs item)))
+    (when (null? seqs)
+      (error "no sequences in expanded element"))
+    (print "xx" seqs)
+    (unless (or (< (length seqs) 2)
+                (apply = (map sequence-length seqs)))
+      (error "sequences do not have the same sizes"))
+    (let ((len (sequence-length (car seqs))))
+      (let loop ((i 0) (result '()))
+        (if (= i len)
+            (reverse result)
+            (loop (+ i 1) (cons (index-seqs item i) result)))))))
 
 (define (expand-sequence element store ellipsis)
   (let* ((vars (get-sequence-vars element store))
@@ -337,10 +348,20 @@
                (error "lone ellipsis in template")))
           ((and (pair? (cdr item))
                 (eq? ellipsis (cadr item)))
-           (let ((expanded (expand-sequence (car item) store ellipsis)))
-             (if (eq? ellipsis (caddr item))
-                 (error "multiple ellipses not supported yet")
-                 (loop (append result expanded) (cddr item)))))
+           (let ((expanded (expand (car item) store ellipsis)))
+             (let inner ((multiplied (multiply-seqs expanded))
+                         (rest (cddr item)))
+               (if (and (pair? rest)
+                        (eq? ellipsis (car rest)))
+                   (begin
+                     (print "mmm1" multiplied "///" (apply append (map multiply-seqs multiplied)))
+                     (inner (apply append (map multiply-seqs multiplied)) (cdr rest))
+                     )
+                   (begin
+                     (print "mmm2" multiplied)
+                     (loop (append result multiplied) rest)
+                     )
+                     ))))
           (else (let ((expanded (expand (car item) store ellipsis)))
                   (loop (append result (list expanded)) (cdr item)))))))
 
@@ -368,6 +389,13 @@
 
 (print "-------")
 
+(let ((m (compile-pattern '(#(a (x ...) ... b)...) '(else) '...))
+      (s (new-store)))
+  (print (m '(#(1 (2 3 4 5) 6) #(10 (20) 30) #(a (b c) d)) s))
+  (print "xx2" (expand '(foo x ... ... ... bar) s '...)))
+
+(print "-------")
+
 (define st (new-store))
 (store-add-value st 'a 10)
 (store-add-value st 'b 20)
@@ -375,4 +403,5 @@
 (store-add-value st 'd 40)
 (store-add-value st 'e (sequence 1000 2000 3000))
 
-(print (multiply-seqs st '(c)))
+(define st (list 1 2 'foo (sequence 1 2) (sequence 10 20) 4))
+(print (multiply-seqs st))
