@@ -51,7 +51,6 @@
     s))
 
 (define (store-add-value store var value)
-  (print "store-add-value" var value)
   (let ((p (assq var (store-vars store))))
     (if p
         (error "duplicate variable")
@@ -79,16 +78,6 @@
   (unless (null? alist)
     (store-set-var store (caar alist) (cdar alist))
     (store-update-from-alist store (cdr alist))))
-
-(define (x-store-add-value x v)
-  (if (not (symbol? x))
-      (error "store-add-value variable name not a symbol"))
-  (print "store-add-value" x v))
-
-(define (store-add-seq x v)
-  (if (not (symbol? x))
-      (error "store-add-seq variable name not a symbol"))
-  (print "store-add-seq" x v))
 
 (define (starts-with-seq? ls ellipsis)
   (and (pair? ls)
@@ -304,7 +293,6 @@
   (let ((seqs (find-all-seqs item)))
     (when (null? seqs)
       (error "no sequences in expanded element"))
-    (print "xx" seqs)
     (unless (or (< (length seqs) 2)
                 (apply = (map sequence-length seqs)))
       (error "sequences do not have the same sizes"))
@@ -314,26 +302,21 @@
             (reverse result)
             (loop (+ i 1) (cons (index-seqs item i) result)))))))
 
-(define (expand-sequence element store ellipsis)
-  (let* ((vars (get-sequence-vars element store))
-         (stores (if (null? vars) (list store) (multiply-seqs store vars))))
-    (if (null? vars)
-        (error "no sequence variables to expand" element)
-        (let loop ((stores stores) (result '()))
-          (if (null? stores)
-              (reverse result)
-              (loop (cdr stores) (cons (expand element (car stores) ellipsis) result)))))))
-
 (define (expand-vector vec store ellipsis)
   (let loop ((result #()) (i 0) (veclen (vector-length vec)))
     (if (= i veclen)
         result
         (if (and (< i (- veclen 1))
                  (eq? ellipsis (vector-ref vec (+ i 1))))
-            (let ((expanded (expand-sequence (vector-ref vec i) store ellipsis)))
-              (loop (vector-append result (list->vector expanded))
-                    (+ i 1)
-                    veclen))
+            (let ((expanded (expand (vector-ref vec i) store ellipsis)))
+              (let inner ((multiplied (multiply-seqs expanded)) (next (+ i 2)))
+                (if (and (< next (- veclen 1))
+                         (eq? ellipsis (vector-ref vec next)))
+                    (inner (apply append (map multiply-seqs multiplied))
+                           (+ next 1))
+                    (loop (vector-append result (list->vector multiplied))
+                          next
+                          veclen))))
             (let ((expanded (expand (vector-ref vec i) store ellipsis)))
               (loop (vector-append result (vector expanded)) (+ i 1) veclen))))))
 
@@ -353,15 +336,8 @@
                          (rest (cddr item)))
                (if (and (pair? rest)
                         (eq? ellipsis (car rest)))
-                   (begin
-                     (print "mmm1" multiplied "///" (apply append (map multiply-seqs multiplied)))
-                     (inner (apply append (map multiply-seqs multiplied)) (cdr rest))
-                     )
-                   (begin
-                     (print "mmm2" multiplied)
-                     (loop (append result multiplied) rest)
-                     )
-                     ))))
+                   (inner (apply append (map multiply-seqs multiplied)) (cdr rest))
+                   (loop (append result multiplied) rest)))))
           (else (let ((expanded (expand (car item) store ellipsis)))
                   (loop (append result (list expanded)) (cdr item)))))))
 
