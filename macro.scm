@@ -1,5 +1,10 @@
 (import (trick))
 
+(define (deep-copy x)
+  (if (pair? x)
+      (cons (deep-copy (car x)) (deep-copy (cdr x)))
+      x))
+
 (define-record-type <sequence>
   (make-sequence)
   sequence?
@@ -21,6 +26,12 @@
           (sequence-add! seq (car items))
           (loop seq (cdr items))))))
 
+(define (sequence-length seq)
+  (vector-length (sequence-items seq)))
+
+(define (sequence->list seq)
+  (vector->list (sequence-items seq)))
+
 (define-record-type <store>
   (make-store)
   store?
@@ -31,6 +42,11 @@
     (store-vars-set! store '())
     store))
 
+(define (store-copy store)
+  (let ((s (new-store)))
+    (store-vars-set! s (deep-copy (store-vars store)))
+    s))
+
 (define (store-add-value store var value)
   (print "store-add-value" var value)
   (let ((p (assq var (store-vars store))))
@@ -38,11 +54,28 @@
         (error "duplicate variable")
         (store-vars-set! store (cons `(,var . ,value) (store-vars store))))))
 
+(define (store-set-var store var value)
+  (let ((p (assq var (store-vars store))))
+    (if p
+        (set-cdr! p value)
+        (store-add-value var value))))
+
 (define (store-get-var store var)
   (let ((p (assq var (store-vars store))))
     (if p
         (cdr p)
         #f)))
+
+(define (store-has-var store var)
+  (not (not (assq var (store-vars store)))))
+
+(define (store-get-all-vars store)
+  (map car (store-vars store)))
+
+(define (store-update-from-alist store alist)
+  (unless (null? alist)
+    (store-set-var store (caar alist) (cdar alist))
+    (store-update-from-alist store (cdr alist))))
 
 (define (x-store-add-value x v)
   (if (not (symbol? x))
@@ -234,24 +267,55 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define (get-sequence-vars element store)
+  (cond ((symbol? element) (if (store-has-var store element)
+                               (list element)
+                               '()))
+        ((vector? element)
+         (vector->list (vector-map (lambda (x)
+                                     (get-sequence-vars x store))
+                                   element)))
+        ((atom? element) '())
+        (else (append (get-sequence-vars (car element) store)
+                      (get-sequence-vars (cdr element) store)))))
+
+(define (multiply-seqs store vars)
+  (when (null? vars)
+    (error "multiply-seqs cannot be called with zero variables"))
+
+  (let ((lens (map (lambda (x) (and (sequence? (store-get-var store x))
+                                    (sequence-length (store-get-var store x))))
+                   vars)))
+    (unless (and (all? lens)
+                 (or (< (length lens) 2)
+                     (apply = lens)))
+      (error "not all sequences are of the same size")))
+
+  (let* ((seqs (map (lambda (x) (store-get-var store x)) vars))
+         (lists (map (lambda (x) (sequence->list x)) seqs))
+         (mult (apply map (lambda args args) lists)))
+    (let loop ((mult mult) (result '()))
+      (if (null? mult)
+          (reverse result)
+          (let ((sub-store (store-copy store)))
+            (store-update-from-alist sub-store
+                                     (map (lambda (x y) (cons x y))
+                                          vars (car mult)))
+            (loop (cdr mult) (cons sub-store result)))))))
+
 (define (expand-sequence element store ellipsis)
-  (let ((lens (map (lambda (var)
-                     (let ((value (store-get-var store var)))
-                       (and (sequence? value)
-                            (sequence-length value))))
-                   (store-get-all-vars store))))
-    (unless (all? lens)
-      (error "non-sequence variable spliced in template"))
-    (unless (apply = lens)
-      (error "not all sequences are the same length"))
-    (let* ((seqs (map (lambda (x) (store-get-var store var)) (store-get-all-vars store)))
-           (vecs (map (lambda (i) (apply vector (map (lambda (seq) (sequence-ref seq i)) seqs)) (iota n-vars)))))
-      (let loop ((vecs vecs) (results '()))
-        (if (null? vecs)
-            (reverse results)
-            (let* ((sub-store (store-from-vec vars (car vecs)))
-                   (expanded (expand element sub-store ellipsis)))
-              (loop (cdr vecs) (cons expanded results))))))))
+  (print "EXPSEQ" element)
+  (let* ((vars (get-sequence-vars element store))
+         (stores (if (null? vars) (list store) (multiply-seqs store vars))))
+    (if ;;(and (symbol? element)
+        ;;     (not (memq element vars)))
+        ;;(error "non-sequence variable expanded" element)
+        (null? vars)
+        (error "no sequence variables to expand" element)
+        (let loop ((stores stores) (result '()))
+          (if (null? stores)
+              (reverse result)
+              (loop (cdr stores) (cons (expand element (car stores) ellipsis) result)))))))
 
 (define (expand-vector vec store ellipsis)
   (let loop ((result #()) (i 0) (veclen (vector-length vec)))
@@ -273,7 +337,7 @@
         (if (and (pair? (cdr pair))
                  (eq? ellipsis (cadr pair)))
             (let ((expanded (expand-sequence (car pair) store ellipsis)))
-              (loop (append result expanded) (cdr pair)))
+              (loop (append result expanded) (cddr pair)))
             (let ((expanded (expand (car pair) store ellipsis)))
               (loop (append result (list expanded)) (cdr pair)))))))
 
@@ -295,4 +359,16 @@
       (s (new-store)))
   (print (m '(#(1 2 3 4 5 6) #(10 20 30) #(a b c d)) s))
   (print s)
+  (print "xx1" (expand '(foo x ... ... bar) s '...))
   )
+
+(print "-------")
+
+(define st (new-store))
+(store-add-value st 'a 10)
+(store-add-value st 'b 20)
+(store-add-value st 'c (sequence 100 200 300))
+(store-add-value st 'd 40)
+(store-add-value st 'e (sequence 1000 2000 3000))
+
+(print (multiply-seqs st '(c)))
