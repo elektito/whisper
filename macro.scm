@@ -337,7 +337,7 @@
                (error "lone ellipsis in template")))
           ((and (pair? (cdr pair))
                 (eq? ellipsis (cadr pair)))
-           (let inner ((expanded (expand-sequence (car pair) store ellipsis)))
+           (let ((expanded (expand-sequence (car pair) store ellipsis)))
              (if (eq? ellipsis (caddr pair))
                  (error "multiple ellipses not supported yet")
                  (loop (append result expanded) (cddr pair)))))
