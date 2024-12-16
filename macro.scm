@@ -399,8 +399,8 @@
 (store-add-value st 'd 40)
 (store-add-value st 'e (sequence 1000 2000 3000))
 
-(define st (list 1 2 'foo (sequence 1 2) (sequence 10 20) 4))
-(print (multiply-seqs st))
+(define st2 (list 1 2 'foo (sequence 1 2) (sequence 10 20) 4))
+(print (multiply-seqs st2))
 
 (print "-------")
 
