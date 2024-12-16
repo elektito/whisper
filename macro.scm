@@ -259,18 +259,6 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define (get-sequence-vars element store)
-  (cond ((symbol? element) (if (store-has-var store element)
-                               (list element)
-                               '()))
-        ((vector? element)
-         (vector->list (vector-map (lambda (x)
-                                     (get-sequence-vars x store))
-                                   element)))
-        ((atom? element) '())
-        (else (append (get-sequence-vars (car element) store)
-                      (get-sequence-vars (cdr element) store)))))
-
 (define (index-seqs item idx)
   (cond ((sequence? item) (sequence-ref item idx))
         ((pair? item) (cons (index-seqs (car item) idx)
