@@ -286,3 +286,13 @@
             (vector-set! vec i (car args))
             (loop (cdr args) (+ i 1)))))
     vec))
+
+(define (list->vector ls)
+  (if (not (list? ls))
+      (error "list->vector needs a proper list"))
+  (let loop ((i 0) (ls ls) (vec (make-vector (length ls))))
+    (if (null? ls)
+        vec
+        (begin
+          (vector-set! vec i (car ls))
+          (loop (+ i 1) (cdr ls) vec)))))

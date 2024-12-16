@@ -208,6 +208,10 @@
   (let ((ch (peek-char port)))
     (cond ((eof-object? ch) (compile-error "unexpected eof after sharp"))
           ((char=? #\\ ch) (read-char-literal port))
+          ((char=? #\( ch) (let ((ls (read-list port)))
+                             (if (not (list? ls))
+                                 (compile-error "bad vector literal: #~s" ls)
+                                 (list->vector ls))))
           (else (read-sharp-identifier port)))))
 
 (define (read-sharp-identifier port)
@@ -697,6 +701,7 @@
         ((number? form) (compile-form func indent form))
         ((char? form) (compile-form func indent form))
         ((string? form) (compile-form func indent form))
+        ((vector? form) (compile-form func indent form))
         ((symbol? form) (let ((varnum (func-next-varnum func)))
                           (intern (func-program func) form)
                           (gen-code func indent "value x~a = sym~a;\n" varnum (mangle-name form))
@@ -1262,6 +1267,16 @@
       (else (error (format "unknown meaning kind: ~a" (meaning-kind meaning)))))
     varnum))
 
+(define (compile-vector func indent form)
+  (let ((varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a = make_vector(~a, VOID);\n" varnum (vector-length form))
+    (let loop ((i 0))
+      (if (< i (vector-length form))
+          (let ((value-varnum (compile-quoted-item func indent (vector-ref form i))))
+            (gen-code func indent "GET_OBJECT(x~a)->vector.data[~a] = x~a;\n" varnum i value-varnum)
+            (loop (+ i 1)))))
+    varnum))
+
 (define (compile-form func indent form)
   (cond ((symbol? form) (compile-identifier func indent form))
         ((number? form) (compile-number func indent form))
@@ -1269,6 +1284,7 @@
         ((boolean? form) (compile-bool func indent form))
         ((char? form) (compile-char func indent form))
         ((pair? form) (compile-list func indent form))
+        ((vector? form) (compile-vector func indent form))
         ((eq? form *dot*) (compile-error "unexpected dot (.)"))
         (else (compile-error "don't know how to compile form: ~s" form))))
 
