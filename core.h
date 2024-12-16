@@ -1765,7 +1765,7 @@ static value primcall_unwrap(environment env, enum call_flags flags, int nargs, 
     return GET_OBJECT(v)->wrapped.value;
 }
 
-static value primcall_vecotr_q(environment env, enum call_flags flags, int nargs, ...) {
+static value primcall_vector_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("vector? needs a single argument"); }
     init_args();
     value v = next_arg();
