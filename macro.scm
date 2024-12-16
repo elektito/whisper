@@ -337,6 +337,38 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define (compile-syntax-rules form)
+  (when (< (length form) 3)
+    (error "invalid syntax-rules"))
+  (let* ((ellipsis (if (atom? (cadr form)) (cadr form) '...))
+         (literals (if (atom? (cadr form)) (caddr form) (cadr form)))
+         (rules (let loop ((result '())
+                           (rest (if (atom? (cadr form)) (cdddr form) (cddr form))))
+                  (if (null? rest)
+                      (reverse result)
+                      (if (and (pair? (car rest))
+                               (= 2 (length (car rest)))
+                               (pair? (caar rest)))
+                          (loop (cons (compile-pattern (caar rest) literals ellipsis)
+                                      (cadar rest))
+                                (cdr rest))
+                          (error "invalid rule"))))))
+    (when (null? rules)
+      (error "syntax-rules has no rules"))
+    (lambda (input)
+      (let loop ((rules rules))
+        (print "xxx" rules)
+        (if (null? rules)
+            (error "no rule matched input")
+            (let ((store (new-store))
+                  (pattern (caar rules))
+                  (template (cadar rules)))
+              (if (pattern input store)
+                  (expand template store ellipsis)
+                  (loop (cdr rules)))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;;(let ((m (compile-pattern #(a (b x ...) ... c) '(else) '...)))
 ;;  (print (m #(1 (2 3 a b) (4 5 foo bar spam) 6) (new-store))))
 
@@ -369,3 +401,12 @@
 
 (define st (list 1 2 'foo (sequence 1 2) (sequence 10 20) 4))
 (print (multiply-seqs st))
+
+(print "-------")
+
+(let ((mac (compile-syntax-rules '(syntax-rules ()
+                                    ((and) #t)
+                                    ((and test) test)
+                                    ((and test1 test2 ...)
+                                     (if test1 (and test2 ...) #f))))))
+  (print (mac '(and))))
