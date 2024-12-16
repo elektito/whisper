@@ -357,7 +357,6 @@
       (error "syntax-rules has no rules"))
     (lambda (input)
       (let loop ((rules rules))
-        (print "xxx" rules)
         (if (null? rules)
             (error "no rule matched input")
             (let ((store (new-store))
