@@ -425,57 +425,36 @@
     (display "}\n" port)
     (close-port port)))
 
-(define (add-function program parent params rest-param)
-  (let ((func (list (open-output-string) ; port
-                    0                    ; varnum
-                    (format "f~a" (program-next-funcnum program)) ; name
-                    program
-                    params
-                    parent
-                    rest-param
-                    '() ; freevars
-                    #f  ; self-name (for named let)
-                    )))
-    (list-set! program 1 (cons func (program-funcs program)))
-    func))
+(define-record-type <c-function>
+  (make-cfunc name port varnum)
+  cfunc?
+  (name cfunc-name)
+  (varnum cfunc-varnum cfunc-varnum-set!)
+  (port cfunc-port)
+  (freevars cfunc-freevars cfunc-freevars-set!)
+  (self-name cfunc-self-name  cfunc-self-name-set!))
 
-(define (func-port func)
-  (car func))
+(define-record-type <environment>
+  (make-environment program parent cfunc)
+  environment?
+  (parent environment-parent)
+  (program environment-program)
+  (cfunc environment-cfunc)
+  (bindings environment-bindings environment-bindings-set!))
 
-(define (func-next-varnum func)
-  (let ((n (cadr func)))
-    (list-set! func 1 (+ n 1))
-    n))
+(define (add-cfunc program parent params rest-param)
+  (let ((cfunc (make-cfunc (format "f~a" (program-next-funcnum program))
+                           (open-output-string)
+                           0)))
+    (let ((env (make-environment program parent cfunc)))
+      (program-add-cfunc cfunc)
+      env)))
 
-(define (func-name func)
-  (list-ref func 2))
-
-(define (func-program func)
-  (list-ref func 3))
-
-(define (func-params func)
-  (list-ref func 4))
-
-(define (func-params-set! func params)
-  (list-set! func 4 params))
-
-(define (func-parent func)
-  (list-ref func 5))
-
-(define (func-rest-param func)
-  (list-ref func 6))
-
-(define (func-freevars func)
-  (list-ref func 7))
-
-(define (func-freevars-set! func freevars)
-  (list-set! func 7 freevars))
-
-(define (func-self-name func)
-  (list-ref func 8))
-
-(define (func-self-name-set! func name)
-  (list-set! func 8 name))
+(define (environment-next-varnum env)
+  (let ((cfunc (environment-cfunc env)))
+    (let ((n (cfunc-varnum func)))
+      (cfunc-varnum-set! func (+ n 1))
+      n)))
 
 (define (func-add-freevar func var)
   (let ((new-freevars (append (func-freevars func) (list var))))
