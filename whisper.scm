@@ -261,23 +261,33 @@
 
 ;;;;;; compiler ;;;;;;
 
-(define (create-program port)
-  (list (list port)
-        '() ; funcs
-        0   ; funcnum (function counter)
-        '() ; interned symbols
-        #f  ; init func, to be set later
-        '() ; referenced variables
-        #f  ; is test suite?
-        0   ; test counter
-        #f  ; debug instrumentation
-        ))
+(define-record-type <program>
+  (make-program ports funcs funcnum interned-symbols init-func referenced-vars is-test-suite test-counter debug)
+  program?
+  (ports program-ports program-ports-set!)
+  (funcs program-funcs program-funcs-set!)
+  (funcnum program-funcnum program-funcnum-set!)
+  (interned-symbols program-symbols program-symbols-set!)
+  (init-func program-init-func program-init-func-set!)
+  (referenced-vars program-referenced-vars program-referenced-vars-set!)
+  (is-test-suite program-is-test-suite program-is-test-suite-set!)
+  (test-counter program-test-counter program-test-counter-set!)
+  (debug program-debug program-debug-set!))
 
-(define (program-ports program)
-  (car program))
+(define (create-program port)
+  (make-program (list port)
+                '() ; funcs
+                0   ; funcnum (function counter)
+                '() ; interned symbols
+                #f  ; init func, to be set later
+                '() ; referenced variables
+                #f  ; is test suite?
+                0   ; test counter
+                #f  ; debug instrumentation
+                ))
 
 (define (program-port program)
-  (caar program))
+  (car (program-ports program)))
 
 (define (program-is-main-file program)
   ;; returns true if we are not inside an included file.
@@ -285,58 +295,25 @@
   (null? (cdr (program-ports program))))
 
 (define (program-push-port program port)
-  (let ((ports (list-ref program 0)))
-    (list-set! program 0 (cons port ports))))
+  (let ((ports (program-ports program)))
+    (program-ports-set! program (cons port ports))))
 
 (define (program-pop-port program)
   (let ((ports (program-ports program)))
-    (list-set! program 0 (cdr ports))))
+    (program-ports-set! program (cdr ports))))
 
-(define (program-funcs program)
-  (cadr program))
+(define (program-add-function program func)
+  (program-funcs-set! program (cons func (program-funcs program))))
 
-(define (program-next-funcnum func)
-  (let ((n (caddr func)))
-    (list-set! func 2 (+ n 1))
+(define (program-next-funcnum program)
+  (let ((n (program-funcnum program)))
+    (program-funcnum-set! program (+ n 1))
     n))
-
-(define (program-symbols program)
-  (list-ref program 3))
-
-(define (program-set-symbols program symbols)
-  (list-set! program 3 symbols))
-
-(define (program-init-func program)
-  (list-ref program 4))
-
-(define (program-init-func-set! program func)
-  (list-set! program 4 func))
-
-(define (program-referenced-vars program)
-  (list-ref program 5))
-
-(define (program-referenced-vars-set! program vars)
-  (list-set! program 5 vars))
-
-(define (program-is-test-suite program)
-  (list-ref program 6))
-
-(define (program-is-test-suite-set! program value)
-  (list-set! program 6 value))
-
-(define (program-test-counter program)
-  (list-ref program 7))
 
 (define (program-test-counter-inc! program)
   (let ((c (+ 1 (program-test-counter program))))
-    (list-set! program 7 c)
+    (program-test-counter-set! program c)
     c))
-
-(define (program-debug program)
-  (list-ref program 8))
-
-(define (program-debug-set! program value)
-  (list-set! program 8 value))
 
 (define (program-add-referenced-var program var)
   (let loop ((vars (program-referenced-vars program)))
@@ -425,57 +402,37 @@
     (display "}\n" port)
     (close-port port)))
 
+(define-record-type <function>
+  (make-function port varnum name program params parent rest-param freevars self-name)
+  function?
+  (port func-port)
+  (varnum func-varnum func-varnum-set!)
+  (name func-name)
+  (program func-program)
+  (params func-params func-params-set!)
+  (parent func-parent)
+  (rest-param func-rest-param func-rest-param-set!)
+  (freevars func-freevars func-freevars-set!)
+  (self-name func-self-name func-self-name-set!))
+
 (define (add-function program parent params rest-param)
-  (let ((func (list (open-output-string) ; port
-                    0                    ; varnum
-                    (format "f~a" (program-next-funcnum program)) ; name
-                    program
-                    params
-                    parent
-                    rest-param
-                    '() ; freevars
-                    #f  ; self-name (for named let)
-                    )))
-    (list-set! program 1 (cons func (program-funcs program)))
+  (let ((func (make-function (open-output-string) ; port
+                             0  ; varnum
+                             (format "f~a" (program-next-funcnum program)) ; name
+                             program
+                             params
+                             parent
+                             rest-param
+                             '() ; freevars
+                             #f  ; self-name
+                             )))
+    (program-add-function program func)
     func))
 
-(define (func-port func)
-  (car func))
-
 (define (func-next-varnum func)
-  (let ((n (cadr func)))
-    (list-set! func 1 (+ n 1))
+  (let ((n (func-varnum func)))
+    (func-varnum-set! func (+ n 1))
     n))
-
-(define (func-name func)
-  (list-ref func 2))
-
-(define (func-program func)
-  (list-ref func 3))
-
-(define (func-params func)
-  (list-ref func 4))
-
-(define (func-params-set! func params)
-  (list-set! func 4 params))
-
-(define (func-parent func)
-  (list-ref func 5))
-
-(define (func-rest-param func)
-  (list-ref func 6))
-
-(define (func-freevars func)
-  (list-ref func 7))
-
-(define (func-freevars-set! func freevars)
-  (list-set! func 7 freevars))
-
-(define (func-self-name func)
-  (list-ref func 8))
-
-(define (func-self-name-set! func name)
-  (list-set! func 8 name))
 
 (define (func-add-freevar func var)
   (let ((new-freevars (append (func-freevars func) (list var))))
@@ -691,7 +648,7 @@
 (define (intern program sym)
   (let loop ((i 0) (symbols (program-symbols program)))
     (if (null? symbols)
-        (program-set-symbols program (cons sym (program-symbols program)))
+        (program-symbols-set! program (cons sym (program-symbols program)))
         (if (eq? sym (car symbols))
             i
             (loop (+ i 1) (cdr symbols))))))
@@ -1321,78 +1278,32 @@
 
 ;;;;;; command-line parsing ;;;;;;
 
+(define-record-type <cmdline>
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags)
+  cmdline?
+  (just-compile cmdline-just-compile cmdline-just-compile-set!)
+  (run cmdline-run cmdline-run-set!)
+  (output-file cmdline-output-file cmdline-output-file-set!)
+  (input-file cmdline-input-file cmdline-input-file-set!)
+  (test cmdline-test cmdline-test-set!)
+  (c-file cmdline-c-file cmdline-c-file-set!)
+  (executable-file cmdline-executable-file cmdline-executable-file-set!)
+  (delete-executable cmdline-delete-executable cmdline-delete-executable-set!)
+  (debug cmdline-debug cmdline-debug-set!)
+  (cflags cmdline-cflags cmdline-cflags-set!))
+
 (define (create-cmdline-args)
-  (list #f ; just compile
-        #f ; run
-        #f ; output file
-        #f ; input file
-        #f ; test
-        #f ; c output file
-        #f ; executable output file
-        #f ; delete executable
-        #f ; debug
-        "" ; cflags
-        ))
-
-(define (cmdline-just-compile cl)
-  (list-ref cl 0))
-
-(define (cmdline-just-compile-set! cl value)
-  (list-set! cl 0 value))
-
-(define (cmdline-run cl)
-  (list-ref cl 1))
-
-(define (cmdline-run-set! cl value)
-  (list-set! cl 1 value))
-
-(define (cmdline-output-file cl)
-  (list-ref cl 2))
-
-(define (cmdline-output-file-set! cl value)
-  (list-set! cl 2 value))
-
-(define (cmdline-input-file cl)
-  (list-ref cl 3))
-
-(define (cmdline-input-file-set! cl value)
-  (list-set! cl 3 value))
-
-(define (cmdline-test cl)
-  (list-ref cl 4))
-
-(define (cmdline-test-set! cl value)
-  (list-set! cl 4 value))
-
-(define (cmdline-c-file cl)
-  (list-ref cl 5))
-
-(define (cmdline-c-file-set! cl value)
-  (list-set! cl 5 value))
-
-(define (cmdline-executable-file cl)
-  (list-ref cl 6))
-
-(define (cmdline-executable-file-set! cl value)
-  (list-set! cl 6 value))
-
-(define (cmdline-delete-executable cl)
-  (list-ref cl 7))
-
-(define (cmdline-delete-executable-set! cl value)
-  (list-set! cl 7 value))
-
-(define (cmdline-debug cl)
-  (list-ref cl 8))
-
-(define (cmdline-debug-set! cl value)
-  (list-set! cl 8 value))
-
-(define (cmdline-cflags cl)
-  (list-ref cl 9))
-
-(define (cmdline-cflags-set! cl value)
-  (list-set! cl 9 value))
+  (make-cmdline #f ; just compile
+                #f ; run
+                #f ; output file
+                #f ; input file
+                #f ; test
+                #f ; c output file
+                #f ; executable output file
+                #f ; delete executable
+                #f ; debug
+                "" ; cflags
+                ))
 
 (define (command-line-error fmt . args)
   (apply format (current-error-port) fmt args)
