@@ -403,7 +403,7 @@
     (close-port port)))
 
 (define-record-type <function>
-  (make-function port varnum name program params parent rest-param freevars self-name)
+  (make-function port varnum name program params parent freevars self-name)
   function?
   (port func-port)
   (varnum func-varnum func-varnum-set!)
@@ -411,7 +411,6 @@
   (program func-program)
   (params func-params func-params-set!)
   (parent func-parent)
-  (rest-param func-rest-param func-rest-param-set!)
   (freevars func-freevars func-freevars-set!)
   (self-name func-self-name func-self-name-set!))
 
@@ -420,9 +419,8 @@
                              0  ; varnum
                              (format "f~a" (program-next-funcnum program)) ; name
                              program
-                             params
+                             (if rest-param (append params (list rest-param)) params)
                              parent
-                             rest-param
                              '() ; freevars
                              #f  ; self-name
                              )))
@@ -454,14 +452,12 @@
             (loop (+ i 1) (cdr freevars))))))
 
 (define (func-has-param func param)
-  (if (eq? param (func-rest-param func))
-      #t
-      (let loop ((params (func-params func)))
-        (if (null? params)
-            #f
-            (if (eq? param (car params))
-                #t
-                (loop (cdr params)))))))
+  (let loop ((params (func-params func)))
+    (if (null? params)
+        #f
+        (if (eq? param (car params))
+            #t
+            (loop (cdr params))))))
 
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
