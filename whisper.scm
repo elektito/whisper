@@ -403,7 +403,7 @@
     (close-port port)))
 
 (define-record-type <function>
-  (make-function port varnum name program params parent freevars self-name)
+  (make-function port varnum name program params parent freevars)
   function?
   (port func-port)
   (varnum func-varnum func-varnum-set!)
@@ -411,8 +411,7 @@
   (program func-program)
   (params func-params func-params-set!)
   (parent func-parent)
-  (freevars func-freevars func-freevars-set!)
-  (self-name func-self-name func-self-name-set!))
+  (freevars func-freevars func-freevars-set!))
 
 (define (add-function program parent params rest-param)
   (let ((func (make-function (open-output-string) ; port
@@ -422,7 +421,6 @@
                              (if rest-param (append params (list rest-param)) params)
                              parent
                              '() ; freevars
-                             #f  ; self-name
                              )))
     (program-add-function program func)
     func))
@@ -704,7 +702,7 @@
                 ((atom? params) (list (reverse proper-params) params))
                 (else (loop (cons (car params) proper-params) (cdr params))))))))
 
-(define (compile-lambda func indent form self-name)
+(define (compile-lambda func indent form known-freevars)
   (if (< (length form) 3)
       (compile-error "malformed lambda"))
   (let ((params-and-rest (parse-lambda-params form)))
@@ -714,12 +712,13 @@
                                     func
                                     params
                                     rest-param)))
-        ;; if there's a "self-name" (in a named let block) reserve
-        ;; freevar zero for it. compile-let will later assign its value
-        (if self-name
-            (begin
-              (func-self-name-set! new-func self-name)
-              (func-add-freevar new-func self-name)))
+        ;; add known free vars to the beginning of the list of free vars
+        (let loop ((known-freevars known-freevars))
+          (if (not (null? known-freevars))
+              (begin
+                (func-add-freevar new-func (car known-freevars))
+                (loop (cdr known-freevars)))))
+
         (if (eq? rest-param #f)
             (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch\");\n" (length params))
             (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function\");\n" (length params)))
@@ -765,7 +764,7 @@
                 (begin
                   (if (func-has-param func (car freevars))
                       (gen-code func 0 ", ~a" (mangle-name (car freevars))) ;; generate mangled param name
-                      (if (eq? (car freevars) self-name)
+                      (if (memq (car freevars) known-freevars)
                           (gen-code func 0 ", (value) 0")
                           (let ((freevar (func-find-freevar func (car freevars))))
                             (if freevar
@@ -792,7 +791,7 @@
                (params '())
                (init-forms '()))
       (if (null? bindings)
-          (let ((func-varnum (compile-lambda func indent (append (list 'lambda (reverse params)) body) name)))
+          (let ((func-varnum (compile-lambda func indent (append (list 'lambda (reverse params)) body) (list name))))
             (if name
                 (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum))
             (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
@@ -1078,7 +1077,7 @@
     ((include) (compile-include func indent form))
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
-    ((lambda) (compile-lambda func indent form #f))
+    ((lambda) (compile-lambda func indent form '()))
     ((or) (compile-or func indent form))
     ((quasiquote) (compile-quasiquote func indent form))
     ((quote) (compile-quote func indent form))
@@ -1147,8 +1146,6 @@
                 (if func
                     (cond ((and (func-has-param func identifier)
                                 (func-parent func)) ; only "free" if not top-level
-                           (make-meaning 'free #f))
-                          ((eq? identifier (func-self-name func))
                            (make-meaning 'free #f))
                           ((func-find-freevar func identifier)
                            (make-meaning 'free #f))
