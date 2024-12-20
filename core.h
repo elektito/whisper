@@ -267,6 +267,25 @@ void print_stacktrace(void) {
 void print_stacktrace(void) {}
 #endif /* DEBUG */
 
+const char *find_func_name(funcptr func) {
+    for (int i = 0; i < n_symbols; ++i) {
+        if (IS_CLOSURE(symbols[i].value)) {
+            if (GET_CLOSURE(symbols[i].value)->func == func) {
+                char *buf = malloc(symbols[i].name_len + 1);
+                memcpy(buf, symbols[i].name, symbols[i].name_len);
+                buf[symbols[i].name_len] = 0;
+                return buf;
+            }
+        }
+    }
+
+    const char *unknown = "(unknown)";
+    char *buf = malloc(strlen(unknown) + 1);
+    memcpy(buf, unknown, strlen(unknown));
+    buf[strlen(unknown)] = 0;
+    return buf;
+}
+
 /************ memory management ***********/
 
 #define POOL_SIZE 1048576

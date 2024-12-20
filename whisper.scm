@@ -723,8 +723,8 @@
                 (loop (cdr known-freevars)))))
 
         (if (eq? rest-param #f)
-            (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch\");\n" (length params))
-            (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function\");\n" (length params)))
+            (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
+            (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function: %s\", find_func_name(~a));\n" (length params) (func-name new-func)))
 
         ;; generate code for reading arguments
         (gen-code new-func 1 "init_args();\n")
