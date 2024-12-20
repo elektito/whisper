@@ -176,6 +176,26 @@
 (define (memv obj ls)
   (%member obj ls eqv?))
 
+(define (assoc . args)
+  (cond ((= 2 (length args))
+         (apply assoc (append args (list equal?))))
+        ((= 3 (length args))
+         (let ((obj (car args))
+               (alist (cadr args))
+               (compare (caddr args)))
+           (if (null? alist)
+               #f
+               (if (compare obj (caar alist))
+                   (car alist)
+                   (assoc obj (cdr alist) compare)))))
+        (else (error "invalid number of arguments to assoc"))))
+
+(define (assq obj alist)
+  (assoc obj alist eq?))
+
+(define (assv obj alist)
+  (assoc obj alist eqv?))
+
 ;; utility
 
 ;; apply the given function to pairs of the given list and return the results as

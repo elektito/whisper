@@ -403,13 +403,13 @@
     (close-port port)))
 
 (define-record-type <function>
-  (make-function port varnum name program params parent freevars)
+  (make-function port varnum name program bindings parent freevars)
   function?
   (port func-port)
   (varnum func-varnum func-varnum-set!)
   (name func-name)
   (program func-program)
-  (params func-params func-params-set!)
+  (bindings func-bindings func-bindings-set!)
   (parent func-parent)
   (freevars func-freevars func-freevars-set!))
 
@@ -418,7 +418,8 @@
                              0  ; varnum
                              (format "f~a" (program-next-funcnum program)) ; name
                              program
-                             (if rest-param (append params (list rest-param)) params)
+                             (let ((params (if rest-param (append params (list rest-param)) params)))
+                               (map (lambda (p) (cons p (make-meaning (if parent 'local 'global) #f))) params))
                              parent
                              '() ; freevars
                              )))
@@ -437,9 +438,19 @@
     ;; return the index of the new freevar
     (- (length new-freevars) 1)))
 
-(define (func-add-param func var)
-  (let ((new-params (cons var (func-params func))))
-    (func-params-set! func new-params)))
+(define (func-add-binding func var meaning)
+  (let ((new-bindings (cons (cons var meaning) (func-bindings func))))
+    (func-bindings-set! func new-bindings)))
+
+(define (func-lookup-binding func identifier)
+  (let ((r (assq identifier (func-bindings func))))
+    (if r (cdr r) #f)))
+
+(define (func-has-param func name)
+  (let ((m (func-lookup-binding func name)))
+    (if m
+        (if (eq? 'local (meaning-kind m)) #t #f)
+        #f)))
 
 (define (func-find-freevar func var)
   (let loop ((i 0) (freevars (func-freevars func)))
@@ -448,14 +459,6 @@
         (if (eq? var (car freevars))
             i
             (loop (+ i 1) (cdr freevars))))))
-
-(define (func-has-param func param)
-  (let loop ((params (func-params func)))
-    (if (null? params)
-        #f
-        (if (eq? param (car params))
-            #t
-            (loop (cdr params))))))
 
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
@@ -791,7 +794,7 @@
                (params '())
                (init-forms '()))
       (if (null? bindings)
-          (let ((func-varnum (compile-lambda func indent (append (list 'lambda (reverse params)) body) (list name))))
+          (let ((func-varnum (compile-lambda func indent (append (list 'lambda (reverse params)) body) (if name (list name) '()))))
             (if name
                 (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum))
             (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
@@ -819,7 +822,7 @@
            (< (length form) 3))
       (compile-error "malformed define: ~s" form))
 
-  ;; we could technically allow this, and then further on, declare the
+  ;; we could maybe allow this, and then further on, declare the
   ;; variable in-place as opposed to setting the global variable.
   ;; something like this:
   ;;
@@ -843,18 +846,16 @@
                          #f
                          (caddr form))))
       ;; check for re-definition
-      (let loop ((params (func-params func)))
-        (if (not (null? params))
-            (if (eq? (car params) name)
-                (compile-error "re-defining: ~a" name)
-                (loop (cdr params)))))
+      (let ((meaning (lookup-identifier func name)))
+        (if (and meaning (eq? 'global (meaning-kind meaning)))
+            (compile-error "re-defining: ~a" name)))
 
       ;; top-level variable names are all interned, since the values of
       ;; global variables are stored in the symbol table.
       (intern (func-program func) name)
 
-      ;; add the name to the list of current function parameters
-      (func-add-param func name)
+      ;; add the name to the list of current (top-level) function bindings
+      (func-add-binding func name (make-meaning 'global #f))
 
       ;; copmile init form and either set it as a global variable (if in
       ;; the top-level), or declare it as a variable.
@@ -1113,14 +1114,11 @@
             (car specials)
             (loop (cdr specials))))))
 
-(define (make-meaning kind info)
-  (list kind info))
-
-(define (meaning-kind m)
-  (car m))
-
-(define (meaning-info m)
-  (cadr m))
+(define-record-type <meaning>
+  (make-meaning kind info)
+  meaning?
+  (kind meaning-kind)
+  (info meaning-info))
 
 (define (lookup-identifier func identifier)
   ;; returned types
@@ -1140,27 +1138,26 @@
   ;;
   ;;  - unknown: neither of the previous ones
 
-  (cond ((func-has-param func identifier)
-         (if (func-parent func) (make-meaning 'local #f) (make-meaning 'global #f)))
-        (else (let loop ((func func))
-                (if func
-                    (cond ((and (func-has-param func identifier)
-                                (func-parent func)) ; only "free" if not top-level
-                           (make-meaning 'free #f))
-                          ((func-find-freevar func identifier)
-                           (make-meaning 'free #f))
-                          (else (loop (func-parent func))))
-                    ;;(cond ((lookup-primcall identifier) => (lambda (x) (make-meaning 'primcall x))
-                    ;;      ((lookup-special identifier) => (lambda (x) (make-meaning 'special x)))
-                    ;;      (else 'global))))))
-                    (let ((primcall-info (lookup-primcall identifier)))
-                      (if primcall-info
-                          (make-meaning 'primcall primcall-info)
-                          (let ((special-info (lookup-special identifier)))
-                            (if special-info
-                                (make-meaning 'special special-info)
-                                (make-meaning 'unknown #f))))))))))
-
+  (let ((meaning (func-lookup-binding func identifier)))
+    (if meaning
+        meaning
+        (let loop ((func func))
+          (if (not func)
+              (let ((primcall-info (lookup-primcall identifier)))
+                (if primcall-info
+                    (make-meaning 'primcall primcall-info)
+                    (let ((special-info (lookup-special identifier)))
+                      (if special-info
+                          (make-meaning 'special special-info)
+                          (make-meaning 'unknown #f)))))
+              (let ((meaning (func-lookup-binding func identifier)))
+                (if meaning
+                    (if (eq? (meaning-kind meaning) 'local)
+                        (make-meaning 'free #f)
+                        meaning)
+                    (if (func-find-freevar func identifier)
+                        (make-meaning 'free #f)
+                        (loop (func-parent func))))))))))
 
 (define (compile-list func indent form)
   (if (not (symbol? (car form)))
@@ -1264,10 +1261,9 @@
     ;; check for undefined referenced variables
     (let loop ((vars (program-referenced-vars program)))
       (if (not (null? vars))
-          (begin
-            (if (not (func-has-param func (car vars)))
-                (compile-error "undefined variable: ~a" (car vars)))
-            (loop (cdr vars)))))))
+          (let ((meaning (lookup-identifier func (car vars))))
+            (if (not (and meaning (eq? 'global (meaning-kind meaning))))
+                (compile-error "undefined variable: ~a" (car vars))))))))
 
 ;;;;;; command-line parsing ;;;;;;
 
@@ -1336,7 +1332,10 @@
                    (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
             (else (if (cmdline-input-file args)
-                      (command-line-error "unexpected argument: ~a" (car cl))
+                      (begin
+                        (print "ERR")
+                       (command-line-error "unexpected argument: ~a" (car cl))
+                       )
                       (begin
                         (cmdline-input-file-set! args (car cl))
                         (loop (cdr cl)))))))))
