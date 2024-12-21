@@ -753,9 +753,11 @@
                 (gen-code new-func 1 "free_args();\n")
                 (if (program-debug (func-program func))
                     (gen-code new-func 1 "leave_proc();\n"))
+                (when (negative? varnum)
+                  (compile-error "function body is empty"))
                 (gen-code new-func 1 "return x~a;\n" varnum))
               (let ((form (car body)))
-                (loop (cdr body) (compile-form new-func 1 form)))))
+                (loop (cdr body) (compile-body-level-form new-func form)))))
 
         ;; generate the code for referencing the function
         (let ((varnum (func-next-varnum func)))
@@ -859,7 +861,7 @@
       ;; add the name to the list of current (top-level) function bindings
       (func-add-binding func name (make-meaning 'global #f))
 
-      ;; copmile init form and either set it as a global variable (if in
+      ;; compile init form and either set it as a global variable (if in
       ;; the top-level), or declare it as a variable.
       (let ((init-varnum (compile-form func indent init-form)))
         ;; if not init value, we won't initialize here. all global
@@ -874,18 +876,18 @@
   (let ((cond-varnum (compile-form func indent (cadr form)))
         (one-legged (= (length form) 3)))
     (let ((ret-varnum (func-next-varnum func)))
-          (gen-code func indent "value x~a = VOID;\n" ret-varnum)
-          (gen-code func indent "if (x~a != FALSE) {\n" cond-varnum)
-          (let ((then-varnum (compile-form func (+ indent 1) (caddr form))))
-            (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum then-varnum)
-            (if one-legged
-                (gen-code func indent "}\n")
-                (begin
-                  (gen-code func indent "} else {\n")
-                  (let ((else-varnum (compile-form func (+ indent 1) (cadddr form))))
-                    (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum else-varnum)
-                    (gen-code func indent "}\n")))))
-          ret-varnum)))
+      (gen-code func indent "value x~a = VOID;\n" ret-varnum)
+      (gen-code func indent "if (x~a != FALSE) {\n" cond-varnum)
+      (let ((then-varnum (compile-form func (+ indent 1) (caddr form))))
+        (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum then-varnum)
+        (if one-legged
+            (gen-code func indent "}\n")
+            (begin
+              (gen-code func indent "} else {\n")
+              (let ((else-varnum (compile-form func (+ indent 1) (cadddr form))))
+                (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum else-varnum)
+                (gen-code func indent "}\n")))))
+      ret-varnum)))
 
 (define (compile-include func indent form)
   (if (or (!= (length form) 2)
@@ -896,6 +898,8 @@
   -1)
 
 (define (compile-begin func indent form)
+  (when (= 1 (length form))
+    (compile-error "empty begin expression is not allowed"))
   (let ((ret-varnum (func-next-varnum func)))
     (if (= 1 (length form))
         (if (eq? (func-parent func) #f)
@@ -1156,6 +1160,32 @@
   (newline (current-error-port))
   (exit 1))
 
+(define (is-special func form special)
+  (if (not (and (list? form)
+                (pair? form)
+                (symbol? (car form))))
+      #f
+      (let ((m (lookup-identifier func (car form))))
+        (and (eq? 'special (meaning-kind m))
+             (eq? special (meaning-info m))))))
+
+(define (compile-body-level-form func form)
+  (let ((varnum -1))
+    (if (is-special func form 'begin) ;; top/body level "begin" form
+        (let loop ((rest (cdr form)))
+          (if (null? rest)
+              varnum
+              (begin
+                (compile-body-level-form func (car form))
+                (loop (cdr rest)))))
+        (let ((varnum (compile-form func 1 form))
+              (program (func-program func)))
+          (if (and (program-is-test-suite program)
+                   (program-is-main-file program)
+                   (not (func-parent func)))
+              (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
+          varnum))))
+
 (define (compile-program program)
   (let ((func (add-function program #f '() #f)))
     (program-init-func-set! program func)
@@ -1169,11 +1199,10 @@
               (begin
                 (program-pop-port program)
                 (loop (read (program-port program)))))
-          (let ((varnum (compile-form func 1 form)))
-            (if (and (program-is-test-suite program)
-                     (program-is-main-file program))
-                (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
+          (begin
+            (compile-body-level-form func form)
             (loop (read (program-port program))))))
+
     ;; check for undefined referenced variables
     (let loop ((vars (program-referenced-vars program)))
       (if (not (null? vars))
