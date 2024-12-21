@@ -2,6 +2,7 @@
 (define *qq-append* (gensym "QQ-APPEND"))
 (define *qq-list-star* (gensym "QQ-LIST*"))
 (define *qq-quote* (gensym "QQ-QUOTE"))
+(define *qq-list->vector* (gensym "QQ-LIST->VECTOR"))
 
 (define *qq-simplify* #t)
 
@@ -15,7 +16,8 @@
       (qq-remove-tokens result))))
 
 (define (qq-process form level)
-  (cond ;((vector? form) ...)
+  (cond ((vector? form) (list *qq-list->vector*
+                              (qq-process-list (vector->list form) level)))
         ((atom? form) (if (= level 1)
                           (list *qq-quote* form)
                           form))
@@ -39,7 +41,9 @@
             (append append-form (cons (qq-process-list-tail tail level) '())))))))
 
 (define (qq-process-list-item form level)
-  (cond ; ((vector? form) ...)
+  (cond ((vector? form) (list *qq-list*
+                              (list *qq-list->vector*
+                                    (qq-process-list (vector->list form) level))))
         ((atom? form) (list *qq-quote* (list form)))
         ((qq-is-unquote form) (if (= level 1)
                                   (list *qq-list* (cadr form))
@@ -51,7 +55,8 @@
         (else (list *qq-list* (qq-process-list form level)))))
 
 (define (qq-process-list-tail form level)
-  (cond ;(vector? form) ...)
+  (cond ((vector? form) (list *qq-list->vector*
+                              (qq-process-list (vector->list form) level)))
         ((atom? form) (list *qq-quote* form))
         ((qq-is-unquote form) (if (= level 1)
                                   (cadr form)
@@ -200,6 +205,7 @@
         ((eq? form *qq-append*) 'append)
         ((eq? form *qq-list-star*) 'list*)
         ((eq? form *qq-quote*) 'quote)
+        ((eq? form *qq-list->vector*) 'list->vector)
         ((atom? form) form)
         ((and (eq? (car form) *qq-list-star*)
               (pair? (cddr form))
