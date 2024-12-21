@@ -590,7 +590,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(and begin case define define-record-type define-syntax if include lambda let or quasiquote quote syntax-rules))
+(define *specials* '(and begin define define-record-type define-syntax if include lambda let or quasiquote quote syntax-rules))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -886,41 +886,6 @@
                     (gen-code func indent "}\n")))))
           ret-varnum)))
 
-(define (compile-case func indent form)
-  (if (< (length form) 2)
-      (compile-error "bad case syntax: ~s" form))
-  (let ((key-varnum (compile-form func indent (cadr form))))
-    (let ((ret-varnum (func-next-varnum func)))
-      (gen-code func indent "value x~a = VOID;\n" ret-varnum)
-      (let loop ((clauses (cddr form)) (i 0))
-        (if (null? clauses)
-            ret-varnum
-            (let ((clause (car clauses)))
-              (if (not (pair? clause))
-                  (compile-error "bad case clause: ~s" clause))
-              (if (eq? (car clause) 'else)
-                  (cond ((null? (cdr clause))
-                         (compile-error "bad case else clause: ~s" clause))
-                        ((!= 1 (length clauses))
-                         (compile-error "else is not the last case clause"))
-                        (else (let ((arg-varnums (compile-list-of-forms func (+ indent i) (cdr clause))))
-                                (gen-code func (+ indent i) "x~a = x~a;\n" ret-varnum (last arg-varnums)))))
-                  (if (not (pair? (car clause)))
-                      (compile-error "bad case clause: ~s" clause)
-                      (let ((data-varnums (compile-list-of-quoted-forms func (+ indent i) (car clause))))
-                        (gen-code func (+ indent i) "if (~a) {\n" (string-join (map (lambda (x) (format "x~a == x~a" key-varnum x)) data-varnums) " || "))
-                        (let ((arg-varnums (compile-list-of-forms func (+ indent i 1) (cdr clause))))
-                          (gen-code func (+ indent i 1) "x~a = x~a;\n" ret-varnum (last arg-varnums))
-                          (gen-code func (+ indent i) "} else {\n")
-                          (loop (cdr clauses) (+ i 1)))))))))
-      (let ((have-else (eq? 'else (car (last form)))))
-        (let loop ((i (+ (length form) -3 (if have-else 0 1))))
-          (if (positive? i)
-              (begin
-                (gen-code func (+ indent i -1) "}\n")
-                (loop (- i 1))))))
-      ret-varnum)))
-
 (define (compile-include func indent form)
   (if (or (!= (length form) 2)
           (not (string? (cadr form))))
@@ -1057,7 +1022,6 @@
   (case kind
     ((and) (compile-and func indent form))
     ((begin) (compile-begin func indent form))
-    ((case) (compile-case func indent form))
     ((define) (compile-define func indent form))
     ((define-record-type) (compile-define-record-type func indent form))
     ((define-syntax) (compile-define-syntax func indent form))
