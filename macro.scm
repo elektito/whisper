@@ -85,12 +85,10 @@
        (eq? ellipsis (cadr ls))))
 
 (define (sublist ls start end)
-  ;; when
-  (if (negative? start)
-      (error "sublist: start is negative"))
-  ;; when
-  (if (< end start)
-      (error "sublist: start is greater than end"))
+  (when (negative? start)
+    (error "sublist: start is negative"))
+  (when (< end start)
+    (error "sublist: start is greater than end"))
   (let loop ((result '()) (i 0) (ls ls))
     (cond ((null? ls) (if (= i end)
                           (reverse result)
@@ -283,12 +281,10 @@
   ;; error if not all have the same length
   ;; perform a cartesian multiplication: (1 [2 3] [a b]) => (1 2 a) (1 3 b)
   (let ((seqs (find-all-seqs item)))
-    ;; when
-    (if (null? seqs)
-        (error "no sequences in expanded element"))
-    ;; unless
-    (if (not (or (< (length seqs) 2)
-                 (apply = (map sequence-length seqs))))
+    (when (null? seqs)
+      (error "no sequences in expanded element"))
+    (unless (or (< (length seqs) 2)
+                (apply = (map sequence-length seqs)))
         (error "sequences do not have the same sizes"))
     (let ((len (sequence-length (car seqs))))
       (let loop ((i 0) (result '()))
@@ -347,9 +343,8 @@
   (func transformer-func))
 
 (define (compile-syntax-rules form)
-  ;; when
-  (if (< (length form) 3)
-      (error "invalid syntax-rules"))
+  (when (< (length form) 3)
+    (error "invalid syntax-rules"))
   ;; let*
   (let ((ellipsis (if (symbol? (cadr form)) (cadr form) '...))
         (literals (if (symbol? (cadr form)) (caddr form) (cadr form))))
@@ -365,9 +360,8 @@
                                        result)
                                  (cdr rest))
                            (error "invalid rule"))))))
-      ;; when
-      (if (null? rules)
-          (error "syntax-rules has no rules"))
+      (when (null? rules)
+        (error "syntax-rules has no rules"))
       (make-transformer (lambda (input)
                           (let loop ((rules rules))
                             (if (null? rules)
