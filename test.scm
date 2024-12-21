@@ -534,6 +534,29 @@
 (equal? ``,,3 '`,3)
 (equal? ```,,,3 '``,,3)
 
+;; vectors and quasiquotes
+
+(let ((square (lambda (x) (* x x))))
+  (equal? #(10 5 4 16 9 8)
+          `#(10 5 ,(square 2) ,@(map square '(4 3)) 8)))
+(equal? `#(a `(b ,(foo ,(car '(3 6))) c) d)
+        '#(a `(b ,(foo 3) c) d))
+
+(let ((x 10) (y 20) (z 30))
+  (equal? ```#(x ,,,y z) '``#(x ,,20 z)))
+(equal? ``#(a ,,(+ 1 2) ,(+ 2 3))
+        '`#(a ,3 ,(+ 2 3)))
+(equal? `(x y #(z (w #(1 ,(+ 2 2)) a) b) c)
+        '(x y #(z (w #(1 4) a) b) c))
+(equal? ``(x y #(z (w #(1 ,,(+ 2 2)) a) b) c)
+        '`(x y #(z (w #(1 ,4) a) b) c))
+(equal? '(a b . #(1 2 3 4))
+        `(a b . #(1 ,@(list 2 3) 4)))
+(equal? '(1 `(2 . ,(+ 1 2)))
+        `(1 `(2 . ,(+ 1 2))))
+(equal? '(1 `(2 . ,3))
+        `(1 `(2 . ,,(+ 1 2))))
+
 ;; the following are adopted from husk scheme test suite. see
 ;; https://github.com/justinethier/husk-scheme/blob/master/tests/t-backquote.scm
 (equal? `(list ,(car '(3 6)) 4)
@@ -583,3 +606,96 @@
       (cons 40))
   (equal? '(1 2 3 4 5)
           `(1 ,@'(2 3) ,(+ 2 2) 5)))
+
+;; vectors
+
+(atom? #(1 2 3))
+(vector? #(1 2 3))
+
+(equal? '#(1 2 (a b) 3) #(1 2 (a b) 3))
+(not (equal? #(1 2 '(a b) 3) #(1 2 (a b) 3)))
+
+;;(equal? #(a a a a a) (make-vector 5 'a))
+(= 5 (vector-length (make-vector 5)))
+
+(= 0 (vector-length #()))
+(= 3 (vector-length #(1 2 3)))
+;;(= 3 (vector-length #0=#(1 2 #0#)))
+;;(let ((v #0=#(1 2 #0#)))
+;;  (eq? v (vector-ref v 2)))
+;;(let ((v #(1 2 #0=(10) #0#)))
+;;  (eq? (vector-ref v 2) (vector-ref v 3)))
+;;(let ((v #0=#(1 (2 #0#) 3)))
+;;  (eq? v (cadr (vector-ref v 1))))
+;;(let ((v '#0=(1 #(2 #0#) 3)))
+;;  (eq? v (vector-ref (cadr v) 1)))
+
+(= 2 (vector-ref #(1 2 3) 1))
+
+(let ((v #(1 2 3 4)))
+  (vector-set! v 1 20)
+  (equal? #(1 20 3 4) v))
+
+(eq? '() (vector->list #()))
+(equal? '(a b c) (vector->list #(a b c)))
+;;(equal? '(1 2 #0=#(1 2 #0#)) (vector->list #1=#(1 2 #1#)))
+
+(equal? #(41 62) (vector-map (lambda (x y z) (+ x y z))
+                             #(1 2)
+                             #(10 20)
+                             #(30 40)))
+
+#;(let ((result '()))
+  (vector-for-each (lambda (x y)
+                     (set! result (cons (cons x y) result)))
+                   #(10 20 30 40 50)
+                   #(a b c))
+  (equal? '((30 . c) (20 . b) (10 . a))
+          result))
+
+(equal? #() (vector))
+(equal? #(a b c) (vector 'a 'b 'c))
+
+(equal? #() (string->vector ""))
+(equal? #(#\1 #\2 #\3) (string->vector "123"))
+(equal? #(#\c #\d #\e) (string->vector "abcde" 2))
+(equal? #(#\c #\d) (string->vector "abcde" 2 4))
+
+(equal? "" (vector->string #()))
+(equal? "123" (vector->string #(#\1 #\2 #\3)))
+(equal? "cde" (vector->string #(#\a #\b #\c #\d #\e) 2))
+(equal? "cd" (vector->string #(#\a #\b #\c #\d #\e) 2 4))
+
+(let ((v #(1 2 3 4 5)))
+  (vector-fill! v 'a)
+  (equal? #(a a a a a) v))
+(let ((v #(1 2 3 4 5)))
+  (vector-fill! v 'a 2)
+  (equal? #(1 2 a a a) v))
+(let ((v #(1 2 3 4 5)))
+  (vector-fill! v 'a 2 4)
+  (equal? #(1 2 a a 5) v))
+
+(let* ((v #(1 2))
+       (r (vector-copy v)))
+  (and (not (eq? v r))
+       (equal? v r)))
+(equal? #(3 4 5) (vector-copy #(1 2 3 4 5) 2))
+(equal? #(3 4) (vector-copy #(1 2 3 4 5) 2 4))
+
+(let ((v #(1 2 3 4 5 6 7)))
+  (vector-copy! v 2 #(a b))
+  (equal? v #(1 2 a b 5 6 7)))
+(let ((v #(1 2 3 4 5 6 7)))
+  (vector-copy! v 2 #(a b c d e) 3)
+  (equal? v #(1 2 d e 5 6 7)))
+(let ((v #(1 2 3 4 5 6 7)))
+  (vector-copy! v 3 #(a b c d e) 2 4)
+  (equal? v #(1 2 3 c d 6 7)))
+
+(equal? #() (vector-append))
+(let* ((v #(1 2))
+       (a (vector-append v)))
+  (and (not (eq? v a)) ;; the return value should be a newly allocated vector
+       (equal? #(1 2) a)))
+(equal? #(1 2 3 4 5 6) (vector-append #(1 2) #() #(3 4 5 6)))

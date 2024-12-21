@@ -103,6 +103,10 @@
   (cond ((eq? x y) #t)
         ((eqv? x y) #t)
         ((and (string? x) (string? y) (string=? x y)) #t)
+        ((and (vector? x) (vector? y))
+         (all? (vector->list (vector-map (lambda (a b)
+                                           (equal? a b))
+                                         x y))))
         ((not (and (pair? x) (pair? y))) #f)
         (else (and (equal? (car x) (car y))
                    (equal? (cdr x) (cdr y))))))
@@ -516,3 +520,63 @@
                (end (list-ref args 4)))
            (%vector-copy! to at from start end)))
         (else (error "invalid number of arguments to vector-copy!"))))
+
+(define (%string->vector str start end)
+  (let ((n (- end start)))
+    (let loop ((s (make-vector n))
+               (vidx 0)
+               (sidx start))
+      (if (= vidx n)
+          s
+          (begin
+            (vector-set! s vidx (string-ref str sidx))
+            (loop s (+ vidx 1) (+ sidx 1)))))))
+
+(define (string->vector . args)
+  ;; case-lambda
+  (cond ((= 1 (length args))
+         (%string->vector (car args) 0 (string-length (car args))))
+        ((= 2 (length args))
+         (%string->vector (car args) (cadr args) (string-length (car args))))
+        ((= 3 (length args))
+         (%string->vector (car args) (cadr args) (caddr args)))
+        (else (error "invalid number of arguments for string->vector"))))
+
+(define (%vector->string vector start end)
+  (let ((n (- end start)))
+    (let loop ((s (make-string n))
+               (vidx start)
+               (sidx 0))
+      (if (= sidx n)
+          s
+          (begin
+            (string-set! s sidx (vector-ref vector vidx))
+            (loop s (+ vidx 1) (+ sidx 1)))))))
+
+(define (vector->string . args)
+  ;; case-lambda
+  (cond ((= 1 (length args))
+         (%vector->string (car args) 0 (vector-length (car args))))
+        ((= 2 (length args))
+         (%vector->string (car args) (cadr args) (vector-length (car args))))
+        ((= 3 (length args))
+         (%vector->string (car args) (cadr args) (caddr args)))
+        (else (error "invalid number of arguments for vector->string"))))
+
+(define (%vector-fill! vec fill start end)
+  (let loop ((i 0))
+    (if (= i end)
+        vec
+        (begin
+          (vector-set! vec i fill)
+          (loop (+ i 1))))))
+
+(define (vector-fill! . args)
+  ;; case-lambda
+  (cond ((= 2 (length args))
+         (%vector-fill! (car args) (cadr args) 0 (vector-length (car args))))
+        ((= 3 (length args))
+         (%vector-fill! (car args) (cadr args) (caddr args) (vector-length vector)))
+        ((= 4 (length args))
+         (%vector-fill! (car args) (cadr args) (caddr args) (cadddr args)))
+        (else (error "invalid number of arguments to vector-fill!"))))
