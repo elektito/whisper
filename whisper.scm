@@ -965,9 +965,15 @@
                   (accessor-name (cadar fields))
                   (mutator-name (if (> (length (car fields)) 2) (caddar fields) #f)))
               (compile-form func indent `(define (,accessor-name x)
+                                           (if (not (and (wrapped? x)
+                                                         (eq? ,type-name (wrapped-kind x))))
+                                               (error (format "value passed to accessor ~a is not of type ~a" ',accessor-name ',type-name)))
                                            (vector-ref (unwrap x) ,idx)))
               (if mutator-name
                   (compile-form func indent `(define (,mutator-name x value)
+                                               (if (not (and (wrapped? x)
+                                                         (eq? ,type-name (wrapped-kind x))))
+                                                   (error (format "value passed to mutator is not of type ~a" ',mutator-name ',type-name)))
                                                (vector-set! (unwrap x) ,idx value))))
               (loop (cdr fields) (+ idx 1))))))))
 
