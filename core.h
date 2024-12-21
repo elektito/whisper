@@ -677,6 +677,9 @@ static value make_vector(size_t len, value fill) {
     obj->type = OBJ_VECTOR;
     obj->vector.len = len;
     obj->vector.data = calloc(obj->vector.len, sizeof(value));
+    for (int i = 0; i < len; ++i) {
+        obj->vector.data[i] = fill;
+    }
     return OBJECT(obj);
 }
 
