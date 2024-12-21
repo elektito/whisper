@@ -23,6 +23,7 @@
           ((char=? #\, ch) (read-unquoted-form port))
           ((char=? #\| ch) (read-piped-symbol port))
           ((char=? #\. ch) (read-dot-or-identifier port))
+          ((char=? #\) ch) (compile-error "extra closing parenthesis"))
           (else (read-char port) ; read-identifier-or-number expects first character already read and passed to it
                 (read-identifier-or-number port ch)))))
 
