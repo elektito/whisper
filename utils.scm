@@ -57,6 +57,29 @@
          (begin result1 result2 ...)
          (case key clause clauses ...)))))
 
+(define-syntax and
+  (syntax-rules ()
+    ((_) #t)
+    ((_ x) x)
+    ((_ x y ...) (if x (and y ...) #f))))
+
+(define-syntax or
+  (syntax-rules ()
+    ((_) #f)
+    ((_ x) x)
+    ((_ x y ...) (let ((tmp x))
+                   (if tmp tmp (or y ...))))))
+
+(define-syntax when
+  (syntax-rules ()
+    ((_ condition body1 body2 ...)
+     (if condition (begin body1 body2 ...)))))
+
+(define-syntax unless
+  (syntax-rules ()
+    ((_ condition body1 body2 ...)
+     (if condition (void) (begin body1 body2 ...)))))
+
 (define (eqv? x y)
   (eq? x y))
 
