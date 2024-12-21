@@ -1131,6 +1131,8 @@
                        (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form)))
                      (compile-error "unbound identifier: ~a" form)))
 
+      ((macro) (compile-error "invalid use of macro name: ~a" form))
+
       (else (error (format "unknown meaning kind: ~a" (meaning-kind meaning)))))
     varnum))
 
