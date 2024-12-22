@@ -1247,6 +1247,7 @@ static value primcall_error(environment env, enum call_flags flags, int nargs, .
     fprintf(stderr, "error: ");
     _display(msg, OBJECT(&current_error_port));
     printf("\n");
+    print_stacktrace();
     cleanup();
     exit(1);
     return VOID;
