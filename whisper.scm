@@ -591,7 +591,7 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(begin define define-record-type define-syntax if include lambda let quasiquote quote syntax-rules))
+(define *specials* '(begin define define-syntax if include lambda let quasiquote quote syntax-rules))
 
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
@@ -912,71 +912,6 @@
                 (loop (cdr exprs))))))
     ret-varnum))
 
-(define (compile-define-record-type func indent form)
-  (when (func-parent func)
-    (error "define-record-type only supported at the top-level at the moment"))
-  (when (or (< (length form) 4)
-            (not (symbol? (cadr form)))
-            (not (list? (caddr form)))
-            (not (symbol? (cadddr form))))
-    (error "bad define-record-type form"))
-  (let ((type-name (cadr form))
-        (ctor (caddr form))
-        (pred (cadddr form))
-        (fields (cdr (cdddr form))))
-    ;; validate fields
-    (let loop ((fields fields) (names '()))
-      (if (pair? fields)
-          (begin
-            (if (memq (caar fields) names)
-                (compile-error "duplicate field name: ~s" (caar fields)))
-            (if (not (list? (car fields)))
-                (compile-error "bad field spec: ~s" (car fields)))
-            (if (or (< (length (car fields)) 2)
-                    (> (length (car fields)) 3))
-                (compile-error "bad field spec: ~s" (car fields)))
-            (if (not (all? (map symbol? (car fields))))
-                (compile-error "bad field spec: ~s" (car fields)))
-            (loop (cdr fields) (cons (caar fields) names)))))
-
-    (let ((field-names (map car fields)))
-      ;; make sure constructor arguments are in the fields list
-      (let loop ((ctor-args (cdr ctor)))
-        (if (pair? ctor-args)
-            (begin
-              (if (not (memq (car ctor-args) field-names))
-                  (compile-error "constructor argument ~a not in fields list" (car ctor-args)))
-              (loop (cdr ctor-args)))))
-
-      (compile-form func indent `(define ,type-name (gensym (symbol->string ',type-name))))
-      (compile-form func indent `(define (,(car ctor) ,@(cdr ctor))
-                                   (wrap (vector ,@(map (lambda (x)
-                                                          (if (memq x (cdr ctor))
-                                                              x
-                                                              '(void)))
-                                                        field-names))
-                                         ,type-name)))
-      (compile-form func indent `(define (,pred x)
-                                   (and (wrapped? x)
-                                        (eq? ,type-name (wrapped-kind x)))))
-      (let loop ((fields fields) (idx 0))
-        (if (pair? fields)
-            (let ((field-name (caar fields))
-                  (accessor-name (cadar fields))
-                  (mutator-name (if (> (length (car fields)) 2) (caddar fields) #f)))
-              (compile-form func indent `(define (,accessor-name x)
-                                           (if (not (and (wrapped? x)
-                                                         (eq? ,type-name (wrapped-kind x))))
-                                               (error (format "value passed to accessor ~a is not of type ~a" ',accessor-name ',type-name)))
-                                           (vector-ref (unwrap x) ,idx)))
-              (if mutator-name
-                  (compile-form func indent `(define (,mutator-name x value)
-                                               (if (not (and (wrapped? x)
-                                                         (eq? ,type-name (wrapped-kind x))))
-                                                   (error (format "value passed to mutator is not of type ~a" ',mutator-name ',type-name)))
-                                               (vector-set! (unwrap x) ,idx value))))
-              (loop (cdr fields) (+ idx 1))))))))
-
 (define (compile-define-syntax func indent form)
   (when (func-parent func)
     (compile-error "define-syntax only supported at the top-level at the moment"))
@@ -997,7 +932,6 @@
   (case kind
     ((begin) (compile-begin func indent form))
     ((define) (compile-define func indent form))
-    ((define-record-type) (compile-define-record-type func indent form))
     ((define-syntax) (compile-define-syntax func indent form))
     ((include) (compile-include func indent form))
     ((if) (compile-if func indent form))
