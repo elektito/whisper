@@ -310,7 +310,7 @@
 (define (expand-pair pair store ellipsis)
   (let loop ((result '()) (item pair))
     (cond ((atom? item)
-           (append result item))
+           (append result (expand item store ellipsis)))
           ((eq? ellipsis (car item))
            (if (and (pair? (cdr item))
                     (eq? ellipsis (cadr item)))
