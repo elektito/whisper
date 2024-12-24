@@ -371,6 +371,7 @@
     (gen-func-prototypes program port)
     (newline port)
     (gen-func-bodies program port)
+    (display "__attribute__((no_sanitize(\"address\")))\n" port)
     (display "int main(int argc, const char *argv[]) {\n" port)
     (display "    uint64_t ss;\n" port)
     (display "    stack_start = &ss;\n" port)
