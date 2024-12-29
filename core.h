@@ -205,6 +205,14 @@ static struct object current_error_port;
 static int cmdline_argc;
 static const char **cmdline_argv;
 
+struct kind_proc {
+    value kind;
+    value proc;
+};
+
+static int n_wrapped_print_procs = 0;
+static struct kind_proc *wrapped_print_procs = NULL;
+
 /*************** stack trace **************/
 
 #ifdef DEBUG
@@ -809,11 +817,23 @@ static void print_unprintable(value v, value port) {
         const char *kind = GET_OBJECT(v)->error.type == ERR_FILE ? "file-" : "";
         GET_OBJECT(port)->port.printf(port, "#<%serror>", kind);
     } else if (IS_WRAPPED(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<wrapped kind=");
-        _write(GET_OBJECT(v)->wrapped.kind, port);
-        GET_OBJECT(port)->port.printf(port, " value=");
-        _write(GET_OBJECT(v)->wrapped.value, port);
-        GET_OBJECT(port)->port.printf(port, ">");
+        int found = 0;
+        value kind = GET_OBJECT(v)->wrapped.kind;
+        for (int i = 0; i < n_wrapped_print_procs; ++i) {
+            if (wrapped_print_procs[i].kind == kind) {
+                found = 1;
+                value proc = wrapped_print_procs[i].proc;
+                GET_CLOSURE(proc)->func(GET_CLOSURE(proc)->freevars, NO_CALL_FLAGS, 2, v, port);
+            }
+        }
+
+        if (!found) {
+            GET_OBJECT(port)->port.printf(port, "#<wrapped kind=");
+            _write(GET_OBJECT(v)->wrapped.kind, port);
+            GET_OBJECT(port)->port.printf(port, " value=");
+            _write(GET_OBJECT(v)->wrapped.value, port);
+            GET_OBJECT(port)->port.printf(port, ">");
+        }
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
     }
@@ -1866,6 +1886,21 @@ static value primcall_wrapped_kind(environment env, enum call_flags flags, int n
 
     if (!IS_WRAPPED(v)) { RAISE("wrapped-kind argument is not a wrapped object"); }
     return GET_OBJECT(v)->wrapped.kind;
+}
+
+static value primcall_wrapped_set_print(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("wrapped-set-print needs two arguments"); }
+    init_args();
+    value kind = next_arg();
+    value proc = next_arg();
+    free_args();
+
+    if (!IS_CLOSURE(proc)) { RAISE("wrapped-set-print second argument not a procedure"); }
+
+    n_wrapped_print_procs++;
+    wrapped_print_procs = realloc(wrapped_print_procs, n_wrapped_print_procs * sizeof(struct kind_proc));
+    wrapped_print_procs[n_wrapped_print_procs - 1].kind = kind;
+    wrapped_print_procs[n_wrapped_print_procs - 1].proc = proc;
 }
 
 static value primcall_write(environment env, enum call_flags flags, int nargs, ...) {

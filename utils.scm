@@ -717,3 +717,7 @@
                    (eq? (wrapped-kind obj) type-id))
         (error (format "Invalid value passed to modifier procedure  (expecting: ~a)" (record-type-type-id record-type))))
       (vector-set! (unwrap obj) idx value))))
+
+(define (record-set-print record-type print-proc)
+  (wrapped-set-print (vector-ref (unwrap record-type) 0)
+                     print-proc))

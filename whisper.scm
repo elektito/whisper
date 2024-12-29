@@ -580,6 +580,7 @@
                       (wrap "wrap" 2 2)
                       (wrapped? "wrapped_q" 1 1)
                       (wrapped-kind "wrapped_kind" 1 1)
+                      (wrapped-set-print "wrapped_set_print" 2 2)
                       (write "write" 1 2)
                       (write-char "write_char" 1 2)
                       (+ "add" 0 -1)
