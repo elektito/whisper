@@ -287,6 +287,13 @@
           list
           (%member obj (cdr list) compare))))
 
+(define (member . args)
+  (cond ((= 2 (length args))
+         (%member (car args) (cadr args) equal?))
+        ((= 3 (length args))
+         (%member (car args) (cadr args) (caddr args)))
+        (else (error "invalid numbe rof arguments to member"))))
+
 (define (memq obj ls)
   (%member obj ls eq?))
 
@@ -704,7 +711,7 @@
     (lambda (obj)
       (unless (and (wrapped? obj)
                    (eq? (wrapped-kind obj) type-id))
-        (error (format "Invalid value passed to accessor procedure (expecting: ~a)" (record-type-type-id record-type))))
+        (error (format "Invalid value passed to accessor procedure (expecting: ~s, got: ~s)" (record-type-type-id record-type) obj)))
       (vector-ref (unwrap obj) idx))))
 
 (define (record-modifier record-type tag)
@@ -715,7 +722,7 @@
     (lambda (obj value)
       (unless (and (wrapped? obj)
                    (eq? (wrapped-kind obj) type-id))
-        (error (format "Invalid value passed to modifier procedure  (expecting: ~a)" (record-type-type-id record-type))))
+        (error (format "Invalid value passed to modifier procedure  (expecting: ~s, got: ~s)" (record-type-type-id record-type) obj)))
       (vector-set! (unwrap obj) idx value))))
 
 (define (record-set-print record-type print-proc)

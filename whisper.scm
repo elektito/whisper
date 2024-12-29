@@ -2,6 +2,7 @@
 (include "format.scm")
 (include "qq.scm")
 (include "macro.scm")
+(include "preprocess.scm")
 
 (define *indent-size* 4)
 
@@ -321,7 +322,7 @@
   (let loop ((vars (program-referenced-vars program)))
     (if (null? vars)
         (program-referenced-vars-set! program (cons var (program-referenced-vars program)))
-        (if (not (eq? var (car vars)))
+        (if (not (free-identifier=? var (car vars)))
             (loop (cdr vars))))))
 
 (define (gen-func-prototypes program output)
@@ -417,6 +418,10 @@
   (freevars func-freevars func-freevars-set!))
 
 (define (add-function program parent params rest-param)
+  (unless (all? (map identifier? params))
+    (error "not all params passed to add-function are identifiers"))
+  (unless (or (not rest-param) (identifier? rest-param))
+    (error (format "rest-param passed to add-function is not an identifier: ~s" rest-param)))
   (let ((func (make-function (open-output-string) ; port
                              0  ; varnum
                              (format "f~a" (program-next-funcnum program)) ; name
@@ -442,24 +447,25 @@
     (- (length new-freevars) 1)))
 
 (define (func-add-binding func var meaning)
+  (unless (identifier? var)
+    (error "var name passed to func-add-binding is not an identifier"))
   (let ((new-bindings (cons (cons var meaning) (func-bindings func))))
     (func-bindings-set! func new-bindings)))
 
 (define (func-lookup-binding func identifier)
-  (let ((r (assq identifier (func-bindings func))))
+  (let ((r (assoc identifier (func-bindings func) bound-identifier=?)))
     (if r (cdr r) #f)))
 
 (define (func-has-param func name)
   (let ((m (func-lookup-binding func name)))
-    (if m
-        (if (eq? 'local (meaning-kind m)) #t #f)
-        #f)))
+    (not (not m))))
 
 (define (func-find-freevar func var)
   (let loop ((i 0) (freevars (func-freevars func)))
     (if (null? freevars)
         #f
-        (if (eq? var (car freevars))
+        (if (and (eq? 'local (identifier-kind (car freevars)))
+                 (bound-identifier=? var (car freevars)))
             i
             (loop (+ i 1) (cdr freevars))))))
 
@@ -627,11 +633,11 @@
     varnum))
 
 (define (mangle-name name)
-  (let ((name (if (symbol? name)
-                  (symbol->string name)
-                  (if (string? name)
-                      name
-                      (error "mangle-name argument not a string or symbol")))))
+  (let ((name (cond ((identifier? name) (symbol->string (or (identifier-meaning name)
+                                                            (identifier-name name))))
+                    ((symbol? name) (symbol->string name))
+                    ((string? name) name)
+                    (else (error "mangle-name argument not a string or symbol")))))
     (let loop ((i 0)
                (mangled "_"))
       (if (= i (string-length name))
@@ -658,10 +664,10 @@
         ((char? form) (compile-form func indent form))
         ((string? form) (compile-form func indent form))
         ((vector? form) (compile-form func indent form))
-        ((symbol? form) (let ((varnum (func-next-varnum func)))
-                          (intern (func-program func) form)
-                          (gen-code func indent "value x~a = sym~a;\n" varnum (mangle-name form))
-                          varnum))
+        ((identifier? form) (let ((varnum (func-next-varnum func)))
+                              (intern (func-program func) (identifier-name form))
+                              (gen-code func indent "value x~a = sym~a;\n" varnum (mangle-name (identifier-name form)))
+                              varnum))
         ((null? form) (let ((varnum (func-next-varnum func)))
                         (gen-code func indent "value x~a = NIL;\n" varnum)
                         varnum))
@@ -700,7 +706,7 @@
   ;; (lambda (x y . z) x) => ((x y) z)
   ;; (lambda x x) => (() x)
   (let ((params (cadr form)))
-    (if (symbol? params)
+    (if (identifier? params)
         (list '() params)
         (let loop ((proper-params '()) (params params))
           (cond ((null? params) (list (reverse proper-params) #f))
@@ -733,7 +739,7 @@
         (let loop ((params params))
           (if (not (null? params))
               (begin
-                (if (not (symbol? (car params)))
+                (if (not (identifier? (car params)))
                     (compile-error "parameter not an identifier: ~a" (car params)))
                 (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-name (car params)))
                 (loop (cdr params)))))
@@ -771,7 +777,7 @@
                 (begin
                   (if (func-has-param func (car freevars))
                       (gen-code func 0 ", ~a" (mangle-name (car freevars))) ;; generate mangled param name
-                      (if (memq (car freevars) known-freevars)
+                      (if (member (car freevars) known-freevars free-identifier=?)
                           (gen-code func 0 ", (value) 0")
                           (let ((freevar (func-find-freevar func (car freevars))))
                             (if freevar
@@ -786,19 +792,19 @@
 (define (compile-let func indent form)
   (if (< (length form) 3)
       (compile-error "malformed let"))
-  (let ((name (if (symbol? (cadr form))
+  (let ((name (if (identifier? (cadr form))
                   (cadr form)
                   #f))
-        (body (if (symbol? (cadr form))
+        (body (if (identifier? (cadr form))
                   (cdddr form)
                   (cddr form))))
-    (let loop ((bindings (if (symbol? (cadr form))
+    (let loop ((bindings (if (identifier? (cadr form))
                              (caddr form)
                              (cadr form)))
                (params '())
                (init-forms '()))
       (if (null? bindings)
-          (let ((func-varnum (compile-lambda func indent (append (list 'lambda (reverse params)) body) (if name (list name) '()))))
+          (let ((func-varnum (compile-lambda func indent (append (list (identifier 'special 'lambda 'lambda) (reverse params)) body) (if name (list name) '()))))
             (if name
                 (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum))
             (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
@@ -819,7 +825,7 @@
 (define (compile-define func indent form)
   (if (< (length form) 2)
       (compile-error "malformed define: ~s" form))
-  (if (and (symbol? (cadr form))
+  (if (and (identifier? (cadr form))
            (> (length form) 3))
       (compile-error "malformed define: ~s" form))
   (if (and (list? (cadr form))
@@ -843,7 +849,7 @@
   (let ((form (if (pair? (cadr form))
                   (list 'define
                         (caadr form)
-                        (append (list 'lambda (cdadr form)) (cddr form)))
+                        (append (list (identifier 'special 'lambda 'lambda) (cdadr form)) (cddr form)))
                   form)))
     (let ((name (cadr form))
           (init-form (if (< (length form) 3)
@@ -856,7 +862,7 @@
 
       ;; top-level variable names are all interned, since the values of
       ;; global variables are stored in the symbol table.
-      (intern (func-program func) name)
+      (intern (func-program func) (identifier-meaning name))
 
       ;; add the name to the list of current (top-level) function bindings
       (func-add-binding func name (make-meaning 'global #f))
@@ -921,7 +927,7 @@
         (transformer (caddr form)))
     (if (or (not (list? transformer))
             (not (pair? transformer))
-            (not (symbol? (car transformer))))
+            (not (identifier? (car transformer))))
         (compile-error "invalid macro transformer"))
     (let ((transformer (compile-form func indent transformer)))
       (if (not (transformer? transformer))
@@ -960,7 +966,7 @@
   (let loop ((primcalls *primcalls*))
     (if (null? primcalls)
         #f
-        (if (eq? identifier (caar primcalls))
+        (if (eq? (identifier-meaning identifier) (caar primcalls))
             (car primcalls)
             (loop (cdr primcalls))))))
 
@@ -968,7 +974,7 @@
   (let loop ((specials *specials*))
     (if (null? specials)
         #f
-        (if (eq? identifier (car specials))
+        (if (eq? (identifier-meaning identifier) (car specials))
             (car specials)
             (loop (cdr specials))))))
 
@@ -995,30 +1001,34 @@
   ;;  - special: it's a special form
   ;;
   ;;  - unknown: neither of the previous ones
-
-  (let ((meaning (func-lookup-binding func identifier)))
-    (if meaning
-        meaning
-        (let loop ((func func))
-          (if (not func)
-              (let ((primcall-info (lookup-primcall identifier)))
-                (if primcall-info
-                    (make-meaning 'primcall primcall-info)
-                    (let ((special-info (lookup-special identifier)))
-                      (if special-info
-                          (make-meaning 'special special-info)
-                          (make-meaning 'unknown #f)))))
-              (let ((meaning (func-lookup-binding func identifier)))
-                (if meaning
-                    (if (eq? (meaning-kind meaning) 'local)
-                        (make-meaning 'free #f)
-                        meaning)
-                    (if (func-find-freevar func identifier)
-                        (make-meaning 'free #f)
-                        (loop (func-parent func))))))))))
+  (cond ((identifier-is-special identifier)
+         (let ((special-info (lookup-special identifier)))
+           (if special-info
+               (make-meaning 'special special-info)
+               (error (format "cannot find info about special '~s'; this must be a bug." identifier)))))
+        ((identifier-is-primcall identifier)
+         (let ((primcall-info (lookup-primcall identifier)))
+           (if primcall-info
+               (make-meaning 'primcall primcall-info)
+               (error (format "cannot find info about primcall '~s'; this must be a bug." identifier)))))
+        (else
+         (let ((meaning (func-lookup-binding func identifier)))
+           (if meaning
+               meaning
+               (let loop ((func func))
+                 (if (not func)
+                     (make-meaning 'unknown #f)
+                     (let ((meaning (func-lookup-binding func identifier)))
+                       (if meaning
+                           (if (eq? (meaning-kind meaning) 'local)
+                               (make-meaning 'free #f)
+                               meaning)
+                           (if (func-find-freevar func identifier)
+                               (make-meaning 'free #f)
+                               (loop (func-parent func))))))))))))
 
 (define (compile-list func indent form)
-  (if (not (symbol? (car form)))
+  (if (not (identifier? (car form)))
       (compile-call func indent form)
       (let ((meaning (lookup-identifier func (car form))))
         (case (meaning-kind meaning)
@@ -1073,7 +1083,9 @@
 
       ((macro) (compile-error "invalid use of macro name: ~a" form))
 
-      (else (error (format "unknown meaning kind: ~a" (meaning-kind meaning)))))
+      ((aux) (compile-error "invalid use of aux keyword: ~a" form))
+
+      (else (error (format "unknown identifier kind: ~a" (identifier-kind form)))))
     varnum))
 
 (define (compile-vector func indent form)
@@ -1087,7 +1099,7 @@
     varnum))
 
 (define (compile-form func indent form)
-  (cond ((symbol? form) (compile-identifier func indent form))
+  (cond ((identifier? form) (compile-identifier func indent form))
         ((number? form) (compile-number func indent form))
         ((string? form) (compile-string func indent form))
         ((boolean? form) (compile-bool func indent form))
@@ -1102,18 +1114,10 @@
   (newline (current-error-port))
   (exit 1))
 
-(define (is-special func form special)
-  (if (not (and (list? form)
-                (pair? form)
-                (symbol? (car form))))
-      #f
-      (let ((m (lookup-identifier func (car form))))
-        (and (eq? 'special (meaning-kind m))
-             (eq? special (meaning-info m))))))
-
 (define (compile-body-level-form func form)
   (let ((varnum -1))
-    (if (is-special func form 'begin) ;; top/body level "begin" form
+    (if (and (pair? form)
+             (identifier-is-special (car form) 'begin)) ;; top/body level "begin" form
         (let loop ((rest (cdr form)))
           (if (null? rest)
               varnum
@@ -1128,8 +1132,105 @@
               (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
           varnum))))
 
+(define *root-identifiers* (list (identifier 'special 'begin 'begin)
+                                 (identifier 'special 'define 'define)
+                                 (identifier 'special 'define-syntax 'define-syntax)
+                                 (identifier 'special 'if 'if)
+                                 (identifier 'special 'include 'include)
+                                 (identifier 'special 'lambda 'lambda)
+                                 (identifier 'special 'let 'let)
+                                 (identifier 'special 'quasiquote 'quasiquote)
+                                 (identifier 'special 'quote 'quote)
+                                 (identifier 'special 'syntax-rules 'syntax-rules)
+                                 (identifier 'aux 'else 'else)
+                                 (identifier 'aux '=> '=>)
+                                 (identifier 'aux '... '...)
+                                 (identifier 'aux 'unquote 'unquote)
+                                 (identifier 'aux 'unquote-splicing 'unquote-splicing)
+                                 (identifier 'primcall 'apply 'apply)
+                                 (identifier 'primcall 'boolean? 'boolean?)
+                                 (identifier 'primcall 'car 'car)
+                                 (identifier 'primcall 'cdr 'cdr)
+                                 (identifier 'primcall 'char-downcase 'char-downcase)
+                                 (identifier 'primcall 'char-upcase 'char-upcase)
+                                 (identifier 'primcall 'char->integer 'char->integer)
+                                 (identifier 'primcall 'char? 'char?)
+                                 (identifier 'primcall 'close-port 'close-port)
+                                 (identifier 'primcall 'command-line 'command-line)
+                                 (identifier 'primcall 'cons 'cons)
+                                 (identifier 'primcall 'current-input-port 'current-input-port)
+                                 (identifier 'primcall 'current-output-port 'current-output-port)
+                                 (identifier 'primcall 'current-error-port 'current-error-port)
+                                 (identifier 'primcall 'delete-file 'delete-file)
+                                 (identifier 'primcall 'display 'display)
+                                 (identifier 'primcall 'eof-object? 'eof-object?)
+                                 (identifier 'primcall 'eq? 'eq?)
+                                 (identifier 'primcall 'error 'error)
+                                 (identifier 'primcall 'error-object? 'error-object?)
+                                 (identifier 'primcall 'exit 'exit)
+                                 (identifier 'primcall 'file-error? 'file-error?)
+                                 (identifier 'primcall 'gensym 'gensym)
+                                 (identifier 'primcall 'get-output-string 'get-output-string)
+                                 (identifier 'primcall 'get-environment-variable 'get-environment-variable)
+                                 (identifier 'primcall 'input-port? 'input-port?)
+                                 (identifier 'primcall 'integer->char 'integer->char)
+                                 (identifier 'primcall 'make-string 'make-string)
+                                 (identifier 'primcall 'make-vector 'make-vector)
+                                 (identifier 'primcall 'newline 'newline)
+                                 (identifier 'primcall 'number? 'number?)
+                                 (identifier 'primcall 'number->string 'number->string)
+                                 (identifier 'primcall 'open-input-file 'open-input-file)
+                                 (identifier 'primcall 'open-output-file 'open-output-file)
+                                 (identifier 'primcall 'open-output-string 'open-output-string)
+                                 (identifier 'primcall 'pair? 'pair?)
+                                 (identifier 'primcall 'peek-char 'peek-char)
+                                 (identifier 'primcall 'port? 'port?)
+                                 (identifier 'primcall 'procedure? 'procedure?)
+                                 (identifier 'primcall 'read-char 'read-char)
+                                 (identifier 'primcall 'read-line 'read-line)
+                                 (identifier 'primcall 'set-car! 'set-car!)
+                                 (identifier 'primcall 'set-cdr! 'set-cdr!)
+                                 (identifier 'primcall 'string-copy 'string-copy)
+                                 (identifier 'primcall 'string->number 'string->number)
+                                 (identifier 'primcall 'string->symbol 'string->symbol)
+                                 (identifier 'primcall 'symbol->string 'symbol->string)
+                                 (identifier 'primcall 'string-append 'string-append)
+                                 (identifier 'primcall 'string-length 'string-length)
+                                 (identifier 'primcall 'string-ref 'string-ref)
+                                 (identifier 'primcall 'string-set! 'string-set!)
+                                 (identifier 'primcall 'string=? 'string=?)
+                                 (identifier 'primcall 'string? 'string?)
+                                 (identifier 'primcall 'substring 'substring)
+                                 (identifier 'primcall 'symbol? 'symbol?)
+                                 (identifier 'primcall 'system 'system)
+                                 (identifier 'primcall 'uninterned-symbol? 'uninterned-symbol?)
+                                 (identifier 'primcall 'unread-char 'unread-char)
+                                 (identifier 'primcall 'urandom 'urandom)
+                                 (identifier 'primcall 'unwrap 'unwrap)
+                                 (identifier 'primcall 'vector-length 'vector-length)
+                                 (identifier 'primcall 'vector-ref 'vector-ref)
+                                 (identifier 'primcall 'vector-set! 'vector-set!)
+                                 (identifier 'primcall 'vector? 'vector?)
+                                 (identifier 'primcall 'void 'void)
+                                 (identifier 'primcall 'wrap 'wrap)
+                                 (identifier 'primcall 'wrapped? 'wrapped?)
+                                 (identifier 'primcall 'wrapped-kind 'wrapped-kind)
+                                 (identifier 'primcall 'wrapped-set-print 'wrapped-set-print)
+                                 (identifier 'primcall 'write 'write)
+                                 (identifier 'primcall 'write-char 'write-char)
+                                 (identifier 'primcall '+ '+)
+                                 (identifier 'primcall '- '-)
+                                 (identifier 'primcall '* '*)
+                                 (identifier 'primcall '/ '/)
+                                 (identifier 'primcall '= '=)
+                                 (identifier 'primcall '< '<)
+                                 (identifier 'primcall '> '>)
+                                 (identifier 'primcall '<= '<=)
+                                 (identifier 'primcall '>= '>=)))
+
 (define (compile-program program)
-  (let ((func (add-function program #f '() #f)))
+  (let ((func (add-function program #f '() #f))
+        (env (preprocess-create-environment *root-identifiers*)))
     (program-init-func-set! program func)
     (let loop ((form (read (program-port program))))
       (if (eof-object? form)
@@ -1142,15 +1243,15 @@
                 (program-pop-port program)
                 (loop (read (program-port program)))))
           (begin
-            (compile-body-level-form func form)
+            (compile-body-level-form func (preprocess-form env form))
             (loop (read (program-port program))))))
 
     ;; check for undefined referenced variables
     (let loop ((vars (program-referenced-vars program)))
-      (if (not (null? vars))
-          (let ((meaning (lookup-identifier func (car vars))))
-            (if (not (and meaning (eq? 'global (meaning-kind meaning))))
-                (compile-error "undefined variable: ~a" (car vars))))))))
+      (unless (null? vars)
+        (unless (func-has-param func (car vars))
+          (compile-error "undefined variable: ~a" (car vars)))
+        (loop (cdr vars))))))
 
 ;;;;;; command-line parsing ;;;;;;
 
@@ -1219,10 +1320,7 @@
                    (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
             (else (if (cmdline-input-file args)
-                      (begin
-                        (print "ERR")
-                       (command-line-error "unexpected argument: ~a" (car cl))
-                       )
+                      (command-line-error "unexpected argument: ~a" (car cl))
                       (begin
                         (cmdline-input-file-set! args (car cl))
                         (loop (cdr cl)))))))))
