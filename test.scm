@@ -1,4 +1,5 @@
 (include "utils.scm")
+(include "format.scm")
 
 ;; defines
 
