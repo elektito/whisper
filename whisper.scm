@@ -265,7 +265,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program ports funcs funcnum interned-symbols init-func referenced-vars is-test-suite test-counter debug)
+  (make-program ports funcs funcnum interned-symbols init-func referenced-vars is-test-suite test-counter debug modified-vars)
   program?
   (ports program-ports program-ports-set!)
   (funcs program-funcs program-funcs-set!)
@@ -275,7 +275,8 @@
   (referenced-vars program-referenced-vars program-referenced-vars-set!)
   (is-test-suite program-is-test-suite program-is-test-suite-set!)
   (test-counter program-test-counter program-test-counter-set!)
-  (debug program-debug program-debug-set!))
+  (debug program-debug program-debug-set!)
+  (modified-vars program-modified-vars program-modified-vars-set!))
 
 (define (create-program port)
   (make-program (list port)
@@ -287,6 +288,7 @@
                 #f  ; is test suite?
                 0   ; test counter
                 #f  ; debug instrumentation
+                '() ; modified variables
                 ))
 
 (define (program-port program)
@@ -744,6 +746,8 @@
                 (if (not (identifier? (car params)))
                     (compile-error "parameter not an identifier: ~a" (car params)))
                 (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-name (car params)))
+                (when (var-is-modified? func (car params))
+                  (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-name (car params)) (mangle-name (car params))))
                 (loop (cdr params)))))
 
         (if (not (eq? rest-param #f))
@@ -807,7 +811,9 @@
         (unless (identifier? (caar bindings))
           (compile-error "bad let variable name: ~a" (caar bindings)))
         (let ((varnum (compile-form func (+ 1 indent) (cadar bindings))))
-          (gen-code func (+ 1 indent) "value ~a = x~a;\n" (mangle-name (caar bindings)) varnum)
+          (if (var-is-modified? func (caar bindings))
+              (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-name (caar bindings)) varnum)
+              (gen-code func (+ 1 indent) "value ~a = x~a;\n" (mangle-name (caar bindings)) varnum))
           (loop (cdr bindings)))))
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
@@ -839,6 +845,12 @@
           (let ((func-varnum (compile-lambda func indent (append (list (identifier 'special 'lambda 'lambda) (reverse params)) body) (list name) )))
             (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum)
             (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
+              ;; box modified vars
+              (let loop ((params params) (arg-varnums arg-varnums))
+                (unless (null? params)
+                  (when (var-is-modified? func (car params))
+                    (gen-code func indent "x~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (car arg-varnums) (car arg-varnums)))
+                  (loop (cdr params) (cdr arg-varnums))))
               (let ((ret-varnum (func-next-varnum func)))
                 (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
                           ret-varnum
@@ -903,8 +915,8 @@
       (let ((init-varnum (compile-form func indent init-form)))
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
-        (if init-form
-            (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum))
+        (when init-form
+          (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum))
         init-varnum))))
 
 (define (compile-if func indent form)
@@ -966,6 +978,19 @@
       (func-add-binding func name (make-meaning 'macro transformer))))
   -1)
 
+(define (compile-set! func indent form)
+  (unless (= (length form) 3)
+    (compile-error "bad set! form: ~s" form))
+  (unless (identifier? (cadr form))
+    (compile-error "bad set! form: ~s" form))
+  (let ((value-varnum (compile-form func indent (caddr form))))
+    (if (eq? 'global (identifier-kind (cadr form)))
+        (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name (cadr form)) value-varnum)
+        (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (cadr form)) value-varnum)))
+  (let ((varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a = VOID;\n" varnum)
+    varnum))
+
 (define (compile-special func indent form kind)
   (case kind
     ((begin) (compile-begin func indent form))
@@ -977,6 +1002,7 @@
     ((lambda) (compile-lambda func indent form '()))
     ((quasiquote) (compile-quasiquote func indent form))
     ((quote) (compile-quote func indent form))
+    ((set!) (compile-set! func indent form))
     ((syntax-rules) (compile-syntax-rules form))
     (else -1)))
 
@@ -1071,12 +1097,18 @@
                      (compile-form func indent ((transformer-func transformer) form))))
           (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
 
+(define (var-is-modified? func var)
+  (let ((program (func-program func)))
+    (member var (program-modified-vars program) bound-identifier=?)))
+
 (define (compile-identifier func indent form)
   (let ((meaning (lookup-identifier func form))
         (varnum (func-next-varnum func)))
     (case (meaning-kind meaning)
       ((local)
-       (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form)))
+       (if (var-is-modified? func form)
+           (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, ~a);\n" varnum (mangle-name form))
+           (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))))
       ((global)
        (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form)))
       ((free)
@@ -1160,6 +1192,7 @@
                                  (identifier 'special 'let 'let)
                                  (identifier 'special 'quasiquote 'quasiquote)
                                  (identifier 'special 'quote 'quote)
+                                 (identifier 'special 'set! 'set!)
                                  (identifier 'special 'syntax-rules 'syntax-rules)
                                  (identifier 'aux 'else 'else)
                                  (identifier 'aux '=> '=>)
@@ -1266,7 +1299,9 @@
                 (program-pop-port program)
                 (loop (read (program-port program)))))
           (begin
-            (let ((varnum (compile-body-level-form func 1 (preprocess-form env form))))
+            (preprocess-form env form)
+            (program-modified-vars-set! program (pp-environment-modified-vars env))
+            (let ((varnum (compile-body-level-form func 1 form)))
               (when (and (!= varnum -1)
                          (program-is-test-suite program)
                          (program-is-main-file program))
