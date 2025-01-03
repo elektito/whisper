@@ -845,12 +845,6 @@
           (let ((func-varnum (compile-lambda func indent (append (list (identifier 'special 'lambda 'lambda) (reverse params)) body) (list name) )))
             (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum)
             (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
-              ;; box modified vars
-              (let loop ((params params) (arg-varnums arg-varnums))
-                (unless (null? params)
-                  (when (var-is-modified? func (car params))
-                    (gen-code func indent "x~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (car arg-varnums) (car arg-varnums)))
-                  (loop (cdr params) (cdr arg-varnums))))
               (let ((ret-varnum (func-next-varnum func)))
                 (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
                           ret-varnum

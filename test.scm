@@ -700,3 +700,24 @@
   (and (not (eq? v a)) ;; the return value should be a newly allocated vector
        (equal? #(1 2) a)))
 (equal? #(1 2 3 4 5 6) (vector-append #(1 2) #() #(3 4 5 6)))
+
+(let ((b (box 10)))
+  (and (box? b)
+       (= (unbox b) 10)))
+(let ((b (box 10)))
+  (set-box! b 20)
+  (and (box? b)
+       (= (unbox b) 20)))
+
+(let ((x 10) (y 20))
+  (set! x 100)
+  (and (= x 100) (= y 20)))
+
+(let loop ((x 10) (y 20))
+  (set! x 100)
+  (and (= x 100) (= y 20)))
+
+(= 120 ((lambda (x y)
+          (set! x 100)
+          (+ x y))
+        10 20))
