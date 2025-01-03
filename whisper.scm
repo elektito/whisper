@@ -597,8 +597,6 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
-(define *specials* '(begin define define-syntax if include lambda let quasiquote quote syntax-rules))
-
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
   (let loop ((varnums '()) (forms forms))
@@ -1002,14 +1000,6 @@
             (car primcalls)
             (loop (cdr primcalls))))))
 
-(define (lookup-special identifier)
-  (let loop ((specials *specials*))
-    (if (null? specials)
-        #f
-        (if (eq? (identifier-meaning identifier) (car specials))
-            (car specials)
-            (loop (cdr specials))))))
-
 (define-record-type <meaning>
   (make-meaning kind info)
   meaning?
@@ -1034,10 +1024,7 @@
   ;;
   ;;  - unknown: neither of the previous ones
   (cond ((identifier-is-special identifier)
-         (let ((special-info (lookup-special identifier)))
-           (if special-info
-               (make-meaning 'special special-info)
-               (error (format "cannot find info about special '~s'; this must be a bug." identifier)))))
+         (make-meaning 'special (identifier-meaning identifier)))
         ((identifier-is-primcall identifier)
          (let ((primcall-info (lookup-primcall identifier)))
            (if primcall-info
