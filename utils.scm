@@ -449,9 +449,9 @@
 (define (vector-copy . args)
   ;; case-lambda
   (cond ((= (length args) 1)
-         (%vector-copy vector 0 (vector-length (car args))))
+         (%vector-copy (car args) 0 (vector-length (car args))))
         ((= (length args) 2)
-         (%vector-copy vector (cadr args) (vector-length (car args))))
+         (%vector-copy (car args) (cadr args) (vector-length (car args))))
         ((= (length args) 3)
          (%vector-copy (car args) (cadr args) (caddr args)))
         (else (error "invalid number of arguments to vector-copy"))))
@@ -564,7 +564,7 @@
         (else (error "invalid number of arguments for vector->string"))))
 
 (define (%vector-fill! vec fill start end)
-  (let loop ((i 0))
+  (let loop ((i start))
     (if (= i end)
         vec
         (begin
@@ -576,7 +576,7 @@
   (cond ((= 2 (length args))
          (%vector-fill! (car args) (cadr args) 0 (vector-length (car args))))
         ((= 3 (length args))
-         (%vector-fill! (car args) (cadr args) (caddr args) (vector-length vector)))
+         (%vector-fill! (car args) (cadr args) (caddr args) (vector-length (car args))))
         ((= 4 (length args))
          (%vector-fill! (car args) (cadr args) (caddr args) (cadddr args)))
         (else (error "invalid number of arguments to vector-fill!"))))
