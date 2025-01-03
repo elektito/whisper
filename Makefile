@@ -1,6 +1,6 @@
 CFLAGS ?=
 
-SRC_FILES = whisper.scm utils.scm format.scm qq.scm macro.scm
+SRC_FILES = whisper.scm utils.scm format.scm qq.scm macro.scm preprocess.scm
 
 all: whisper-v5
 
