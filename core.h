@@ -80,6 +80,7 @@ enum object_type {
     OBJ_ERROR,
     OBJ_VECTOR,
     OBJ_WRAPPED,
+    OBJ_BOX,
 };
 
 enum port_direction {
@@ -122,6 +123,9 @@ struct object {
             value value;
             value kind;
         } wrapped;
+        struct {
+            value value;
+        } box;
         struct symbol symbol; /* used for uninterned symbols */
     };
 };
@@ -186,6 +190,7 @@ struct object {
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 #define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
 #define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
+#define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
 
 #define RAISE(...) { print_stacktrace(); fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
 
@@ -414,6 +419,8 @@ static void gc_recurse(value v) {
         } else if (GET_OBJECT(v)->type == OBJ_WRAPPED) {
             gc_recurse(GET_OBJECT(v)->wrapped.value);
             gc_recurse(GET_OBJECT(v)->wrapped.kind);
+        } else if (GET_OBJECT(v)->type == OBJ_BOX) {
+            gc_recurse(GET_OBJECT(v)->box.value);
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -834,6 +841,10 @@ static void print_unprintable(value v, value port) {
             _write(GET_OBJECT(v)->wrapped.value, port);
             GET_OBJECT(port)->port.printf(port, ">");
         }
+    } else if (IS_BOX(v)) {
+        GET_OBJECT(port)->port.printf(port, "#<box value=");
+        _write(GET_OBJECT(v)->box.value, port);
+        GET_OBJECT(port)->port.printf(port, ">");
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
     }
@@ -1104,6 +1115,25 @@ static value primcall_boolean_q(environment env, enum call_flags flags, int narg
     value v = next_arg();
     free_args();
     return BOOL(IS_BOOL(v));
+}
+
+static value primcall_box(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("box needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    struct object *box = alloc_object();
+    box->type = OBJ_BOX;
+    box->box.value = v;
+    return OBJECT(box);
+}
+
+static value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("box? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_BOX(v));
 }
 
 static value primcall_car(environment env, enum call_flags flags, int nargs, ...) {
@@ -1559,6 +1589,18 @@ static value primcall_read_line(environment env, enum call_flags flags, int narg
     return GET_OBJECT(port)->port.read_line(port);
 }
 
+static value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("set-box! needs two arguments"); }
+    init_args();
+    value box = next_arg();
+    value obj = next_arg();
+    free_args();
+
+    if (!IS_BOX(box)) { RAISE("set-box! first argument is not a box"); }
+    GET_OBJECT(box)->box.value = obj;
+    return VOID;
+}
+
 static value primcall_set_car_b(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("set-car! needs two arguments"); }
     init_args();
@@ -1796,6 +1838,16 @@ static value primcall_urandom(environment env, enum call_flags flags, int nargs,
     if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
 
     return s;
+}
+
+static value primcall_unbox(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("unbox needs a single argument"); }
+    init_args();
+    value box = next_arg();
+    free_args();
+
+    if (!IS_BOX(box)) { RAISE("unbox argument is not a box object"); }
+    return GET_OBJECT(box)->box.value;
 }
 
 static value primcall_unwrap(environment env, enum call_flags flags, int nargs, ...) {
