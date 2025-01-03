@@ -818,8 +818,6 @@
       (let ((varnum (compile-body-level-form func (+ 1 indent) (car body))))
         (if (null? (cdr body))
             (begin
-              ;;(gen-code func (+ 1 indent) "x~a = ")
-              ;;(gen-code func indent "}\n")
               (if (negative? varnum)
                   (if (negative? last-varnum)
                       (compile-error "empty let body: ~s" form)
