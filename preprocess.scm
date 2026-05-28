@@ -134,14 +134,60 @@
           (loop (+ i 1) veclen)))))
 
 (define (preprocess-list env form)
+  ;; CODE MODE: called only on forms that are being compiled as code.
+  ;; Must not be called on quoted data. binding-form dispatch (lambda,
+  ;; let, define, ...) assumes the form is syntactically valid code and
+  ;; will crash on data that merely looks like a binding form.
   (let ((m (pp-environment-lookup env (car form))))
-    ;; process forms that create bindings differently
     (cond ((identifier-is-special m 'define) (preprocess-define env form))
           ((identifier-is-special m 'define-syntax) (preprocess-define-syntax env form))
           ((identifier-is-special m 'lambda) (preprocess-lambda env form))
           ((identifier-is-special m 'let) (preprocess-let env form))
           ((identifier-is-special m 'set!) (preprocess-set! env form))
+          ((identifier-is-special m 'quote) (preprocess-quote env form))
           (else (preprocess-list-items env form)))))
+
+(define (preprocess-quote env form)
+  ;; mark the head as the special 'quote identifier, then walk the
+  ;; quoted datum *without* dispatching on binding-form heads. Quoted
+  ;; data is inert and must not be interpreted as code (otherwise things
+  ;; like '(lambda 5 6) are rejected as malformed lambdas by
+  ;; preprocess-lambda). but we still need to convert symbols inside to
+  ;; identifiers, since macro templates use quoted patterns like
+  ;; '(field-tag ...) where the symbols are template variables that the
+  ;; macro expander recognizes by identity.
+  (set-car! form (identifier 'special (car form) 'quote))
+  (when (pair? (cdr form))
+    (set-car! (cdr form) (preprocess-quoted-form env (cadr form))))
+  form)
+
+(define (preprocess-quoted-form env form)
+  ;; DATA MODE: walks quoted data, converting symbols to identifiers
+  ;; without dispatching on binding-form heads. The symbol to identifier
+  ;; conversion is still needed here because macro templates are stored
+  ;; as quoted data and the expander matches template variables by
+  ;; identifier identity (free-identifier=?).
+  (cond ((symbol? form) (let ((m (pp-environment-lookup env form)))
+                          (if m m (identifier 'global form form))))
+        ((null? form) '())
+        ((pair? form) (preprocess-quoted-list env form))
+        ((vector? form) (preprocess-quoted-vector env form))
+        (else form)))
+
+(define (preprocess-quoted-list env form)
+  (let loop ((p form))
+    (set-car! p (preprocess-quoted-form env (car p)))
+    (cond ((pair? (cdr p)) (loop (cdr p)))
+          (else (set-cdr! p (preprocess-quoted-form env (cdr p)))
+                form))))
+
+(define (preprocess-quoted-vector env form)
+  (let loop ((i 0) (veclen (vector-length form)))
+    (if (= i veclen)
+        form
+        (begin
+          (vector-set! form i (preprocess-quoted-form env (vector-ref form i)))
+          (loop (+ i 1) veclen)))))
 
 (define (preprocess-set! env form)
   (preprocess-list-items env form)

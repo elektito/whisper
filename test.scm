@@ -721,3 +721,11 @@
           (set! x 100)
           (+ x y))
         10 20))
+
+;; quoted data containing binding-form-shaped lists must not be
+;; interpreted as code by the preprocessor
+(equal? '(lambda 5 6) '(lambda 5 6))
+(equal? '(let) '(let))
+(equal? '(define x) '(define x))
+(eq? (car '(lambda x x)) 'lambda)
+(eq? (length '(a b c)) 3)
