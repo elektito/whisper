@@ -1,5 +1,6 @@
 #include <bits/time.h>
 #include <errno.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -481,6 +482,16 @@ static int is_valid_value(void *ptr, struct pool *heap) {
  * seems to fall exactly into this category. */
 __attribute__((no_sanitize("address")))
 static void gc(void) {
+    /* Spill callee-saved registers (rbx, r12-r15 on x86_64) onto the
+     * stack before we scan it. The C compiler is free to keep live
+     * Scheme values in those registers across calls; without this they
+     * would be invisible to the stack scan and their referents would be
+     * incorrectly collected. setjmp() is defined to save all
+     * callee-saved registers into env, which lives on this stack frame
+     * and is therefore covered by the scan below. */
+    jmp_buf env;
+    (void) setjmp(env);
+
     uint64_t ss;
     void *cur_stack = &ss;
 
