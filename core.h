@@ -482,9 +482,7 @@ static void gc(void) {
      * and is therefore covered by the scan below. */
     jmp_buf env;
     (void) setjmp(env);
-
-    uint64_t ss;
-    void *cur_stack = &ss;
+    void *cur_stack = &env;
 
     if (now() - last_gc_time < GC_MIN_INTERVAL) {
         return;
