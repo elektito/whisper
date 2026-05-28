@@ -654,7 +654,8 @@
 (define (make-record-type name fields)
   ;; a record "type" is a manually constructed wrapped vector itself.
   (wrap (vector (gensym (symbol->string name))
-                fields)
+                fields
+                name)
         record-type-meta-type-id))
 
 (define (record-type? obj)
@@ -667,6 +668,9 @@
 (define (record-type-fields record-type-obj)
   (vector-ref (unwrap record-type-obj) 1))
 
+(define (record-type-name record-type-obj)
+  (vector-ref (unwrap record-type-obj) 2))
+
 ;; helper function to get the index of a field in the underlying vector, given
 ;; the field's tag. "start-idx" should be initially passed 0, and "fields"
 ;; should be the list of field tags for the record type.
@@ -677,14 +681,13 @@
 
 (define (record-constructor record-type tags)
   (unless (record-type? record-type)
-    (error "Invalid record type" record-type))
+    (error (format "record-constructor: not a record type: ~s" record-type)))
   (let ((type-id (record-type-type-id record-type))
         (fields (record-type-fields record-type)))
     (lambda args
       (unless (= (length tags) (length args))
-        (error "Invalid number of arguments for record constructor"
-               (length tags)))
-
+        (error (format "~s constructor: expected ~a arguments, got ~a"
+                       (record-type-name record-type) (length tags) (length args))))
       (let loop ((vec (make-vector (length fields)))
                  (tags tags)
                  (args args))
@@ -698,31 +701,33 @@
 
 (define (record-predicate record-type)
   (unless (record-type? record-type)
-    (error "Invalid record type" record-type))
+    (error (format "record-predicate: not a record type: ~s" record-type)))
   (lambda (obj)
     (and (wrapped? obj)
          (eq? (wrapped-kind obj) (record-type-type-id record-type)))))
 
 (define (record-accessor record-type tag)
   (unless (record-type? record-type)
-    (error "Invalid record type" record-type))
+    (error (format "record-accessor: not a record type: ~s" record-type)))
   (let ((idx (record-type-field-idx tag 0 (record-type-fields record-type)))
         (type-id (record-type-type-id record-type)))
     (lambda (obj)
       (unless (and (wrapped? obj)
                    (eq? (wrapped-kind obj) type-id))
-        (error (format "Invalid value passed to accessor procedure (expecting: ~s, got: ~s)" (record-type-type-id record-type) obj)))
+        (error (format "~s accessor: expected ~s, got ~s"
+                       tag (record-type-name record-type) obj)))
       (vector-ref (unwrap obj) idx))))
 
 (define (record-modifier record-type tag)
   (unless (record-type? record-type)
-    (error "Invalid record type" record-type))
+    (error (format "record-modifier: not a record type: ~s" record-type)))
   (let ((idx (record-type-field-idx tag 0 (record-type-fields record-type)))
         (type-id (record-type-type-id record-type)))
     (lambda (obj value)
       (unless (and (wrapped? obj)
                    (eq? (wrapped-kind obj) type-id))
-        (error (format "Invalid value passed to modifier procedure  (expecting: ~s, got: ~s)" (record-type-type-id record-type) obj)))
+        (error (format "~s modifier: expected ~s, got ~s"
+                       tag (record-type-name record-type) obj)))
       (vector-set! (unwrap obj) idx value))))
 
 (define (record-set-print record-type print-proc)
