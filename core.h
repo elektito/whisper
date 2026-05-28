@@ -322,6 +322,7 @@ struct pool {
     int next_index; /* next index alloc_from_heap better start searching at */
     void *start;
     void *end;
+    uint64_t tag; /* value tag expected for all objects in this pool */
 };
 
 /* we're gonna call a linked list of pools, a heap. */
@@ -351,7 +352,7 @@ static uint64_t now(void) {
     return tp.tv_sec * 1000000000 + tp.tv_nsec;
 }
 
-static struct pool *create_heap(int object_size) {
+static struct pool *create_heap(int object_size, uint64_t tag) {
     int block_size = ALIGN16(sizeof(struct block)) + ALIGN16(object_size);
 
     int total_size = sizeof(struct pool) + block_size * POOL_SIZE;
@@ -362,6 +363,7 @@ static struct pool *create_heap(int object_size) {
     pool->block_size = block_size;
     pool->start = pool + 1; /* one struct pool ahead */
     pool->end = (void*) pool + total_size;
+    pool->tag = tag;
 
     return pool;
 }
@@ -380,18 +382,19 @@ static struct pool *add_pool(struct pool *pool) {
     new_pool->next_index = 0;
     new_pool->start = (void*) new_pool + header_size;
     new_pool->end = (void*) new_pool + total_size;
+    new_pool->tag = pool->tag;
     return new_pool;
 }
 
 static void init_memory(void) {
-    pairs_heap = create_heap(sizeof(struct pair));
-    objects_heap = create_heap(sizeof(struct object));
-    strings_heap = create_heap(sizeof(struct string));
-    closure0s_heap = create_heap(sizeof(struct closure0));
-    closure1s_heap = create_heap(sizeof(struct closure1));
-    closure2s_heap = create_heap(sizeof(struct closure2));
-    closure3s_heap = create_heap(sizeof(struct closure3));
-    closures_heap = create_heap(sizeof(struct closure));
+    pairs_heap = create_heap(sizeof(struct pair), PAIR_TAG);
+    objects_heap = create_heap(sizeof(struct object), OBJECT_TAG);
+    strings_heap = create_heap(sizeof(struct string), STRING_TAG);
+    closure0s_heap = create_heap(sizeof(struct closure0), CLOSURE_TAG);
+    closure1s_heap = create_heap(sizeof(struct closure1), CLOSURE_TAG);
+    closure2s_heap = create_heap(sizeof(struct closure2), CLOSURE_TAG);
+    closure3s_heap = create_heap(sizeof(struct closure3), CLOSURE_TAG);
+    closures_heap = create_heap(sizeof(struct closure), CLOSURE_TAG);
 
     /* if you add more heaps, remember to update the list of heaps in
      * gc() function too */
@@ -456,19 +459,7 @@ static int is_valid_value(void *ptr, struct pool *heap) {
     if (!found)
         return 0;
 
-    /* 5 (binary 101), is the tag used for misc kinds of objects whose
-     * value is in the pointer, like nil, #t, #f, void, characters,
-     * etc. */
-    if (IS_PAIR(ptr) ||
-        IS_OBJECT(ptr) ||
-        IS_STRING(ptr) ||
-        IS_CLOSURE(ptr) ||
-        ((uint64_t)ptr & TAG_MASK) == 5)
-    {
-        return 1;
-    }
-
-    return 0;
+    return ((uint64_t)ptr & TAG_MASK) == pool->tag;
 }
 
 /* this function would cause a false positive stack-buffer-overflow with
