@@ -729,3 +729,15 @@
 (equal? '(define x) '(define x))
 (eq? (car '(lambda x x)) 'lambda)
 (eq? (length '(a b c)) 3)
+
+;; regression: set! on a captured (free) variable must write through
+;; the closure environment, not refer to a nonexistent C local.
+;; before the fix, compile-set! only handled global and local, causing
+;; a C compile error like: '__35n__1' undeclared.
+(let ((make-counter (lambda ()
+                      (let ((n 0))
+                        (lambda ()
+                          (set! n (+ n 1))
+                          n)))))
+  (let ((c (make-counter)))
+    (and (= (c) 1) (= (c) 2) (= (c) 3))))
