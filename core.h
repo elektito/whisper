@@ -1065,6 +1065,7 @@ static value string_to_symbol(value v) {
     symbols[n_symbols - 1].name_len = GET_STRING(v)->len;
     symbols[n_symbols - 1].name = malloc(GET_STRING(v)->len);
     memcpy(symbols[n_symbols - 1].name, GET_STRING(v)->s, GET_STRING(v)->len);
+    symbols[n_symbols - 1].value = VOID;
     return SYMBOL(n_symbols - 1);
 }
 
