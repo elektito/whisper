@@ -411,9 +411,23 @@ static void gc_recurse(value v) {
     }
 
     if (IS_PAIR(v)) {
-        block->mark = 1;
-        gc_recurse(GET_PAIR(v)->car);
-        gc_recurse(GET_PAIR(v)->cdr);
+        /* iterate along the cdr chain instead of recursing, to avoid
+         * O(n) stack depth for lists of length n. we still recurse on
+         * car, but that is bounded by tree depth rather than list
+         * length. */
+        while (IS_PAIR(v)) {
+            block->mark = 1;
+            gc_recurse(GET_PAIR(v)->car);
+            v = GET_PAIR(v)->cdr;
+            if (!IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v))
+                return;
+            block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
+            if (!block->in_use || block->mark)
+                return;
+        }
+
+        /* handle the tail of an improper list (e.g. (a b . c)) */
+        gc_recurse(v);
     } else if (IS_OBJECT(v)) {
         block->mark = 1;
         if (GET_OBJECT(v)->type == OBJ_VECTOR) {
