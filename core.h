@@ -1,4 +1,3 @@
-#include <bits/time.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -7,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
 enum call_flags {
@@ -305,8 +303,6 @@ const char *find_func_name(funcptr func) {
 #define POOL_SIZE 1048576
 #define ALIGN16(n) (((n) + 15) & ~15)
 
-/* minimum time between gc runs in nanoseconds */
-#define GC_MIN_INTERVAL 10000000000
 
 /* this is used as a header for all objects we allocate in a pool */
 struct block {
@@ -338,19 +334,9 @@ static struct pool *closures_heap;
 /* the stack address at the start of main function (used for gc) */
 static void *stack_start;
 
-static uint64_t last_gc_time = 0;
-
-/* return rough (monotonic) current time in nanoseconds */
-static uint64_t now(void) {
-    struct timespec tp;
-    int ret = clock_gettime(CLOCK_MONOTONIC_COARSE, &tp);
-    if (ret) {
-        fprintf(stderr, "could not read time\n");
-        exit(1);
-    }
-
-    return tp.tv_sec * 1000000000 + tp.tv_nsec;
-}
+/* both in units of allocations (object count), not bytes */
+static size_t allocations_since_gc = 0;
+static size_t gc_threshold = POOL_SIZE;
 
 static struct pool *create_heap(int object_size, uint64_t tag) {
     int block_size = ALIGN16(sizeof(struct block)) + ALIGN16(object_size);
@@ -498,10 +484,6 @@ static void gc(void) {
     (void) setjmp(env);
     void *cur_stack = &env;
 
-    if (now() - last_gc_time < GC_MIN_INTERVAL) {
-        return;
-    }
-
     /* recursively mark values accessible from global symbols */
     for (int i = 0; i < n_symbols; ++i) {
         gc_recurse(symbols[i].value);
@@ -573,16 +555,28 @@ static void gc(void) {
 
     /* TODO maybe free empty pools? */
 
-    last_gc_time = now();
+    /* set the next gc threshold to 2x the current live object count so
+     * that GC frequency adapts to the size of the live set (in
+     * allocations, not bytes) */
+    size_t live_count = 0;
+    for (int i = 0; i < n_heaps; ++i) {
+        for (struct pool *p = heaps[i]; p; p = p->next)
+            live_count += p->in_use_count;
+    }
+
+    /* floor at POOL_SIZE so we don't GC on every allocation when the
+     * live set is very small */
+    gc_threshold = live_count * 2 < POOL_SIZE ? POOL_SIZE : live_count * 2;
+    allocations_since_gc = 0;
 }
 
 static void *alloc_from_heap(struct pool *head) {
-    struct pool *pool = head;
-    while (pool->next && pool->in_use_count == POOL_SIZE) pool = pool->next;
-
-    if (pool->in_use_count > POOL_SIZE * 0.8) {
+    if (allocations_since_gc >= gc_threshold) {
         gc();
     }
+
+    struct pool *pool = head;
+    while (pool->next && pool->in_use_count == POOL_SIZE) pool = pool->next;
 
     if (pool->in_use_count == POOL_SIZE) { /* reached the last pool */
         pool = add_pool(pool);
@@ -595,6 +589,7 @@ static void *alloc_from_heap(struct pool *head) {
             if (!block->in_use) {
                 block->in_use = 1;
                 pool->in_use_count++;
+                allocations_since_gc++;
 
                 pool->next_index = (j + 1) % POOL_SIZE;
 
