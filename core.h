@@ -300,7 +300,7 @@ const char *find_func_name(funcptr func) {
 
 /************ memory management ***********/
 
-#define POOL_SIZE 1048576
+#define POOL_SIZE 16384
 #define ALIGN16(n) (((n) + 15) & ~15)
 
 
