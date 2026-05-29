@@ -542,6 +542,11 @@ static void gc(void) {
 
                     block->in_use = 0;
                     pool->in_use_count--;
+
+                    /* zero the data so stale pointers don't cause
+                     * double-frees if the block is reallocated before
+                     * being fully initialized and GC runs again */
+                    memset(v, 0, pool->block_size - ALIGN16(sizeof(struct block)));
                 }
 
                 block->mark = 0;
