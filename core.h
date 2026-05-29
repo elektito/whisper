@@ -433,8 +433,6 @@ static void gc_recurse(value v) {
         for (int i = 0; i < GET_CLOSURE(v)->n_freevars; ++i) {
             gc_recurse(GET_CLOSURE(v)->freevars[i]);
         }
-    } else if (IS_STRING(v)) {
-        block->mark = 1;
     }
 }
 
