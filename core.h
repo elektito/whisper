@@ -685,12 +685,16 @@ static value make_pair(value car, value cdr) {
 }
 
 static value reverse_list(value list, value acc) {
-    if (list == NIL) {
-        return acc;
-    } else {
+    /* Iterative: read car/cdr before make_pair so GC cannot free the pair
+     * between field reads (C argument evaluation order is unspecified). */
+    while (list != NIL) {
         struct pair *p = GET_PAIR(list);
-        return reverse_list(p->cdr, make_pair(p->car, acc));
+        value car = p->car;
+        value cdr = p->cdr;
+        acc  = make_pair(car, acc);
+        list = cdr;
     }
+    return acc;
 }
 
 static value make_string(const char *s, size_t len) {
