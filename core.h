@@ -460,6 +460,103 @@ static int is_valid_value(void *ptr, struct pool *heap) {
     return ((uint64_t)ptr & TAG_MASK) == pool->tag;
 }
 
+struct freevars_closure_mapping {
+    uint64_t freevars;
+    value    closure;
+};
+
+/* Build a map from each large closure's malloc'd freevars pointer to its
+ * closure value.  The caller must free() the returned array. */
+static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
+    /* calculate the number of in-use (large) closure objects */
+    int len = 0;
+    for (struct pool *pool = closures_heap; pool; pool = pool->next)
+        for (void *b = pool->start; b < pool->end; b += pool->block_size)
+            if (((struct block *)b)->in_use)
+                len++;
+
+    /* create a map from malloc'd freevars pointers to their associated
+     * closure objects */
+    struct freevars_closure_mapping *map = NULL;
+    if (len > 0) {
+        map = malloc(len * sizeof(*map));
+        int idx = 0;
+        for (struct pool *pool = closures_heap; pool; pool = pool->next) {
+            for (void *b = pool->start; b < pool->end; b += pool->block_size) {
+                struct block *blk = b;
+                if (blk->in_use) {
+                    struct closure *cl = b + ALIGN16(sizeof(struct block));
+                    map[idx].freevars = (uint64_t)cl->freevars;
+                    map[idx].closure  = CLOSURE(cl);
+                    idx++;
+                }
+            }
+        }
+    }
+
+    *out_len = len;
+    return map;
+}
+
+/* see next function's comment to see why no_sanitize */
+__attribute__((no_sanitize("address")))
+static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
+    int freevars_map_len;
+    struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
+
+    for (void **p = cur_stack; p < (void**) stack_start; p++) {
+        for (int i = 0; i < n_heaps; ++i) {
+            if (is_valid_value(*p, heaps[i])) {
+                gc_recurse(*p);
+            }
+        }
+
+        /* Our code strips tags when accessing heap objects (e.g.
+         * GET_PAIR does ptr & ~7), leaving an untagged pointer. The
+         * compiler may keep this untagged pointer and discard the
+         * original tagged value once it is no longer needed. If GC runs
+         * while only the untagged pointer is live, the object appears
+         * unreachable.
+         *
+         * Untagged pointers have zero tag bits, just like fixnums, but
+         * heap addresses are always far above usual fixnum values so
+         * false positives are unlikely (but possible, which is what we
+         * accept in a conservative garbage collector).
+         *
+         * For large closures env points to a malloc'd array outside any
+         * pool; those are matched via freevars_map. */
+        uint64_t raw = (uint64_t)*p;
+        if ((raw & TAG_MASK) == 0 && raw > 0) {
+            for (int i = 0; i < n_heaps; ++i) {
+                struct pool *pool = heaps[i];
+                while (pool) {
+                    if ((void *)raw >= pool->start && (void *)raw < pool->end) {
+                        size_t offset = (uint8_t *)raw - (uint8_t *)pool->start;
+                        void *block_start = (uint8_t *)pool->start
+                                            + (offset / pool->block_size) * pool->block_size;
+                        struct block *blk = (struct block *)block_start;
+                        if (blk->in_use) {
+                            void *obj = block_start + ALIGN16(sizeof(struct block));
+                            gc_recurse((value)((uint64_t)obj | pool->tag));
+                        }
+                        break;
+                    }
+                    pool = pool->next;
+                }
+            }
+
+            for (int j = 0; j < freevars_map_len; j++) {
+                if (freevars_map[j].freevars == raw) {
+                    gc_recurse(freevars_map[j].closure);
+                    break;
+                }
+            }
+        }
+    }
+
+    free(freevars_map);
+}
+
 /* this function would cause a false positive stack-buffer-overflow with
  * address sanitizer. address sanitizer itself says this about the issue:
  *
@@ -499,14 +596,7 @@ static void gc(void) {
     };
     int n_heaps = sizeof(heaps) / sizeof(heaps[0]);
 
-    /* look for values that look like valid pointers on the stack */
-    for (void **p = cur_stack; p < (void**) stack_start; p++) {
-        for (int i = 0; i < n_heaps; ++i) {
-            if (is_valid_value(*p, heaps[i])) {
-                gc_recurse(*p);
-            }
-        }
-    }
+    gc_scan_stack(cur_stack, heaps, n_heaps);
 
     /* free unmarked objects and reset marks */
     for (int i = 0; i < n_heaps; ++i) {
