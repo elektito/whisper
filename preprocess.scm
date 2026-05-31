@@ -294,7 +294,9 @@
         (else
          (set-car! form (identifier 'special (car form) 'define-syntax))
          (set-car! (cdr form) (identifier 'global (cadr form) (cadr form)))
-         (preprocess-form env (caddr form))
+         ; use quoted-form walk: templates are data, not code. treating
+         ; them as code could fail.
+         (preprocess-quoted-form env (caddr form))
          form)))
 
 (define (preprocess-list-items env form)

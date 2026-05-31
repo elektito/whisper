@@ -752,3 +752,14 @@
 (let ((x 0))
   (increment! x)
   (= x 1))
+
+;; regression: preprocess-define-syntax was calling preprocess-form on
+;; the syntax-rules body, causing preprocess-let to misparse templates
+;; that use (let ((v ...) ...) ...) as executable code, failing when it
+;; called (length '...) on the ellipsis symbol.
+(define-syntax bind-to-zero
+  (syntax-rules ()
+    ((bind-to-zero (v ...) body ...)
+     (let ((v 0) ...)
+       body ...))))
+(= (bind-to-zero (x y) (+ x y)) 0)
