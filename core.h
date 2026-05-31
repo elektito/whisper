@@ -557,6 +557,23 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
     free(freevars_map);
 }
 
+static void gc_free_empty_pools(struct pool **heaps, int n_heaps) {
+    for (int i = 0; i < n_heaps; ++i) {
+        struct pool *pool = heaps[i]->next;  /* skip head — owned by global */
+        while (pool) {
+            struct pool *next = pool->next;
+            if (pool->in_use_count == 0) {
+                pool->prev->next = next;
+                if (next)
+                    next->prev = pool->prev;
+                free(pool);
+            }
+
+            pool = next;
+        }
+    }
+}
+
 static void gc_sweep(struct pool **heaps, int n_heaps) {
     /* free unmarked objects and reset marks */
     for (int i = 0; i < n_heaps; ++i) {
@@ -649,8 +666,7 @@ static void gc(void) {
 
     gc_scan_stack(cur_stack, heaps, n_heaps);
     gc_sweep(heaps, n_heaps);
-
-    /* TODO maybe free empty pools? */
+    gc_free_empty_pools(heaps, n_heaps);
 
     /* set the next gc threshold to 2x the current live object count so
      * that GC frequency adapts to the size of the live set (in
