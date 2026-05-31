@@ -1100,8 +1100,7 @@
           ((unknown) (if (func-parent func)
                          (compile-call func indent form)
                          (compile-error "unbound identifier: ~a" (car form))))
-          ((macro) (let ((transformer (meaning-info meaning)))
-                     (compile-form func indent ((transformer-func transformer) form))))
+          ((macro) (error (format "internal error: unexpanded macro ~a reached codegen" (car form))))
           (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
 
 (define (var-is-modified? func var)
@@ -1293,6 +1292,47 @@
                                  (identifier 'primcall '<= '<=)
                                  (identifier 'primcall '>= '>=)))
 
+(define (expand-form func form)
+  ;; recursively expand all macro calls in an already-preprocessed form.
+  ;; only quote is not descended into. all other forms (lambda bodies,
+  ;; let bodies, if branches, etc.) may contain macro calls.
+  (if (not (pair? form))
+      form
+      (if (identifier-is-special (car form) 'quote)
+          form
+          (if (and (identifier? (car form))
+                   (eq? 'macro (meaning-kind (lookup-identifier func (car form)))))
+              (expand-form func
+                ((transformer-func (meaning-info (lookup-identifier func (car form)))) form))
+              (expand-form-list func form)))))
+
+(define (expand-form-list func form)
+  ;; rebuild a list or dotted-pair by expanding each element. handles
+  ;; improper lists (e.g. lambda rest params in templates).
+  (if (not (pair? form))
+      form
+      (cons (expand-form func (car form))
+            (expand-form-list func (cdr form)))))
+
+(define (collect-modified-vars func form)
+  ;; walk an already-expanded form and record every set! target in
+  ;; program-modified-vars. descends into all subforms including lambda
+  ;; bodies -- a set! of an outer variable inside a nested lambda still
+  ;; needs to trigger boxing at the outer binding site.
+  ;; only quote is skipped (inert data).
+  (when (and (pair? form)
+             (not (identifier-is-special (car form) 'quote)))
+    (if (identifier-is-special (car form) 'set!)
+        (when (and (pair? (cdr form)) (identifier? (cadr form)))
+          (let ((prog (func-program func)))
+            (unless (member (cadr form) (program-modified-vars prog) bound-identifier=?)
+              (program-modified-vars-set! prog
+                (cons (cadr form) (program-modified-vars prog))))))
+        (let loop ((f form))
+          (when (pair? f)
+            (collect-modified-vars func (car f))
+            (loop (cdr f)))))))
+
 (define (compile-program program)
   (let ((func (add-function program #f '() #f))
         (env (preprocess-create-environment *root-identifiers*)))
@@ -1309,12 +1349,13 @@
                 (loop (read (program-port program)))))
           (begin
             (preprocess-form env form)
-            (program-modified-vars-set! program (pp-environment-modified-vars env))
-            (let ((varnum (compile-body-level-form func 1 form)))
-              (when (and (!= varnum -1)
-                         (program-is-test-suite program)
-                         (program-is-main-file program))
-                (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program))))
+            (let ((expanded (expand-form func form)))
+              (collect-modified-vars func expanded)
+              (let ((varnum (compile-body-level-form func 1 expanded)))
+                (when (and (!= varnum -1)
+                           (program-is-test-suite program)
+                           (program-is-main-file program))
+                  (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))))
             (loop (read (program-port program))))))
 
     ;; check for undefined referenced variables

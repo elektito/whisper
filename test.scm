@@ -741,3 +741,14 @@
                           n)))))
   (let ((c (make-counter)))
     (and (= (c) 1) (= (c) 2) (= (c) 3))))
+
+;; regression: set! introduced by a macro expansion must correctly trigger
+;; boxing for the target variable. previously this failed at runtime with
+;; "set-box! first argument is not a box".
+(define-syntax increment!
+  (syntax-rules ()
+    ((_ var) (set! var (+ var 1)))))
+
+(let ((x 0))
+  (increment! x)
+  (= x 1))

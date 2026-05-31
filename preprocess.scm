@@ -62,13 +62,7 @@
   pp-environment?
   (parent pp-environment-parent)
   (bindings pp-environment-bindings pp-environment-bindings-set!)
-  (counter pp-environment-counter pp-environment-counter-set!)
-  (modified-vars pp-environment-modified-vars pp-environment-modified-vars-set!))
-
-(define (pp-environment-add-modified-var env var)
-  (if (pp-environment-parent env)
-      (pp-environment-add-modified-var (pp-environment-parent env) var)
-      (pp-environment-modified-vars-set! env (cons var (pp-environment-modified-vars env)))))
+  (counter pp-environment-counter pp-environment-counter-set!))
 
 (define (pp-environment-next-counter env)
   (let loop ((root env))
@@ -95,7 +89,6 @@
   (let ((env (make-pp-environment parent)))
     (pp-environment-counter-set! env 0)
     (pp-environment-bindings-set! env '())
-    (pp-environment-modified-vars-set! env '())
     env))
 
 (define (preprocess-create-environment root-identifiers)
@@ -143,7 +136,7 @@
           ((identifier-is-special m 'define-syntax) (preprocess-define-syntax env form))
           ((identifier-is-special m 'lambda) (preprocess-lambda env form))
           ((identifier-is-special m 'let) (preprocess-let env form))
-          ((identifier-is-special m 'set!) (preprocess-set! env form))
+          ((identifier-is-special m 'set!) (preprocess-list-items env form))
           ((identifier-is-special m 'quote) (preprocess-quote env form))
           (else (preprocess-list-items env form)))))
 
@@ -188,13 +181,6 @@
         (begin
           (vector-set! form i (preprocess-quoted-form env (vector-ref form i)))
           (loop (+ i 1) veclen)))))
-
-(define (preprocess-set! env form)
-  (preprocess-list-items env form)
-  (when (and (pair? (cdr form))
-             (identifier? (cadr form)))
-    (pp-environment-add-modified-var env (cadr form)))
-  form)
 
 (define (preprocess-let env form)
   (set-car! form (identifier 'special (car form) 'let))
