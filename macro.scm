@@ -137,7 +137,7 @@
       (lambda (x store)
         (free-identifier=? x lit))
       (lambda (x store)
-        (eq? x lit))))
+        (equal? x lit))))
 
 (define (pp-compile-variable var)
   (lambda (x store)

@@ -763,3 +763,12 @@
      (let ((v 0) ...)
        body ...))))
 (= (bind-to-zero (x y) (+ x y)) 0)
+
+;; regression: pp-compile-literal used eq? for non-identifier literals,
+;; so string literals in syntax-rules patterns compared by identity and
+;; never matched across separate string objects.
+(define-syntax double-via-aux
+  (syntax-rules ()
+    ((double-via-aux "go" x) (* x 2))
+    ((double-via-aux x) (double-via-aux "go" x))))
+(= (double-via-aux 21) 42)
