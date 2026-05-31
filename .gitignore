@@ -1,0 +1,6 @@
+b.out
+b.c
+stage0
+stage1
+whisper-v[0-9]*
+bootstrap/
