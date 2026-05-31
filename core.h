@@ -498,7 +498,7 @@ static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
     return map;
 }
 
-/* see next function's comment to see why no_sanitize */
+/* see gc() function's comment to see why no_sanitize */
 __attribute__((no_sanitize("address")))
 static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
     int freevars_map_len;
@@ -557,47 +557,7 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
     free(freevars_map);
 }
 
-/* this function would cause a false positive stack-buffer-overflow with
- * address sanitizer. address sanitizer itself says this about the issue:
- *
- * HINT: this may be a false positive if your program uses some custom
-      stack unwind mechanism, swapcontext or vfork (longjmp and C++
-      exceptions *are* supported)
-
- * since we are indeed doing some sort of custom stack unwinding, this
- * seems to fall exactly into this category. */
-__attribute__((no_sanitize("address")))
-static void gc(void) {
-    /* Spill callee-saved registers (rbx, r12-r15 on x86_64) onto the
-     * stack before we scan it. The C compiler is free to keep live
-     * Scheme values in those registers across calls; without this they
-     * would be invisible to the stack scan and their referents would be
-     * incorrectly collected. setjmp() is defined to save all
-     * callee-saved registers into env, which lives on this stack frame
-     * and is therefore covered by the scan below. */
-    jmp_buf env;
-    (void) setjmp(env);
-    void *cur_stack = &env;
-
-    /* recursively mark values accessible from global symbols */
-    for (int i = 0; i < n_symbols; ++i) {
-        gc_recurse(symbols[i].value);
-    }
-
-    struct pool *heaps[] = {
-        pairs_heap,
-        objects_heap,
-        strings_heap,
-        closure0s_heap,
-        closure1s_heap,
-        closure2s_heap,
-        closure3s_heap,
-        closures_heap,
-    };
-    int n_heaps = sizeof(heaps) / sizeof(heaps[0]);
-
-    gc_scan_stack(cur_stack, heaps, n_heaps);
-
+static void gc_sweep(struct pool **heaps, int n_heaps) {
     /* free unmarked objects and reset marks */
     for (int i = 0; i < n_heaps; ++i) {
         struct pool *pool = heaps[i];
@@ -645,6 +605,50 @@ static void gc(void) {
             pool = pool->next;
         }
     }
+
+}
+
+/* this function would cause a false positive stack-buffer-overflow with
+ * address sanitizer. address sanitizer itself says this about the issue:
+ *
+ * HINT: this may be a false positive if your program uses some custom
+      stack unwind mechanism, swapcontext or vfork (longjmp and C++
+      exceptions *are* supported)
+
+ * since we are indeed doing some sort of custom stack unwinding, this
+ * seems to fall exactly into this category. */
+__attribute__((no_sanitize("address")))
+static void gc(void) {
+    /* Spill callee-saved registers (rbx, r12-r15 on x86_64) onto the
+     * stack before we scan it. The C compiler is free to keep live
+     * Scheme values in those registers across calls; without this they
+     * would be invisible to the stack scan and their referents would be
+     * incorrectly collected. setjmp() is defined to save all
+     * callee-saved registers into env, which lives on this stack frame
+     * and is therefore covered by the scan below. */
+    jmp_buf env;
+    (void) setjmp(env);
+    void *cur_stack = &env;
+
+    /* recursively mark values accessible from global symbols */
+    for (int i = 0; i < n_symbols; ++i) {
+        gc_recurse(symbols[i].value);
+    }
+
+    struct pool *heaps[] = {
+        pairs_heap,
+        objects_heap,
+        strings_heap,
+        closure0s_heap,
+        closure1s_heap,
+        closure2s_heap,
+        closure3s_heap,
+        closures_heap,
+    };
+    int n_heaps = sizeof(heaps) / sizeof(heaps[0]);
+
+    gc_scan_stack(cur_stack, heaps, n_heaps);
+    gc_sweep(heaps, n_heaps);
 
     /* TODO maybe free empty pools? */
 
