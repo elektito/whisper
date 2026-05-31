@@ -14,7 +14,19 @@ whisper-v5: stage1 core.h $(SRC_FILES)
 	./stage1 whisper.scm -o whisper-v5 -f "-Wl,-s $(CFLAGS)"
 	diff stage1 whisper-v5
 
+test: whisper-v5
+	./whisper-v5 test.scm -t -r
+
+matrix: whisper-v5
+	./whisper-v5 whisper.scm -c -o /tmp/b.c
+	@for o in 0 1 2 3; do \
+		echo "--- O$$o ---"; \
+		gcc -O$$o -Wl,-s -I. -o /tmp/b.$$o /tmp/b.c \
+		&& /tmp/b.$$o whisper.scm -o /tmp/out.$$o \
+		&& /tmp/b.$$o test.scm -t -r || exit 1; \
+	done
+
 clean:
 	rm -f whisper-v5 stage0 stage1
 
-.PHONY: all clean
+.PHONY: all clean test matrix
