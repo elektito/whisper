@@ -1465,6 +1465,8 @@
 (define (postprocess-cmdline args)
   (if (not (cmdline-input-file args))
       (command-line-error "missing input file"))
+  (if (and (cmdline-just-compile args) (cmdline-run args))
+      (command-line-error "-r and -c are mutually exclusive"))
   (if (cmdline-output-file args)
       (if (cmdline-just-compile args)
           (cmdline-c-file-set! args (cmdline-output-file args))
