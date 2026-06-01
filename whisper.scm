@@ -647,8 +647,7 @@
       (if (= i (string-length name))
           mangled
           (let ((ch (string-ref name i)))
-            (cond ((= i (string-length name)) mangled)
-                  ((or (char-alphabetic? ch) (char-numeric? ch))
+            (cond ((or (char-alphabetic? ch) (char-numeric? ch))
                    (loop (+ i 1) (string-append-char mangled ch)))
                   ((char=? #\- ch) (loop (+ i 1) (string-append mangled "_")))
                   ((char=? #\_ ch) (loop (+ i 1) (string-append mangled "__")))
