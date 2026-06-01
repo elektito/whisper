@@ -217,6 +217,8 @@
             (compile-error "bad let binding: ~s" binding))
           (when (not (symbol? (car binding)))
             (compile-error "bad let variable: ~s" (car binding)))
+          (when (memq (car binding) (map identifier-name (pp-environment-bindings new-env)))
+            (compile-error "duplicate variable in let: ~s" (car binding)))
           (let ((id (identifier 'local (car binding) (pp-unique-name (car binding) env))))
             (pp-environment-add-var new-env id)
             (set-car! binding id)
