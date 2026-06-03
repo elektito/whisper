@@ -198,6 +198,17 @@ struct object {
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
 #define free_args() va_end(argsx); free(arg_arr_base)
 
+/* primcall_apply malloc's an args array and passes it via
+ * CALL_HAS_ARG_ARRAY. The callee's arg_arr_base is a raw malloc pointer
+ * invisible to the conservative GC stack scan. This stack tracks active
+ * arrays so the GC can scan their contents directly. */
+struct args_array_frame {
+    value *args;
+    int    n;
+    struct args_array_frame *prev;
+};
+static struct args_array_frame *args_array_stack = NULL;
+
 static uint64_t gensym_counter;
 static int n_symbols = 0;
 static struct symbol *symbols = NULL;
@@ -651,6 +662,11 @@ static void gc(void) {
     for (int i = 0; i < n_symbols; ++i) {
         gc_recurse(symbols[i].value);
     }
+
+    /* scan any malloc'd args arrays live on the call stack (see args_array_stack) */
+    for (struct args_array_frame *f = args_array_stack; f; f = f->prev)
+        for (int i = 0; i < f->n; i++)
+            gc_recurse(f->args[i]);
 
     struct pool *heaps[] = {
         pairs_heap,
@@ -1230,7 +1246,10 @@ static value primcall_apply(environment env, enum call_flags flags, int nargs, .
         ptr = GET_PAIR(ptr)->cdr;
     }
 
+    struct args_array_frame frame = { args, func_nargs, args_array_stack };
+    args_array_stack = &frame;
     value ret = GET_CLOSURE(func)->func(GET_CLOSURE(func)->freevars, CALL_HAS_ARG_ARRAY, func_nargs, args);
+    args_array_stack = frame.prev;
 
     free_args();
     return ret;
