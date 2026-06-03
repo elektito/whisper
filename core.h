@@ -1016,6 +1016,9 @@ static void _display_pair(struct pair *v, value port, int in_the_middle) {
     }
 }
 
+/* vec is an untagged pointer. Safe only because _display never
+   allocates. If that changes, the conservative GC could miss the vector
+   and collect it. */
 static void _display_vector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, "#(");
     for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
@@ -1066,6 +1069,9 @@ static void _write_pair(struct pair *v, value port, int in_the_middle) {
     }
 }
 
+/* vec is an untagged pointer. Safe only because _write never allocates.
+   If that changes, the conservative GC could miss the vector and
+   collect it. */
 static void _write_vector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, "#(");
     for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
