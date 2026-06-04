@@ -534,6 +534,10 @@
         '`(a ,3 ,(+ 2 3)))
 (equal? ``,,3 '`,3)
 (equal? ```,,,3 '``,,3)
+(let ((a 1) (b '(2 3)))
+  (equal? `(,a . ,b) '(1 2 3)))
+(let ((a 1) (b 2))
+  (equal? `(,a . ,b) (cons 1 2)))
 
 ;; vectors and quasiquotes
 
