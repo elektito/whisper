@@ -1502,9 +1502,14 @@ static value primcall_gensym(environment env, enum call_flags flags, int nargs, 
     if (nargs == 1) {
         value name = next_arg();
         if (!IS_STRING(name)) { RAISE("gensym argument is not a string"); }
-        sym->symbol.name_len = GET_STRING(name)->len;
-        sym->symbol.name = malloc(sym->symbol.name_len);
-        memcpy(sym->symbol.name, GET_STRING(name)->s, sym->symbol.name_len);
+        uint64_t n = gensym_counter++;
+        int prefix_len = (int)GET_STRING(name)->len;
+        int suffix_len = snprintf(NULL, 0, "%lu", n);
+        int len = prefix_len + suffix_len;
+        sym->symbol.name_len = len;
+        sym->symbol.name = malloc(len);
+        memcpy(sym->symbol.name, GET_STRING(name)->s, prefix_len);
+        snprintf(sym->symbol.name + prefix_len, suffix_len + 1, "%lu", n);
     } else {
         char buf[32];
         snprintf(buf, sizeof(buf), "g%lu", gensym_counter++);
