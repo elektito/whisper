@@ -134,13 +134,13 @@ struct object {
 #define CLOSURE_TAG 0x02
 #define STRING_TAG 0x03
 #define PAIR_TAG 0x04
-#define VOID_TAG 0x15    /*      10_101 */
-#define BOOL_TAG 0xd     /*       1_101 */
-#define TRUE_TAG 0x1d    /*      11_101 */
-#define FALSE_TAG 0x0d   /*      01_101 */
-#define CHAR_TAG 0x25    /*     100_101 */
-#define SYMBOL_TAG 0x45  /*    1000_101 */
-#define NIL_TAG 0x85     /*   10000_101 */
+#define VOID_TAG 0x15    /*     10_101 */
+#define BOOL_TAG 0xd     /*      1_101 */
+#define TRUE_TAG 0x1d    /*     11_101 */
+#define FALSE_TAG 0x0d   /*     01_101 */
+#define CHAR_TAG 0x25    /*    100_101 */
+#define SYMBOL_TAG 0x45  /*   1000_101 */
+#define NIL_TAG 0x85     /*  10000_101 */
 #define EOFOBJ_TAG 0x105 /* 100000_101 */
 
 #define TAG_MASK 0x7
