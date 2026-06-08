@@ -1128,7 +1128,8 @@
                (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, envget(env, ~a));\n" varnum freevar-idx)
                (gen-code func indent "value x~a = envget(env, ~a);\n" varnum freevar-idx)))))
       ((primcall)
-       (gen-code func indent "value x~a = make_closure(primcall_~a, 0, 0);\n" varnum (list-ref (meaning-info meaning) 1)))
+       ;; TODO: use proper min/max args instead of -1 once closures support them
+       (gen-code func indent "value x~a = make_closure(primcall_~a, -1, 0);\n" varnum (list-ref (meaning-info meaning) 1)))
       ((special) (compile-error "invalid use of special: ~a" form))
 
       ;; allow use of not-yet defined variables only in non-top-level
