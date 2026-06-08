@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -1221,6 +1222,20 @@ static int string_cmp(struct string *s1, struct string *s2) {
     }
 }
 
+static int string_ci_cmp(struct string *s1, struct string *s2) {
+    if (s1->len != s2->len) {
+        return s1->len < s2->len ? -1 : 1;
+    }
+
+    for (size_t i = 0; i < s1->len; i++) {
+        int d = tolower((unsigned char) s1->s[i]) - tolower((unsigned char) s2->s[i]);
+        if (d != 0) {
+            return d;
+        }
+    }
+    return 0;
+}
+
 /************ primcall functions ***********/
 
 static value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
@@ -1897,8 +1912,7 @@ static value primcall_string_set_b(environment env, enum call_flags flags, int n
 }
 
 static value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs == 0) { RAISE("string=? needs at least one argument"); }
-    if (nargs == 1) return TRUE;
+    if (nargs < 2) { RAISE("string=? needs at least two arguments"); }
     init_args();
     value prev = next_arg();
     if (!IS_STRING(prev)) { RAISE("string=? argument is not a string"); }
@@ -1906,6 +1920,25 @@ static value primcall_string_eq_q(environment env, enum call_flags flags, int na
         value cur = next_arg();
         if (!IS_STRING(cur)) { RAISE("string=? argument is not a string"); }
         if (string_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
+            free_args();
+            return FALSE;
+        }
+        prev = cur;
+    }
+
+    free_args();
+    return TRUE;
+}
+
+static value primcall_string_ci_eq_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs < 2) { RAISE("string-ci=? needs at least two arguments"); }
+    init_args();
+    value prev = next_arg();
+    if (!IS_STRING(prev)) { RAISE("string-ci=? argument is not a string"); }
+    for (int i = 1; i < nargs; ++i) {
+        value cur = next_arg();
+        if (!IS_STRING(cur)) { RAISE("string-ci=? argument is not a string"); }
+        if (string_ci_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
             free_args();
             return FALSE;
         }

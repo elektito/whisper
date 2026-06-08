@@ -422,6 +422,14 @@
 (equal? "cde" (substring "abcdefg" 2 5))
 (equal? "" (substring "abcdefg" 4 4))
 
+(string-ci=? "foo" "foo")
+(string-ci=? "foo" "FOO")
+(string-ci=? "Hello" "hELLO")
+(not (string-ci=? "foo" "bar"))
+(string-ci=? "a" "A" "a")
+(not (string-ci=? "a" "A" "b"))
+(string-ci=? "aa" "aa" (string #\a #\a))
+
 (equal? "cde" (string-copy "abcdefg" 2 5))
 (equal? "" (string-copy "abcdefg" 4 4))
 (equal? "cdefg" (string-copy "abcdefg" 2))
