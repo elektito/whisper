@@ -628,6 +628,15 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
+(define *primcalls-table*
+  (let ((ht (make-eq-hash-table)))
+    (let loop ((lst *primcalls*))
+      (if (not (null? lst))
+          (begin
+            (hash-table-set! ht (caar lst) (car lst))
+            (loop (cdr lst)))))
+    ht))
+
 ;;; compiles a list of forms and returns their varnums as a list
 (define (compile-list-of-forms func indent forms)
   (let loop ((varnums '()) (forms forms))
@@ -1052,12 +1061,7 @@
         ret-varnum))))
 
 (define (lookup-primcall identifier)
-  (let loop ((primcalls *primcalls*))
-    (if (null? primcalls)
-        #f
-        (if (eq? (identifier-meaning identifier) (caar primcalls))
-            (car primcalls)
-            (loop (cdr primcalls))))))
+  (hash-table-ref/default *primcalls-table* (identifier-meaning identifier) #f))
 
 (define-record-type <meaning>
   (make-meaning kind info)
