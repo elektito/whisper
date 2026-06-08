@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -19,6 +20,231 @@ typedef value *environment;
 typedef struct closure *closure;
 typedef void(*kont)(value v);
 typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
+
+/************ tags and masks and some macros ***********/
+
+#define FIXNUM_TAG 0x0
+#define OBJECT_TAG 0x01
+#define CLOSURE_TAG 0x02
+#define STRING_TAG 0x03
+#define PAIR_TAG 0x04
+#define SENTINEL_TAG 0x5       /*   0...0_101 */
+#define VOID_TAG 0x15          /*      10_101 */
+#define BOOL_TAG 0xd           /*       1_101 */
+#define TRUE_TAG 0x1d          /*      11_101 */
+#define FALSE_TAG 0x0d         /*      01_101 */
+#define CHAR_TAG 0x25          /*     100_101 */
+#define SYMBOL_TAG 0x45        /*    1000_101 */
+#define NIL_TAG 0x85           /*   10000_101 */
+#define EOFOBJ_TAG 0x105       /*  100000_101 */
+#define HT_TOMBSTONE_TAG 0x205 /* 1000000_101 */
+
+#define TAG_MASK 0x7
+#define VALUE_MASK 0xfffffffffffffff8
+#define BOOL_TAG_MASK 0xf
+#define VOID_TAG_MASK 0x1f
+#define CHAR_TAG_MASK 0x3f
+#define SYMBOL_TAG_MASK 0x7f
+#define EOFOBJ_TAG_MASK 0x1ff
+
+#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)
+#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)
+#define PAIR(v) (value)((uint64_t)(v) | PAIR_TAG)
+#define STRING(v) (value)((uint64_t)(v) | STRING_TAG)
+#define BOOL(v) ((v) ? TRUE : FALSE)
+#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)
+#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)
+#define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)
+
+#define SENTINEL (value)(SENTINEL_TAG)
+#define VOID (value)(VOID_TAG)
+#define TRUE (value)(TRUE_TAG)
+#define FALSE (value)(FALSE_TAG)
+#define HT_TOMBSTONE (value)(HT_TOMBSTONE_TAG)
+#define NIL (value)(NIL_TAG)
+#define EOFOBJ (value)(EOFOBJ_TAG)
+
+/************ hash table ***********/
+
+#define HASH_TABLE_INITIAL_SIZE 8
+
+struct hash_table;
+typedef uint64_t (*hash_fn)(struct hash_table *ht, value key);
+typedef int (*eq_fn)(struct hash_table *ht, value a, value b);
+
+struct hash_table {
+    hash_fn hash_fn;
+    eq_fn eq_fn;
+    value user_hash_fn;
+    value user_eq_fn;
+    size_t size;
+    size_t cap;
+    value *data;
+};
+
+/* A good hash function for direct use with tagged pointers, which are
+ * basically 64-bit integers. Translated from java, from:
+ * https://gist.github.com/badboy/6267743 */
+static uint64_t hash_table_default_hash(struct hash_table *ht, value key)
+{
+    uint64_t k = (uint64_t) key;
+    k = (~k) + (k << 21); /* key = (key << 21) - key - 1; */
+    k = k ^ (k >> 24);
+    k = (k + (k << 3)) + (k << 8); /* key * 265 */
+    k = k ^ (k >> 14);
+    k = (k + (k << 2)) + (k << 4); /* key * 21 */
+    k = k ^ (k >> 28);
+    k = k + (k << 31);
+    return k;
+}
+
+static int hash_table_default_eq(struct hash_table *ht, value k1, value k2) {
+    return k1 == k2;
+}
+
+static void hash_table_init(struct hash_table *ht, size_t initial_size, hash_fn hash_fn, eq_fn eq_fn) {
+    ht->data = malloc(2 * initial_size * sizeof(value)); /* double because key+value */
+    ht->size = 0;
+    ht->cap = initial_size;
+
+    ht->hash_fn = hash_fn ? hash_fn : hash_table_default_hash;
+    ht->eq_fn = eq_fn ? eq_fn : hash_table_default_eq;
+    ht->user_hash_fn = FALSE;
+    ht->user_eq_fn = FALSE;
+
+    /* initialize keys and values to sentinel values to mark them as
+     * empty */
+    for (int i = 0; i < initial_size * 2; ++i) {
+        ht->data[i] = SENTINEL;
+    }
+}
+
+static void hash_table_cleanup(struct hash_table *ht) {
+    free(ht->data);
+}
+
+/* owner is the tagged value of the object containing ht. It is kept
+ * volatile to force a stack spill, ensuring the conservative GC finds
+ * the reference if a user-provided hash or eq function triggers collection. */
+static void hash_table_grow(struct hash_table *ht, volatile value owner) {
+    value *old_data = ht->data;
+    size_t old_cap = ht->cap;
+    ht->cap *= 2;
+    ht->data = malloc(2 * ht->cap * sizeof(value)); /* double because key+value */
+
+    /* initialize keys and values to sentinel values to mark them as
+     * empty */
+    for (int i = 0; i < ht->cap * 2; ++i) {
+        ht->data[i] = SENTINEL;
+    }
+
+    for (int old_idx = 0; old_idx < old_cap; ++old_idx) {
+        value key = old_data[old_idx * 2];
+        if (key != SENTINEL && key != HT_TOMBSTONE) {
+            uint64_t h = ht->hash_fn(ht, key);
+            size_t new_idx = h % ht->cap;
+            while (ht->data[new_idx * 2] != SENTINEL) {
+                new_idx = (new_idx + 1) % ht->cap;
+            }
+            ht->data[new_idx * 2] = old_data[old_idx * 2];
+            ht->data[new_idx * 2 + 1] = old_data[old_idx * 2 + 1];
+        }
+    }
+
+    free(old_data);
+}
+
+/* owner: see hash_table_grow */
+static void hash_table_set(struct hash_table *ht, volatile value owner, value k, value v) {
+    if (ht->size * 10 >= ht->cap * 7) { /* 70% */
+        hash_table_grow(ht, owner);
+    }
+
+    uint64_t h = ht->hash_fn(ht, k);
+    size_t start = h % ht->cap;
+    size_t idx = start;
+    size_t tombstone_idx = SIZE_MAX;
+
+    do {
+        if (ht->data[idx * 2] == SENTINEL) {
+            size_t i = tombstone_idx == SIZE_MAX ? idx : tombstone_idx;
+            ht->data[i * 2] = k;
+            ht->data[i * 2 + 1] = v;
+            ht->size++;
+            return;
+        } else if (ht->data[idx * 2] == HT_TOMBSTONE) {
+            if (tombstone_idx == SIZE_MAX) {
+                tombstone_idx = idx;
+            }
+        } else if (ht->eq_fn(ht, ht->data[idx * 2], k)) {
+            ht->data[idx * 2 + 1] = v;
+            return;
+        }
+
+        idx = (idx + 1) % ht->cap;
+    } while (idx != start);
+
+    assert (tombstone_idx != SIZE_MAX);
+    ht->data[tombstone_idx * 2] = k;
+    ht->data[tombstone_idx * 2 + 1] = v;
+    ht->size++;
+}
+
+/* owner: see hash_table_grow */
+static int hash_table_delete(struct hash_table *ht, volatile value owner, value key) {
+    uint64_t h = ht->hash_fn(ht, key);
+    size_t start = h % ht->cap;
+    size_t idx = start;
+
+    do {
+        if (ht->data[idx * 2] == SENTINEL) {
+            /* not found */
+            return 0;
+        } else if (ht->data[idx * 2] != HT_TOMBSTONE && ht->eq_fn(ht, ht->data[idx * 2], key)) {
+            ht->data[idx * 2] = HT_TOMBSTONE;
+            ht->size--;
+            return 1;
+        }
+
+        idx = (idx + 1) % ht->cap;
+    } while (idx != start);
+
+    /* not found */
+    return 0;
+}
+
+/* owner: see hash_table_grow */
+static value hash_table_get(struct hash_table *ht, volatile value owner, value key) {
+    uint64_t h = ht->hash_fn(ht, key);
+
+    size_t start = h % ht->cap;
+    size_t idx = start;
+
+    do {
+        if (ht->data[idx * 2] == SENTINEL) {
+            /* not found */
+            return SENTINEL;
+        } else if (ht->data[idx * 2] != HT_TOMBSTONE && ht->eq_fn(ht, ht->data[idx * 2], key)) {
+            return ht->data[idx * 2 + 1];
+        }
+
+        idx = (idx + 1) % ht->cap;
+    } while (idx != start);
+
+    /* not found */
+    return SENTINEL;
+}
+
+static void hash_table_each(struct hash_table *ht, void (*fn)(value k, value v, void *ctx), void *ctx) {
+    for (int i = 0; i < ht->cap; ++i) {
+        value key = ht->data[i * 2];
+        if (key != SENTINEL && key != HT_TOMBSTONE) {
+            fn(key, ht->data[i * 2 + 1], ctx);
+        }
+    }
+}
+
+/************ value types ***********/
 
 struct closure {
     funcptr func;
@@ -81,6 +307,7 @@ enum object_type {
     OBJ_VECTOR,
     OBJ_WRAPPED,
     OBJ_BOX,
+    OBJ_HASH_TABLE,
 };
 
 enum port_direction {
@@ -96,6 +323,9 @@ enum error_type {
 struct object {
     enum object_type type;
     union {
+        struct {
+            struct hash_table ht;
+        } hash_table;
         struct {
             int direction;
             int closed;
@@ -130,41 +360,7 @@ struct object {
     };
 };
 
-#define FIXNUM_TAG 0x0
-#define OBJECT_TAG 0x01
-#define CLOSURE_TAG 0x02
-#define STRING_TAG 0x03
-#define PAIR_TAG 0x04
-#define VOID_TAG 0x15    /*     10_101 */
-#define BOOL_TAG 0xd     /*      1_101 */
-#define TRUE_TAG 0x1d    /*     11_101 */
-#define FALSE_TAG 0x0d   /*     01_101 */
-#define CHAR_TAG 0x25    /*    100_101 */
-#define SYMBOL_TAG 0x45  /*   1000_101 */
-#define NIL_TAG 0x85     /*  10000_101 */
-#define EOFOBJ_TAG 0x105 /* 100000_101 */
-
-#define TAG_MASK 0x7
-#define VALUE_MASK 0xfffffffffffffff8
-#define BOOL_TAG_MASK 0xf
-#define VOID_TAG_MASK 0x1f
-#define CHAR_TAG_MASK 0x3f
-#define SYMBOL_TAG_MASK 0x7f
-#define EOFOBJ_TAG_MASK 0x1ff
-
-#define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)
-#define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)
-#define PAIR(v) (value)((uint64_t)(v) | PAIR_TAG)
-#define STRING(v) (value)((uint64_t)(v) | STRING_TAG)
-#define VOID (value)(VOID_TAG)
-#define TRUE (value)(TRUE_TAG)
-#define FALSE (value)(FALSE_TAG)
-#define BOOL(v) ((v) ? TRUE : FALSE)
-#define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)
-#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)
-#define NIL (value)(NIL_TAG)
-#define EOFOBJ (value)(EOFOBJ_TAG)
-#define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)
+/************ accessors and predicates ***********/
 
 #define GET_FIXNUM(v) ((int64_t)(v) >> 3)
 #define GET_CLOSURE(v) ((struct closure *)((uint64_t)(v) & VALUE_MASK))
@@ -191,6 +387,9 @@ struct object {
 #define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
 #define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
 #define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
+#define IS_HASH_TABLE(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_HASH_TABLE)
+
+/************ globals and helpers ***********/
 
 #define RAISE(...) { print_stacktrace(); fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
 
@@ -437,6 +636,16 @@ static void gc_recurse(value v) {
             gc_recurse(GET_OBJECT(v)->wrapped.kind);
         } else if (GET_OBJECT(v)->type == OBJ_BOX) {
             gc_recurse(GET_OBJECT(v)->box.value);
+        } else if (GET_OBJECT(v)->type == OBJ_HASH_TABLE) {
+            struct hash_table *ht = &GET_OBJECT(v)->hash_table.ht;
+            gc_recurse(ht->user_hash_fn);
+            gc_recurse(ht->user_eq_fn);
+            for (int i = 0; i < ht->cap; ++i) {
+                if (ht->data[i * 2] != SENTINEL && ht->data[i * 2] != HT_TOMBSTONE) {
+                    gc_recurse(ht->data[i * 2]);
+                    gc_recurse(ht->data[i * 2 + 1]);
+                }
+            }
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -988,6 +1197,11 @@ static void print_unprintable(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "#<box value=");
         _write(GET_OBJECT(v)->box.value, port);
         GET_OBJECT(port)->port.printf(port, ">");
+    } else if (IS_HASH_TABLE(v)) {
+        GET_OBJECT(port)->port.printf(
+            port, "#<hash-table size=%zu cap=%zu>",
+            GET_OBJECT(v)->hash_table.ht.size,
+            GET_OBJECT(v)->hash_table.ht.cap);
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
     }
@@ -2308,4 +2522,524 @@ static value primcall_num_ge(environment env, enum call_flags flags, int nargs, 
 
     free_args();
     return TRUE;
+}
+
+static uint64_t hash_fn_wrapper(struct hash_table *ht, value key) {
+    struct closure *c = GET_CLOSURE(ht->user_hash_fn);
+    value result = c->func(c->freevars, NO_CALL_FLAGS, 1, key);
+    return (uint64_t) GET_FIXNUM(result);
+}
+
+static int eq_fn_wrapper(struct hash_table *ht, value a, value b) {
+    struct closure *c = GET_CLOSURE(ht->user_eq_fn);
+    return c->func(c->freevars, NO_CALL_FLAGS, 2, a, b) != FALSE;
+}
+
+static value primcall_percent_make_hash_table(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("%%make-hash-table accepts two arguments"); }
+    init_args();
+    value eq_fn = next_arg();
+    value hash_fn = next_arg();
+    free_args();
+
+    if (eq_fn != FALSE && (!IS_CLOSURE(eq_fn) || (GET_CLOSURE(eq_fn)->n_args != 2 && GET_CLOSURE(eq_fn)->n_args != -1))) {
+        RAISE("%%make-hash-table first argument must be #f or a procedure that accepts two arguments");
+    }
+
+    if (hash_fn != FALSE && (!IS_CLOSURE(hash_fn) || (GET_CLOSURE(hash_fn)->n_args != 1 && GET_CLOSURE(hash_fn)->n_args != -1))) {
+        RAISE("%%make-hash-table second argument must be #f or a procedure that accepts a single argument");
+    }
+
+    struct object *obj = alloc_object();
+    obj->type = OBJ_HASH_TABLE;
+    hash_table_init(&obj->hash_table.ht,
+                    HASH_TABLE_INITIAL_SIZE,
+                    hash_fn == FALSE ? NULL : hash_fn_wrapper,
+                    eq_fn == FALSE ? NULL : eq_fn_wrapper);
+    obj->hash_table.ht.user_hash_fn = hash_fn;
+    obj->hash_table.ht.user_eq_fn = eq_fn;
+    return OBJECT(obj);
+}
+
+static value primcall_hash_table_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_HASH_TABLE(v));
+}
+
+static value primcall_hash_table_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { RAISE("hash-table-set! needs three arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    value v = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-set! first argument is not a hash-table"); }
+    hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, k, v);
+    return VOID;
+}
+
+static value primcall_hash_table_delete_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("hash-table-delete! needs two arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-delete! first argument is not a hash-table"); }
+    hash_table_delete(&GET_OBJECT(ht)->hash_table.ht, ht, k);
+    return VOID;
+}
+
+static value primcall_hash_table_ref(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2 && nargs != 3) { RAISE("hash-table-ref needs two or three arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    value thunk = nargs == 3 ? next_arg() : FALSE;
+    free_args();
+
+    if (thunk != FALSE) {
+        if (!IS_CLOSURE(thunk)) {
+            RAISE("thunk is not a procedure");
+        }
+
+        if (GET_CLOSURE(thunk)->n_args != 0 && GET_CLOSURE(thunk)->n_args != -1) {
+            RAISE("thunk should accept 0 arguments");
+        }
+    }
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-ref first argument is not a hash-table"); }
+    value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
+
+    if (v == SENTINEL) {
+        if (thunk == FALSE) {
+            RAISE("key not found in hash-table");
+        } else {
+            struct closure *c = GET_CLOSURE(thunk);
+            return c->func(c->freevars, NO_CALL_FLAGS, 0);
+        }
+    }
+
+    return v;
+}
+
+static value primcall_hash_table_ref_default(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { RAISE("hash-table-ref/default needs three arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    value deflt = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-ref/default first argument is not a hash-table"); }
+    value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
+
+    if (v == SENTINEL) {
+        return deflt;
+    }
+
+    return v;
+}
+
+static value primcall_hash_table_exists_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("hash-table-exists? needs two arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-exists? first argument is not a hash-table"); }
+    value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
+    return BOOL(v != SENTINEL);
+}
+
+static value primcall_hash_table_size(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table-size needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-size argument is not a hash-table"); }
+    return FIXNUM(GET_OBJECT(ht)->hash_table.ht.size);
+}
+
+static value primcall_hash_table_update_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3 && nargs != 4) { RAISE("hash-table-update! needs three or four arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    value func = next_arg();
+    value thunk = nargs == 4 ? next_arg() : FALSE;
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-update! first argument is not a hash-table"); }
+
+    if (!IS_CLOSURE(func)) {
+        RAISE("hash-table-argument third argument (function) is not a procedure");
+    }
+    if (GET_CLOSURE(func)->n_args != 1 && GET_CLOSURE(func)->n_args != -1) {
+        RAISE("hash-table-argument third argument (function) procedure should accept a single argument");
+    }
+
+    if (thunk != FALSE) {
+        if (!IS_CLOSURE(thunk)) {
+            RAISE("hash-table-argument fourth argument (thunk) is not a procedure");
+        }
+
+        if (GET_CLOSURE(thunk)->n_args != 0 && GET_CLOSURE(thunk)->n_args != -1) {
+            RAISE("hash-table-argument fourth argument (thunk) should accept 0 arguments");
+        }
+    }
+
+    value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
+    if (v == SENTINEL) {
+        if (thunk == FALSE) {
+            RAISE("key not found in hash-table");
+        }
+
+        struct closure *c = GET_CLOSURE(thunk);
+        v = c->func(c->freevars, NO_CALL_FLAGS, 0);
+    }
+
+    struct closure *c = GET_CLOSURE(func);
+    v = c->func(c->freevars, NO_CALL_FLAGS, 1, v);
+
+    hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, k, v);
+
+    return VOID;
+}
+
+static value primcall_hash_table_update_b_default(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 4) { RAISE("hash-table-update!/default needs four arguments"); }
+    init_args();
+    value ht = next_arg();
+    value k = next_arg();
+    value func = next_arg();
+    value deflt = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-update!/default first argument is not a hash-table"); }
+
+    if (!IS_CLOSURE(func)) {
+        RAISE("hash-table-update!/default third argument (function) is not a procedure");
+    }
+    if (GET_CLOSURE(func)->n_args != 1 && GET_CLOSURE(func)->n_args != -1) {
+        RAISE("hash-table-update!/default hash-table-update!/default argument (function) procedure should accept a single argument");
+    }
+
+    value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
+    if (v == SENTINEL) {
+        v = deflt;
+    }
+
+    struct closure *c = GET_CLOSURE(func);
+    v = c->func(c->freevars, NO_CALL_FLAGS, 1, v);
+
+    hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, k, v);
+
+    return VOID;
+}
+
+static void keys_accummulator(value k, value v, void *ctx) {
+    value *list = (value *) ctx;
+    *list = make_pair(k, *list);
+}
+
+static value primcall_hash_table_keys(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table-keys needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-keys argument is not a hash-table"); }
+
+    value list = NIL;
+    hash_table_each(&GET_OBJECT(ht)->hash_table.ht, keys_accummulator, &list);
+
+    return list;
+}
+
+static void values_accummulator(value k, value v, void *ctx) {
+    value *list = (value *) ctx;
+    *list = make_pair(v, *list);
+}
+
+static value primcall_hash_table_values(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table-values needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-values argument is not a hash-table"); }
+
+    value list = NIL;
+    hash_table_each(&GET_OBJECT(ht)->hash_table.ht, values_accummulator, &list);
+
+    return list;
+}
+
+static void ht_walker(value k, value v, void *ctx) {
+    value proc = (value) ctx;
+    GET_CLOSURE(proc)->func(GET_CLOSURE(proc)->freevars, NO_CALL_FLAGS, 2, k, v);
+}
+
+static value primcall_hash_table_walk(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("hash-table-walk needs two arguments"); }
+    init_args();
+    value ht = next_arg();
+    value proc = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-walk first argument is not a hash-table"); }
+    if (!IS_CLOSURE(proc)) { RAISE("hash-table-walk second argument is not a procedure"); }
+    if (GET_CLOSURE(proc)->n_args != 2 && GET_CLOSURE(proc)->n_args != -1) {
+        RAISE("hash-table-walk second argument (proc) procedure should accept two arguments");
+    }
+
+    hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_walker, proc);
+
+    return VOID;
+}
+
+struct folder_ctx {
+    value func;
+    value acc;
+};
+
+static void ht_folder(value k, value v, void *ctx) {
+    struct folder_ctx *c = ctx;
+    c->acc = GET_CLOSURE(c->func)->func(GET_CLOSURE(c->func)->freevars, NO_CALL_FLAGS, 3, k, v, c->acc);
+}
+
+static value primcall_hash_table_fold(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { RAISE("hash-table-fold needs three arguments"); }
+    init_args();
+    value ht = next_arg();
+    value f = next_arg();
+    value init_value = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-fold first argument is not a hash-table"); }
+    if (!IS_CLOSURE(f)) { RAISE("hash-table-fold second argument is not a procedure"); }
+    if (GET_CLOSURE(f)->n_args != 3 && GET_CLOSURE(f)->n_args != -1) {
+        RAISE("hash-table-fold second argument (f) procedure should accept three arguments");
+    }
+
+    struct folder_ctx ctx = {
+        .func = f,
+        .acc = init_value,
+    };
+    hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_folder, &ctx);
+
+    return ctx.acc;
+}
+
+static void ht_to_alist(value k, value v, void *ctx) {
+    value *alist = ctx;
+    *alist = make_pair(make_pair(k, v), *alist);
+}
+
+static value primcall_hash_table_to_alist(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table->alist needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table->alist argument is not a hash-table"); }
+
+    value alist = NIL;
+    hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_to_alist, &alist);
+
+    return alist;
+}
+
+static void ht_copier(value k, value v, void *ctx) {
+    value owner = (value) ctx;
+    struct hash_table *ht = &GET_OBJECT(owner)->hash_table.ht;
+    hash_table_set(ht, owner, k, v);
+}
+
+static value primcall_hash_table_copy(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table-copy needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-copy argument is not a hash-table"); }
+
+    struct object *new_ht = alloc_object();
+    new_ht->type = OBJ_HASH_TABLE;
+    new_ht->hash_table.ht.user_hash_fn = GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
+    new_ht->hash_table.ht.user_eq_fn = GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
+    hash_table_init(&new_ht->hash_table.ht,
+                    GET_OBJECT(ht)->hash_table.ht.cap,
+                    GET_OBJECT(ht)->hash_table.ht.hash_fn,
+                    GET_OBJECT(ht)->hash_table.ht.eq_fn);
+
+    hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_copier, OBJECT(new_ht));
+
+    return OBJECT(new_ht);
+}
+
+static value primcall_hash_table_merge_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("hash-table-merge! needs two arguments"); }
+    init_args();
+    value ht1 = next_arg();
+    value ht2 = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht1)) { RAISE("hash-table-merge! first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht2)) { RAISE("hash-table-merge! second argument is not a hash-table"); }
+
+    hash_table_each(&GET_OBJECT(ht2)->hash_table.ht, ht_copier, ht1);
+
+    return ht1;
+}
+
+static value primcall_hash_by_identity(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { RAISE("hash-by-identity needs one or two arguments"); }
+    init_args();
+    value v = next_arg();
+    value bound = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
+        RAISE("hash-by-identity second argument must be a positive integer");
+    }
+
+    uint64_t h = hash_table_default_hash(NULL, v);
+
+    /* we have only 61-bit signed integers right now, so shift by 4 bits
+     * to get a positive integer in the appropriate range. */
+    h >>= 4;
+
+    if (bound != FALSE) {
+        h %= GET_FIXNUM(bound);
+    }
+
+    return FIXNUM(h);
+}
+
+static uint64_t hash_string_djb2(const char *s, size_t len) {
+    uint64_t h = 5381;
+    for (size_t i = 0; i < len; i++) {
+        h = ((h << 5) + h) ^ (unsigned char) s[i];
+    }
+    return h;
+}
+
+static uint64_t hash_string_ci_djb2(const char *s, size_t len) {
+    uint64_t h = 5381;
+    for (size_t i = 0; i < len; i++) {
+        h = ((h << 5) + h) ^ (unsigned char) tolower(s[i]);
+    }
+    return h;
+}
+
+static uint64_t hash_equal_recursive(value v, int depth);
+
+static uint64_t hash_vector_recursive(value *data, int len, int depth) {
+    uint64_t h = 5381;
+    for (int i = 0; i < len && i < 16; i++) {
+        /* 2654435761 = 2^32/phi (Knuth multiplicative hash), good for avalanche mixing */
+        h ^= hash_equal_recursive(data[i], depth - 1) * (2654435761ULL + i);
+    }
+    return h;
+}
+
+/* depth=8 covers typical nesting depth without risking stack overflow */
+static uint64_t hash_equal_recursive(value v, int depth) {
+    if (IS_STRING(v)) {
+        struct string *s = GET_STRING(v);
+        return hash_string_djb2(s->s, s->len);
+    }
+    if (depth > 0 && IS_PAIR(v)) {
+        uint64_t h = hash_equal_recursive(GET_PAIR(v)->car, depth - 1);
+        h ^= hash_equal_recursive(GET_PAIR(v)->cdr, depth - 1) * 2654435761ULL; /* Knuth */
+        return h;
+    }
+    if (depth > 0 && IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR) {
+        return hash_vector_recursive(GET_OBJECT(v)->vector.data,
+                                     GET_OBJECT(v)->vector.len, depth);
+    }
+    return hash_table_default_hash(NULL, v);
+}
+
+/* shift by 4 to land in the positive fixnum range (fixnums are 61-bit signed) */
+static uint64_t hash_finalize(uint64_t h, value bound) {
+    h >>= 4;
+    if (bound != FALSE) {
+        h %= GET_FIXNUM(bound);
+    }
+    return h;
+}
+
+static value primcall_hash(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { RAISE("hash needs one or two arguments"); }
+    init_args();
+    value v = next_arg();
+    value bound = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
+        RAISE("hash second argument must be a positive integer");
+    }
+
+    return FIXNUM(hash_finalize(hash_equal_recursive(v, 8), bound));
+}
+
+static value primcall_string_hash(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { RAISE("string-hash needs one or two arguments"); }
+    init_args();
+    value v = next_arg();
+    value bound = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    if (!IS_STRING(v)) { RAISE("string-hash first argument must be a string"); }
+    if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
+        RAISE("string-hash second argument must be a positive integer");
+    }
+
+    struct string *s = GET_STRING(v);
+    return FIXNUM(hash_finalize(hash_string_djb2(s->s, s->len), bound));
+}
+
+static value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { RAISE("string-ci-hash needs one or two arguments"); }
+    init_args();
+    value v = next_arg();
+    value bound = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    if (!IS_STRING(v)) { RAISE("string-ci-hash first argument must be a string"); }
+    if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
+        RAISE("string-ci-hash second argument must be a positive integer");
+    }
+
+    struct string *s = GET_STRING(v);
+    return FIXNUM(hash_finalize(hash_string_ci_djb2(s->s, s->len), bound));
+}
+
+static value primcall_hash_table_equivalence_function(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table-equivalence-function needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-equivalence-function argument is not a hash-table"); }
+    return GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
+}
+
+static value primcall_hash_table_hash_function(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("hash-table-hash-function needs a single argument"); }
+    init_args();
+    value ht = next_arg();
+    free_args();
+
+    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-hash-function argument is not a hash-table"); }
+    return GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
 }

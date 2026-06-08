@@ -734,6 +734,86 @@
           (+ x y))
         10 20))
 
+;; hash tables
+
+(let ((ht (make-eq-hash-table)))
+  (hash-table? ht))
+
+(let ((ht (make-hash-table)))
+  (hash-table? ht))
+
+(let ((ht (make-hash-table string-ci=? string-ci-hash)))
+  (hash-table-set! ht "foo" 100)
+  (hash-table-set! ht "bar" 200)
+  (hash-table-set! ht "FOO" 1000)
+  (and (= 1000 (hash-table-ref ht "FoO"))
+       (= 200 (hash-table-ref ht "bar"))))
+
+(let ((ht (make-eq-hash-table)))
+  (hash-table-set! ht 'foo 100)
+  (hash-table-set! ht 'bar 200)
+  (and (= 100 (hash-table-ref ht 'foo))
+       (= 200 (hash-table-ref ht 'bar))))
+
+(let ((ht (make-hash-table string-ci=?)))
+  ((hash-table-equivalence-function ht) "foo" "Foo"))
+
+(let ((ht (make-hash-table string-ci=? string-ci-hash)))
+  (= ((hash-table-hash-function ht) "foo")
+     ((hash-table-hash-function ht) "Foo")))
+
+(let ((ht (alist->hash-table '((foo . 100) (bar . 200) (to-del . 10)))))
+  (hash-table-delete! ht 'to-del)
+  (and (= 100 (hash-table-ref ht 'foo))
+       (= 200 (hash-table-ref ht 'bar))
+       (= 300 (hash-table-ref ht 'spam (lambda () 300)))
+       (= 400 (hash-table-ref/default ht 'spam 400))
+       (not (hash-table-exists? ht 'to-del))))
+
+(let ((ht (make-eq-hash-table)))
+  (hash-table-set! ht 'foo 100)
+  (hash-table-update! ht 'foo (lambda (x) (+ x 1)))
+  (hash-table-update! ht 'bar (lambda (x) (+ x 2)) (lambda () 200))
+  (hash-table-update!/default ht 'spam (lambda (x) (+ x 3)) 300)
+  (and (= 101 (hash-table-ref ht 'foo))
+       (= 202 (hash-table-ref ht 'bar))
+       (= 303 (hash-table-ref ht 'spam))))
+
+(let ((ht (alist->hash-table '((foo . 100) (bar . 200)))))
+  (= 2 (hash-table-size ht)))
+
+(let ((ht (alist->hash-table '((foo . 100) (bar . 200)))))
+  (or (equal? (hash-table-keys ht)
+              '(foo bar))
+      (equal? (hash-table-keys ht)
+              '(bar foo))))
+
+(let ((ht (alist->hash-table '((foo . 100) (bar . 200)))))
+  (or (equal? (hash-table-values ht)
+              '(100 200))
+      (equal? (hash-table-values ht)
+              '(200 100))))
+
+(let ((ht (alist->hash-table '((foo . 100) (bar . 200)))))
+  (let ((x 0))
+    (hash-table-walk ht (lambda (k v) (set! x (+ x v))))
+    (= x 300)))
+
+(let ((ht (hash-table-merge! (alist->hash-table '((foo . 100) (bar . 200)))
+                             (alist->hash-table '((spam . 300) (eggs . 400))))))
+  (and (= 4 (hash-table-size ht))
+       (= 100 (hash-table-ref ht 'foo))
+       (= 200 (hash-table-ref ht 'bar))
+       (= 300 (hash-table-ref ht 'spam))
+       (= 400 (hash-table-ref ht 'eggs))))
+
+(let ((ht1 (alist->hash-table '((foo . 100) (bar . 200)))))
+  (let ((ht2 (hash-table-copy ht1)))
+    (and (not (eq? ht1 ht2))
+         (= 2 (hash-table-size ht2))
+         (= 100 (hash-table-ref ht2 'foo))
+         (= 200 (hash-table-ref ht2 'bar)))))
+
 ;; quoted data containing binding-form-shaped lists must not be
 ;; interpreted as code by the preprocessor
 (equal? '(lambda 5 6) '(lambda 5 6))
