@@ -2679,19 +2679,19 @@ static value primcall_hash_table_update_b(environment env, enum call_flags flags
     if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-update! first argument is not a hash-table"); }
 
     if (!IS_CLOSURE(func)) {
-        RAISE("hash-table-argument third argument (function) is not a procedure");
+        RAISE("hash-table-update! third argument (function) is not a procedure");
     }
     if (GET_CLOSURE(func)->n_args != 1 && GET_CLOSURE(func)->n_args != -1) {
-        RAISE("hash-table-argument third argument (function) procedure should accept a single argument");
+        RAISE("hash-table-update! third argument (function) procedure should accept a single argument");
     }
 
     if (thunk != FALSE) {
         if (!IS_CLOSURE(thunk)) {
-            RAISE("hash-table-argument fourth argument (thunk) is not a procedure");
+            RAISE("hash-table-update! fourth argument (thunk) is not a procedure");
         }
 
         if (GET_CLOSURE(thunk)->n_args != 0 && GET_CLOSURE(thunk)->n_args != -1) {
-            RAISE("hash-table-argument fourth argument (thunk) should accept 0 arguments");
+            RAISE("hash-table-update! fourth argument (thunk) should accept 0 arguments");
         }
     }
 
