@@ -1025,9 +1025,6 @@ static value make_closure(funcptr func, int min_args, int max_args, int nfreevar
     return CLOSURE(closure);
 }
 
-/* Alias for code compiled by whisper-v6. Remove when bumping to v8. */
-#define make_closure_minmax make_closure
-
 static value make_pair(value car, value cdr) {
     struct pair *pair = alloc_pair();
     pair->car = car;

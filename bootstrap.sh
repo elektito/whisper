@@ -46,10 +46,17 @@ cd v6
 cp ../v5/whisper-v5 .
 make
 
+echo "==== v7 ===="
+cd ..
+git clone .. --branch=v7 v7 >/dev/null 2>&1
+cd v7
+cp ../v6/whisper-v6 .
+make
+
 echo "==== current ===="
 cd ..
 git clone .. --branch=master current >/dev/null 2>&1
 cd current
-cp ../v6/whisper-v6 .
+cp ../v7/whisper-v7 .
 make
-cp whisper-v7 ../whisper
+cp whisper-v8 ../whisper
