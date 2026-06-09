@@ -810,10 +810,11 @@
 
         ;; generate the code for referencing the function
         (let ((varnum (func-next-varnum func)))
-          (gen-code func indent "value x~a = make_closure(~a, ~a, ~a"
+          (gen-code func indent "value x~a = make_closure_minmax(~a, ~a, ~a, ~a"
                     varnum
                     (func-name new-func)
                     (length params)
+                    (if rest-param "MAX_ARGS" (length params))
                     (length (func-freevars new-func)))
           (let loop ((freevars (func-freevars new-func)))
             (if (not (null? freevars))
@@ -1154,8 +1155,12 @@
                (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, envget(env, ~a));\n" varnum freevar-idx)
                (gen-code func indent "value x~a = envget(env, ~a);\n" varnum freevar-idx)))))
       ((primcall)
-       ;; TODO: use proper min/max args instead of -1 once closures support them
-       (gen-code func indent "value x~a = make_closure(primcall_~a, -1, 0);\n" varnum (list-ref (meaning-info meaning) 1)))
+       (let* ((info (meaning-info meaning))
+              (min-args (list-ref info 2))
+              (max-args (list-ref info 3))
+              (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
+         (gen-code func indent "value x~a = make_closure_minmax(primcall_~a, ~a, ~a, 0);\n"
+                   varnum (list-ref info 1) min-args c-max-args)))
       ((special) (compile-error "invalid use of special: ~a" form))
 
       ;; allow use of not-yet defined variables only in non-top-level
