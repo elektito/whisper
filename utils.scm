@@ -280,6 +280,13 @@
 (define (map func . arg-lists)
   (%map func arg-lists '()))
 
+(define (for-each proc . arg-lists)
+  (unless (null? arg-lists)
+    (let loop ((arg-lists arg-lists))
+      (unless (any? (mapcar null? arg-lists))
+        (apply proc (mapcar car arg-lists))
+        (loop (mapcar cdr arg-lists))))))
+
 (define (%member obj list compare)
   (if (null? list)
       #f

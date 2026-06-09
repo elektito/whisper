@@ -278,6 +278,37 @@
   (set-cdr! x 10)
   (equal? x '(1 . 10)))
 
+;; map
+
+(equal? '() (map (lambda (x) (* x x)) '()))
+(equal? '(1 4 9) (map (lambda (x) (* x x)) '(1 2 3)))
+(equal? '(11 22 33) (map + '(1 2 3) '(10 20 30)))
+(equal? '(15 27) (map + '(1 2) '(4 5 6) '(10 20 30)))
+
+;; for-each
+
+(let ((result '()))
+  (for-each (lambda (x) (set! result (cons x result))) '(1 2 3))
+  (equal? '(3 2 1) result))
+
+(let ((result '()))
+  (for-each (lambda (x y) (set! result (cons (+ x y) result))) '(1 2 3) '(10 20 30))
+  (equal? '(33 22 11) result))
+
+(let ((count 0))
+  (for-each (lambda (x) (set! count (+ count 1))) '())
+  (= 0 count))
+
+(let ((result '()))
+  (for-each (lambda (x y) (set! result (cons (list x y) result))) '(1 2 3) '(a b))
+  (equal? '((2 b) (1 a)) result))
+
+(eq? (void) (for-each (lambda (x) x) '(1 2 3)))
+
+(let ((result '()))
+  (for-each (lambda args (set! result (cons args result))) '(1 2 3 4 5) '(10 20 30 40))
+  (equal? '((4 40) (3 30) (2 20) (1 10)) result))
+
 ;; equality
 
 (not (eq? (gensym) (gensym)))
