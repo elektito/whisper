@@ -1133,6 +1133,27 @@ static void file_printf(value port, const char *fmt, ...) {
     va_end(args);
 }
 
+static void init_ports() {
+    current_input_port.type = OBJ_PORT;
+    current_input_port.port.direction = PORT_DIR_READ;
+    current_input_port.port.fp = stdin;
+    current_input_port.port.read_char = file_read_char;
+    current_input_port.port.peek_char = file_peek_char;
+    current_input_port.port.read_line = file_read_line;
+
+    current_output_port.type = OBJ_PORT;
+    current_output_port.port.direction = PORT_DIR_WRITE;
+    current_output_port.port.fp = stdout;
+    current_output_port.port.printf = file_printf;
+    current_output_port.port.write_char = file_write_char;
+
+    current_error_port.type = OBJ_PORT;
+    current_error_port.port.direction = PORT_DIR_WRITE;
+    current_error_port.port.fp = stderr;
+    current_error_port.port.printf = file_printf;
+    current_error_port.port.write_char = file_write_char;
+}
+
 static void string_write_char(value port, value ch) {
     int64_t needed = GET_OBJECT(port)->port.string_len + 1;
     if (needed > GET_OBJECT(port)->port.string_cap) {
