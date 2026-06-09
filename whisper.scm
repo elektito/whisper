@@ -810,7 +810,7 @@
 
         ;; generate the code for referencing the function
         (let ((varnum (func-next-varnum func)))
-          (gen-code func indent "value x~a = make_closure_minmax(~a, ~a, ~a, ~a"
+          (gen-code func indent "value x~a = make_closure(~a, ~a, ~a, ~a"
                     varnum
                     (func-name new-func)
                     (length params)
@@ -1159,7 +1159,7 @@
               (min-args (list-ref info 2))
               (max-args (list-ref info 3))
               (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
-         (gen-code func indent "value x~a = make_closure_minmax(primcall_~a, ~a, ~a, 0);\n"
+         (gen-code func indent "value x~a = make_closure(primcall_~a, ~a, ~a, 0);\n"
                    varnum (list-ref info 1) min-args c-max-args)))
       ((special) (compile-error "invalid use of special: ~a" form))
 
