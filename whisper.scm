@@ -349,7 +349,6 @@
 (define (intern-primcalls program)
   (for-each (lambda (p) (intern program (car p))) *primcalls*))
 
-
 (define (gen-symbol-defines program output)
   (let loop ((i 0) (symbols (program-symbols program)))
     (if (not (null? symbols))
@@ -378,6 +377,8 @@
             (format output "    symbols[~a].name = \"~a\";\n" i (symbol->string sym))
             (format output "    symbols[~a].name_len = ~a;\n" i (string-length (symbol->string sym)))
             (format output "    symbols[~a].value = ~a;\n" i value-expr)
+            (when info
+              (format output "    symbols[~a].kind = sym_value;\n" i))
             (loop (+ i 1) (cdr symbols)))))
     (display "}\n" output)))
 
@@ -534,6 +535,9 @@
                       (current-error-port "current_error_port" 0 0)
                       (delete-file "delete_file" 1 1)
                       (display "display" 1 2)
+                      (environment? "environment_q" 1 1)
+                      (environment-define "environment_define" 3 3)
+                      (environment-ref "environment_ref" 2 2)
                       (eof-object? "eof_object_q" 1 1)
                       (eq? "eq_q" 2 2)
                       (error "error" 1 1)
@@ -566,6 +570,7 @@
                       (hash-table-walk "hash_table_walk" 2 2)
                       (input-port? "input_port_q" 1 1)
                       (integer->char "integer_to_char" 1 1)
+                      (make-environment "make_environment" 0 0)
                       (make-string "make_string" 1 2)
                       (make-vector "make_vector" 1 2)
                       (newline "newline" 0 1)
@@ -945,7 +950,8 @@
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
         (when init-form
-          (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum))
+          (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum)
+          (gen-code func indent "symbols[symidx~a].kind = sym_value;\n" (mangle-name name)))
         init-varnum))))
 
 (define (compile-if func indent form)
@@ -1254,6 +1260,9 @@
                                  (identifier 'primcall 'current-error-port 'current-error-port)
                                  (identifier 'primcall 'delete-file 'delete-file)
                                  (identifier 'primcall 'display 'display)
+                                 (identifier 'primcall 'environment? 'environment?)
+                                 (identifier 'primcall 'environment-define 'environment-define)
+                                 (identifier 'primcall 'environment-ref 'environment-ref)
                                  (identifier 'primcall 'eof-object? 'eof-object?)
                                  (identifier 'primcall 'eq? 'eq?)
                                  (identifier 'primcall 'error 'error)
@@ -1285,6 +1294,7 @@
                                  (identifier 'primcall 'hash-table-walk 'hash-table-walk)
                                  (identifier 'primcall 'input-port? 'input-port?)
                                  (identifier 'primcall 'integer->char 'integer->char)
+                                 (identifier 'primcall 'make-environment 'make-environment)
                                  (identifier 'primcall 'make-string 'make-string)
                                  (identifier 'primcall 'make-vector 'make-vector)
                                  (identifier 'primcall 'newline 'newline)

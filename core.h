@@ -305,9 +305,17 @@ struct string {
     char *s;
 };
 
+enum sym_kind {
+    sym_unbound, /* default (0 from calloc): no binding */
+    sym_special, /* built-in syntax; value = canonical special form symbol */
+    sym_value,   /* runtime value: primcall closure or user-defined variable */
+    sym_macro,   /* macro transformer (future) */
+};
+
 struct symbol {
     size_t name_len;
     char *name;
+    enum sym_kind kind;
     value value;
 };
 
@@ -319,6 +327,7 @@ enum object_type {
     OBJ_WRAPPED,
     OBJ_BOX,
     OBJ_HASH_TABLE,
+    OBJ_ENVIRONMENT,
 };
 
 enum port_direction {
@@ -368,8 +377,13 @@ struct object {
             value value;
         } box;
         struct symbol symbol; /* used for uninterned symbols */
+        struct {
+            value hash_table; /* FALSE = global sentinel, hash table = local env */
+        } environment;
     };
 };
+
+static struct object global_environment_obj;
 
 /************ accessors and predicates ***********/
 
@@ -399,6 +413,7 @@ struct object {
 #define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
 #define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
 #define IS_HASH_TABLE(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_HASH_TABLE)
+#define IS_ENVIRONMENT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ENVIRONMENT)
 
 /************ globals and helpers ***********/
 
@@ -657,6 +672,8 @@ static void gc_recurse(value v) {
                     gc_recurse(ht->data[i * 2 + 1]);
                 }
             }
+        } else if (GET_OBJECT(v)->type == OBJ_ENVIRONMENT) {
+            gc_recurse(GET_OBJECT(v)->environment.hash_table);
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -3080,4 +3097,63 @@ static value primcall_hash_table_hash_function(environment env, enum call_flags 
 
     if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-hash-function argument is not a hash-table"); }
     return GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
+}
+
+/* env_define and env_ref are separate C functions so that library-mode .so
+ * files can call them directly without going through the primcall convention.
+ * They will become non-static in step 5. */
+static void env_define(value e, value sym, value val) {
+    value ht = GET_OBJECT(e)->environment.hash_table;
+    hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, sym, val);
+}
+
+static value env_ref(value e, value sym) {
+    value ht = GET_OBJECT(e)->environment.hash_table;
+    value result = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, sym);
+    if (result == SENTINEL) {
+        struct symbol *s = GET_SYMBOL(sym);
+        RAISE("unbound variable: %.*s", (int)s->name_len, s->name);
+    }
+    return result;
+}
+
+static value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { RAISE("make-environment takes no arguments"); }
+    value ht = primcall_percent_make_hash_table(NULL, NO_CALL_FLAGS, 2, FALSE, FALSE);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = ht;
+    return OBJECT(obj);
+}
+
+static value primcall_environment_ref(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("environment-ref needs 2 arguments"); }
+    init_args();
+    value e = next_arg();
+    value sym = next_arg();
+    free_args();
+    if (!IS_ENVIRONMENT(e)) { RAISE("environment-ref first argument is not an environment"); }
+    if (!IS_SYMBOL(sym)) { RAISE("environment-ref second argument is not a symbol"); }
+    return env_ref(e, sym);
+}
+
+static value primcall_environment_define(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { RAISE("environment-define needs 3 arguments"); }
+    init_args();
+    value e = next_arg();
+    value sym = next_arg();
+    value val = next_arg();
+    free_args();
+    if (!IS_ENVIRONMENT(e)) { RAISE("environment-define first argument is not an environment"); }
+    if (!IS_SYMBOL(sym)) { RAISE("environment-define second argument is not a symbol"); }
+    env_define(e, sym, val);
+    return VOID;
+}
+
+static value primcall_environment_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("environment? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_ENVIRONMENT(v));
 }

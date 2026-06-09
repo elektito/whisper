@@ -845,6 +845,26 @@
          (= 100 (hash-table-ref ht2 'foo))
          (= 200 (hash-table-ref ht2 'bar)))))
 
+;; environments
+
+(environment? (make-environment))
+(not (environment? 42))
+(not (environment? '()))
+
+(let ((e (make-environment)))
+  (environment-define e 'x 42)
+  (= 42 (environment-ref e 'x)))
+
+(let ((e (make-environment)))
+  (environment-define e 'x 1)
+  (environment-define e 'x 2)
+  (= 2 (environment-ref e 'x)))
+
+(let ((e (make-environment)))
+  (environment-define e 'a 10)
+  (environment-define e 'b 20)
+  (= 30 (+ (environment-ref e 'a) (environment-ref e 'b))))
+
 ;; quoted data containing binding-form-shaped lists must not be
 ;; interpreted as code by the preprocessor
 (equal? '(lambda 5 6) '(lambda 5 6))
