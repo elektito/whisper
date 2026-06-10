@@ -1567,7 +1567,7 @@
           (let ((cc (get-environment-variable "CC")))
             (let ((cc (if cc cc "gcc"))
                   (own-cflags (if (program-debug program) " -DDEBUG" "")))
-              (let ((cmd (format "~a -I.~a -o ~a ~a ~a core.c" cc own-cflags (cmdline-executable-file args) (cmdline-cflags args) (cmdline-c-file args))))
+              (let ((cmd (format "~a -I.~a -Wl,--export-dynamic -o ~a ~a ~a core.c" cc own-cflags (cmdline-executable-file args) (cmdline-cflags args) (cmdline-c-file args))))
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))
