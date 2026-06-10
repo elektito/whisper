@@ -383,8 +383,6 @@ struct object {
     };
 };
 
-static struct object global_environment_obj;
-
 /************ accessors and predicates ***********/
 
 #define GET_FIXNUM(v) ((int64_t)(v) >> 3)
