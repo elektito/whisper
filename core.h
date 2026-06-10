@@ -3115,13 +3115,22 @@ static value env_ref(value e, value sym) {
     return result;
 }
 
+/* this is a primitive that returns an environment that's a copy of
+ * current global environment. it's to make things easier until we have
+ * proper (environment ...) in place.*/
 static value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("make-environment takes no arguments"); }
     value ht = primcall_percent_make_hash_table(NULL, NO_CALL_FLAGS, 2, FALSE, FALSE);
     struct object *obj = alloc_object();
     obj->type = OBJ_ENVIRONMENT;
     obj->environment.hash_table = ht;
-    return OBJECT(obj);
+    value e = OBJECT(obj);
+    for (int i = 0; i < n_symbols; i++) {
+        if (symbols[i].kind == sym_value) {
+            env_define(e, SYMBOL(i), symbols[i].value);
+        }
+    }
+    return e;
 }
 
 static value primcall_environment_ref(environment env, enum call_flags flags, int nargs, ...) {
