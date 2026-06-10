@@ -265,7 +265,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program ports funcs funcnum interned-symbols init-func referenced-vars is-test-suite test-counter debug modified-vars)
+  (make-program ports funcs funcnum interned-symbols init-func referenced-vars is-test-suite test-counter debug modified-vars library-mode)
   program?
   (ports program-ports program-ports-set!)
   (funcs program-funcs program-funcs-set!)
@@ -276,7 +276,8 @@
   (is-test-suite program-is-test-suite program-is-test-suite-set!)
   (test-counter program-test-counter program-test-counter-set!)
   (debug program-debug program-debug-set!)
-  (modified-vars program-modified-vars program-modified-vars-set!))
+  (modified-vars program-modified-vars program-modified-vars-set!)
+  (library-mode program-library-mode program-library-mode-set!))
 
 (define (create-program port)
   (make-program (list port)
@@ -289,6 +290,7 @@
                 0   ; test counter
                 #f  ; debug instrumentation
                 '() ; modified variables
+                #f  ; library mode
                 ))
 
 (define (program-port program)
@@ -387,23 +389,33 @@
   (let ((port (open-output-file filename)))
     (display "#include \"core.h\"\n\n" port)
     (gen-symbol-defines program port)
+    (when (program-library-mode program)
+      (display "\nstatic value eval_env;" port))
     (newline port)
     (gen-func-prototypes program port)
     (newline port)
     (gen-register-globals program port)
     (newline port)
     (gen-func-bodies program port)
-    (display "__attribute__((no_sanitize(\"address\")))\n" port)
-    (display "int main(int argc, const char *argv[]) {\n" port)
-    (display "    uint64_t ss;\n" port)
-    (display "    stack_start = &ss;\n" port)
-    (display "    init_memory();\n" port)
-    (display "    register_globals();\n" port)
-    (display "    init_ports();\n" port)
-    (display "    cmdline_argc = argc;\n" port)
-    (display "    cmdline_argv = argv;\n" port)
-    (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
-    (display "}\n" port)
+    (if (program-library-mode program)
+        (begin
+          (display "__attribute__((no_sanitize(\"address\")))\n" port)
+          (display "value whisper_main(value env) {\n" port)
+          (display "    eval_env = env;\n" port)
+          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+          (display "}\n" port))
+        (begin
+          (display "__attribute__((no_sanitize(\"address\")))\n" port)
+          (display "int main(int argc, const char *argv[]) {\n" port)
+          (display "    uint64_t ss;\n" port)
+          (display "    stack_start = &ss;\n" port)
+          (display "    init_memory();\n" port)
+          (display "    register_globals();\n" port)
+          (display "    init_ports();\n" port)
+          (display "    cmdline_argc = argc;\n" port)
+          (display "    cmdline_argv = argv;\n" port)
+          (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+          (display "}\n" port)))
     (close-port port)))
 
 (define-record-type <function>
@@ -950,8 +962,11 @@
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
         (when init-form
-          (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum)
-          (gen-code func indent "symbols[symidx~a].kind = sym_value;\n" (mangle-name name)))
+          (if (program-library-mode (func-program func))
+              (gen-code func indent "env_define(eval_env, sym~a, x~a);\n" (mangle-name name) init-varnum)
+              (begin
+                (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name name) init-varnum)
+                (gen-code func indent "symbols[symidx~a].kind = sym_value;\n" (mangle-name name)))))
         init-varnum))))
 
 (define (compile-if func indent form)
@@ -1022,7 +1037,9 @@
         (meaning (lookup-identifier func (cadr form))))
     (case (meaning-kind meaning)
       ((global)
-       (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name (cadr form)) value-varnum))
+       (if (program-library-mode (func-program func))
+           (gen-code func indent "env_define(eval_env, sym~a, x~a);\n" (mangle-name (cadr form)) value-varnum)
+           (gen-code func indent "symbols[symidx~a].value = x~a;\n" (mangle-name (cadr form)) value-varnum)))
       ((local)
        (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (cadr form)) value-varnum))
       ((free)
@@ -1148,7 +1165,9 @@
            (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, ~a);\n" varnum (mangle-name form))
            (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))))
       ((global)
-       (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form)))
+       (if (program-library-mode (func-program func))
+           (gen-code func indent "value x~a = env_ref(eval_env, sym~a);\n" varnum (mangle-name form))
+           (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form))))
       ((free)
        (let ((freevar-idx (func-find-freevar func form)))
          (let ((freevar-idx (if freevar-idx
@@ -1173,7 +1192,9 @@
       ((unknown) (if (func-parent func)
                      (begin
                        (program-add-referenced-var (func-program func) form)
-                       (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form)))
+                       (if (program-library-mode (func-program func))
+                           (gen-code func indent "value x~a = env_ref(eval_env, sym~a);\n" varnum (mangle-name form))
+                           (gen-code func indent "value x~a = symbols[symidx~a].value;\n" varnum (mangle-name form))))
                      (compile-error "unbound identifier: ~a" form)))
 
       ((macro) (compile-error "invalid use of macro name: ~a" form))
@@ -1430,7 +1451,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -1441,7 +1462,8 @@
   (executable-file cmdline-executable-file cmdline-executable-file-set!)
   (delete-executable cmdline-delete-executable cmdline-delete-executable-set!)
   (debug cmdline-debug cmdline-debug-set!)
-  (cflags cmdline-cflags cmdline-cflags-set!))
+  (cflags cmdline-cflags cmdline-cflags-set!)
+  (library-mode cmdline-library-mode cmdline-library-mode-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f ; just compile
@@ -1454,6 +1476,7 @@
                 #f ; delete executable
                 #f ; debug
                 "" ; cflags
+                #f ; library mode
                 ))
 
 (define (command-line-error fmt . args)
@@ -1481,6 +1504,9 @@
             ((string=? (car cl) "-g")
              (cmdline-debug-set! args #t)
              (loop (cdr cl)))
+            ((string=? (car cl) "-l")
+             (cmdline-library-mode-set! args #t)
+             (loop (cdr cl)))
             ((string=? (car cl) "-f")
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -f")
@@ -1500,12 +1526,13 @@
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-o output-file] [-f cflags] [-g]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
- -o\tthe name of the output file. defaults to b.c or b.out depending on
-\twhether -c is passed or not.
+ -l\tcompile as a library. output is a .so if -o ends with .so, else a .a
+ -o\tthe name of the output file. defaults to b.c, b.out, or b.so
+\tdepending on -c, -l, or neither.
  -f\tuse the given options when invoking the C compiler
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
@@ -1530,6 +1557,8 @@
       (command-line-error "missing input file"))
   (if (and (cmdline-just-compile args) (cmdline-run args))
       (command-line-error "-r and -c are mutually exclusive"))
+  (if (and (cmdline-library-mode args) (cmdline-run args))
+      (command-line-error "-l and -r are mutually exclusive"))
   (if (cmdline-output-file args)
       (if (cmdline-just-compile args)
           (cmdline-c-file-set! args (cmdline-output-file args))
@@ -1544,12 +1573,26 @@
                 (begin
                   (cmdline-output-file-set! args (temp-filename))
                   (cmdline-delete-executable-set! args #t))
-                (cmdline-output-file-set! args "b.out")))))
+                (if (cmdline-library-mode args)
+                    (cmdline-output-file-set! args "b.so")
+                    (cmdline-output-file-set! args "b.out"))))))
   (if (cmdline-just-compile args)
       (cmdline-c-file-set! args (cmdline-output-file args))
       (begin
         (cmdline-c-file-set! args (string-append (temp-filename) ".c"))
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
+
+(define (build-compile-cmd cc own-cflags args c-file)
+  (let ((out (cmdline-executable-file args))
+        (extra (cmdline-cflags args)))
+    (cond
+      ((not (cmdline-library-mode args))
+       (format "~a -I.~a -Wl,--export-dynamic -o ~a ~a ~a core.c" cc own-cflags out extra c-file))
+      ((string-suffix? ".so" out)
+       (format "~a -I.~a -fPIC -shared -o ~a ~a ~a" cc own-cflags out extra c-file))
+      (else
+       (let ((obj (string-append (temp-filename) ".o")))
+         (format "~a -I.~a -fPIC -c -o ~a ~a ~a && ar rcs ~a ~a" cc own-cflags obj extra c-file out obj))))))
 
 ;;;;;; main ;;;;;;
 
@@ -1561,13 +1604,15 @@
           (program-is-test-suite-set! program #t))
       (if (cmdline-debug args)
           (program-debug-set! program #t))
+      (if (cmdline-library-mode args)
+          (program-library-mode-set! program #t))
       (compile-program program)
       (output-program-code program (cmdline-c-file args))
       (if (not (cmdline-just-compile args))
           (let ((cc (get-environment-variable "CC")))
             (let ((cc (if cc cc "gcc"))
                   (own-cflags (if (program-debug program) " -DDEBUG" "")))
-              (let ((cmd (format "~a -I.~a -Wl,--export-dynamic -o ~a ~a ~a core.c" cc own-cflags (cmdline-executable-file args) (cmdline-cflags args) (cmdline-c-file args))))
+              (let ((cmd (build-compile-cmd cc own-cflags args (cmdline-c-file args))))
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))

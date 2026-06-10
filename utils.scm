@@ -405,6 +405,12 @@
             (loop (car strs) (cdr strs))
             (loop (string-append result sep (car strs)) (cdr strs))))))
 
+(define (string-suffix? suffix str)
+  (let ((suffix-len (string-length suffix))
+        (str-len (string-length str)))
+    (and (>= str-len suffix-len)
+         (string=? suffix (substring str (- str-len suffix-len) str-len)))))
+
 (define (string-append-char str ch)
   (string-append str (make-string 1 ch)))
 
