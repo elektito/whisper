@@ -475,11 +475,6 @@ extern struct symbol *symbols;
 extern int cmdline_argc;
 extern const char **cmdline_argv;
 
-/* these won't be needed in next version */
-extern struct object current_input_port;
-extern struct object current_output_port;
-extern struct object current_error_port;
-
 /************ extern function declarations ***********/
 
 extern void init_memory(void);
@@ -496,14 +491,6 @@ extern value env_ref(value e, value sym);
 
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
-
-/* these won't be needed in next version */
-extern value file_read_char(value port);
-extern value file_peek_char(value port);
-extern value file_read_line(value port);
-extern void  file_unread_char(value port, value ch);
-extern void  file_write_char(value port, value ch);
-extern void  file_printf(value port, const char *fmt, ...);
 
 extern value primcall_apply(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);

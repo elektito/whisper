@@ -13,6 +13,10 @@ static uint64_t gensym_counter;
 static int n_wrapped_print_procs = 0;
 static struct kind_proc *wrapped_print_procs = NULL;
 
+static struct object current_input_port;
+static struct object current_output_port;
+static struct object current_error_port;
+
 /* both in units of allocations (object count), not bytes */
 static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
@@ -37,11 +41,6 @@ struct symbol *symbols = NULL;
 
 int cmdline_argc;
 const char **cmdline_argv;
-
-/* these can be made static in next version */
-struct object current_input_port;
-struct object current_output_port;
-struct object current_error_port;
 
 /*************** stack trace **************/
 
@@ -633,8 +632,7 @@ static char *strz(value str) {
     return buf;
 }
 
-/* this can be made static in next version */
-value file_read_line(value port) {
+static value file_read_line(value port) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     char buf[256];
     char *r = fgets(buf, sizeof(buf), fp);
@@ -663,16 +661,14 @@ value file_read_line(value port) {
     return STRING(str);
 }
 
-/* this can be made static in next version */
-value file_read_char(value port) {
+static value file_read_char(value port) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     char ch = getc(fp);
     if (ch == EOF) return EOFOBJ;
     return CHAR(ch);
 }
 
-/* this can be made static in next version */
-value file_peek_char(value port) {
+static value file_peek_char(value port) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     char ch = getc(fp);
     if (ch == EOF) return EOFOBJ;
@@ -680,22 +676,19 @@ value file_peek_char(value port) {
     return CHAR(ch);
 }
 
-/* this can be made static in next version */
-void file_unread_char(value port, value ch) {
+static void file_unread_char(value port, value ch) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     int ret = ungetc(GET_CHAR(ch), fp);
     if (ret == EOF) { RAISE("error unreading character"); }
 }
 
-/* this can be made static in next version */
-void file_write_char(value port, value ch) {
+static void file_write_char(value port, value ch) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     int ret = putc(GET_CHAR(ch), fp);
     if (ret == EOF) { RAISE("error writing to file: %s", strerror(errno)); }
 }
 
-/* this can be made static in next version */
-void file_printf(value port, const char *fmt, ...) {
+static void file_printf(value port, const char *fmt, ...) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     va_list args;
     va_start(args, fmt);
