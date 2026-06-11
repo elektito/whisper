@@ -397,25 +397,34 @@
     (gen-register-globals program port)
     (newline port)
     (gen-func-bodies program port)
-    (if (program-library-mode program)
-        (begin
-          (display "__attribute__((no_sanitize(\"address\")))\n" port)
-          (display "value whisper_main(value env) {\n" port)
-          (display "    eval_env = env;\n" port)
-          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
-          (display "}\n" port))
-        (begin
-          (display "__attribute__((no_sanitize(\"address\")))\n" port)
-          (display "int main(int argc, const char *argv[]) {\n" port)
-          (display "    uint64_t ss;\n" port)
-          (display "    stack_start = &ss;\n" port)
-          (display "    init_memory();\n" port)
-          (display "    register_globals();\n" port)
-          (display "    init_ports();\n" port)
-          (display "    cmdline_argc = argc;\n" port)
-          (display "    cmdline_argv = argv;\n" port)
-          (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
-          (display "}\n" port)))
+    (let ((lib-mode (program-library-mode program)))
+      (cond
+        ((eq? lib-mode 'so)
+         (display "value whisper_main(value env) {\n" port)
+         (display "    eval_env = env;\n" port)
+         (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+         (display "}\n" port))
+        ((eq? lib-mode 'static)
+         (display "static value _lib_init(value env) {\n" port)
+         (display "    eval_env = env;\n" port)
+         (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+         (display "}\n\n" port)
+         (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
+         (display "STATIC_LIB_CONSTRUCTOR(_lib_ctor) {\n" port)
+         (display "    register_static_lib(&_lib_node);\n" port)
+         (display "}\n" port))
+        (else
+         (display "__attribute__((no_sanitize(\"address\")))\n" port)
+         (display "int main(int argc, const char *argv[]) {\n" port)
+         (display "    uint64_t ss;\n" port)
+         (display "    stack_start = &ss;\n" port)
+         (display "    init_memory();\n" port)
+         (display "    register_globals();\n" port)
+         (display "    init_ports();\n" port)
+         (display "    cmdline_argc = argc;\n" port)
+         (display "    cmdline_argv = argv;\n" port)
+         (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+         (display "}\n" port))))
     (close-port port)))
 
 (define-record-type <function>
@@ -1505,7 +1514,10 @@
              (cmdline-debug-set! args #t)
              (loop (cdr cl)))
             ((string=? (car cl) "-l")
-             (cmdline-library-mode-set! args #t)
+             (cmdline-library-mode-set! args 'so)
+             (loop (cdr cl)))
+            ((string=? (car cl) "-L")
+             (cmdline-library-mode-set! args 'static)
              (loop (cdr cl)))
             ((string=? (car cl) "-f")
              (if (null? (cdr cl))
@@ -1526,13 +1538,14 @@
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-o output-file] [-f cflags] [-g]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
- -l\tcompile as a library. output is a .so if -o ends with .so, else a .a
- -o\tthe name of the output file. defaults to b.c, b.out, or b.so
-\tdepending on -c, -l, or neither.
+ -l\tcompile as a shared library (.so)
+ -L\tcompile as a static library (.a)
+ -o\tthe name of the output file. defaults to b.c, b.out, b.so, or b.a
+\tdepending on -c, -l, -L, or neither.
  -f\tuse the given options when invoking the C compiler
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
@@ -1558,7 +1571,7 @@
   (if (and (cmdline-just-compile args) (cmdline-run args))
       (command-line-error "-r and -c are mutually exclusive"))
   (if (and (cmdline-library-mode args) (cmdline-run args))
-      (command-line-error "-l and -r are mutually exclusive"))
+      (command-line-error "-l/-L and -r are mutually exclusive"))
   (if (cmdline-output-file args)
       (if (cmdline-just-compile args)
           (cmdline-c-file-set! args (cmdline-output-file args))
@@ -1573,9 +1586,10 @@
                 (begin
                   (cmdline-output-file-set! args (temp-filename))
                   (cmdline-delete-executable-set! args #t))
-                (if (cmdline-library-mode args)
-                    (cmdline-output-file-set! args "b.so")
-                    (cmdline-output-file-set! args "b.out"))))))
+                (case (cmdline-library-mode args)
+                  ((so)     (cmdline-output-file-set! args "b.so"))
+                  ((static) (cmdline-output-file-set! args "b.a"))
+                  (else     (cmdline-output-file-set! args "b.out")))))))
   (if (cmdline-just-compile args)
       (cmdline-c-file-set! args (cmdline-output-file args))
       (begin
@@ -1585,14 +1599,14 @@
 (define (build-compile-cmd cc own-cflags args c-file)
   (let ((out (cmdline-executable-file args))
         (extra (cmdline-cflags args)))
-    (cond
-      ((not (cmdline-library-mode args))
-       (format "~a -I.~a -Wl,--export-dynamic -o ~a ~a ~a core.c" cc own-cflags out extra c-file))
-      ((string-suffix? ".so" out)
+    (case (cmdline-library-mode args)
+      ((so)
        (format "~a -I.~a -fPIC -shared -o ~a ~a ~a" cc own-cflags out extra c-file))
-      (else
+      ((static)
        (let ((obj (string-append (temp-filename) ".o")))
-         (format "~a -I.~a -fPIC -c -o ~a ~a ~a && ar rcs ~a ~a" cc own-cflags obj extra c-file out obj))))))
+         (format "~a -I.~a -fPIC -c -o ~a ~a ~a && ar rcs ~a ~a" cc own-cflags obj extra c-file out obj)))
+      (else
+       (format "~a -I.~a -Wl,--export-dynamic -o ~a ~a ~a core.c" cc own-cflags out extra c-file)))))
 
 ;;;;;; main ;;;;;;
 
@@ -1604,8 +1618,8 @@
           (program-is-test-suite-set! program #t))
       (if (cmdline-debug args)
           (program-debug-set! program #t))
-      (if (cmdline-library-mode args)
-          (program-library-mode-set! program #t))
+      (when (cmdline-library-mode args)
+        (program-library-mode-set! program (cmdline-library-mode args)))
       (compile-program program)
       (output-program-code program (cmdline-c-file args))
       (if (not (cmdline-just-compile args))

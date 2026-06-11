@@ -1238,6 +1238,20 @@ void init_ports() {
     current_error_port.port.write_char = file_write_char;
 }
 
+/************ static library registration ***********/
+
+static struct static_lib *lib_list = NULL;
+
+void register_static_lib(struct static_lib *lib) {
+    lib->next = lib_list;
+    lib_list = lib;
+}
+
+void run_static_libs(value env) {
+    for (struct static_lib *p = lib_list; p; p = p->next)
+        p->init(env);
+}
+
 /************ primcall functions ***********/
 
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
