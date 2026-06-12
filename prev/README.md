@@ -1,0 +1,1 @@
+This directory contains the versions of core header and c files required by the previous (bootstrap) version of the compiler. This way we can change the current files in backwards-incompatible ways without breaking anything.
