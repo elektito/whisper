@@ -1460,7 +1460,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -1472,20 +1472,22 @@
   (delete-executable cmdline-delete-executable cmdline-delete-executable-set!)
   (debug cmdline-debug cmdline-debug-set!)
   (cflags cmdline-cflags cmdline-cflags-set!)
-  (library-mode cmdline-library-mode cmdline-library-mode-set!))
+  (library-mode cmdline-library-mode cmdline-library-mode-set!)
+  (core-path cmdline-core-path cmdline-core-path-set!))
 
 (define (create-cmdline-args)
-  (make-cmdline #f ; just compile
-                #f ; run
-                #f ; output file
-                #f ; input file
-                #f ; test
-                #f ; c output file
-                #f ; executable output file
-                #f ; delete executable
-                #f ; debug
-                "" ; cflags
-                #f ; library mode
+  (make-cmdline #f  ; just compile
+                #f  ; run
+                #f  ; output file
+                #f  ; input file
+                #f  ; test
+                #f  ; c output file
+                #f  ; executable output file
+                #f  ; delete executable
+                #f  ; debug
+                ""  ; cflags
+                #f  ; library mode
+                "." ; core path
                 ))
 
 (define (command-line-error fmt . args)
@@ -1519,6 +1521,12 @@
             ((string=? (car cl) "-L")
              (cmdline-library-mode-set! args 'static)
              (loop (cdr cl)))
+            ((string=? (car cl) "-C")
+             (if (null? (cdr cl))
+                 (command-line-error "missing argument to -C")
+                 (begin
+                   (cmdline-core-path-set! args (cadr cl))
+                   (loop (cddr cl)))))
             ((string=? (car cl) "-f")
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -f")
@@ -1538,12 +1546,13 @@
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-o output-file] [-f cflags] [-g]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
  -l\tcompile as a shared library (.so)
  -L\tcompile as a static library (.a)
+ -C\tpath to core files (core.h and core.c).
  -o\tthe name of the output file. defaults to b.c, b.out, b.so, or b.a
 \tdepending on -c, -l, -L, or neither.
  -f\tuse the given options when invoking the C compiler
@@ -1598,15 +1607,16 @@
 
 (define (build-compile-cmd cc own-cflags args c-file)
   (let ((out (cmdline-executable-file args))
-        (extra (cmdline-cflags args)))
+        (extra (cmdline-cflags args))
+        (core-path (cmdline-core-path args)))
     (case (cmdline-library-mode args)
       ((so)
-       (format "~a -I.~a -fPIC -shared -o ~a ~a ~a" cc own-cflags out extra c-file))
+       (format "~a -I~a ~a -fPIC -shared -o ~a ~a ~a" core-path cc own-cflags out extra c-file))
       ((static)
        (let ((obj (string-append (temp-filename) ".o")))
-         (format "~a -I.~a -fPIC -c -o ~a ~a ~a && ar rcs ~a ~a" cc own-cflags obj extra c-file out obj)))
+         (format "~a -I~a ~a -fPIC -c -o ~a ~a ~a && ar rcs ~a ~a" cc core-path own-cflags obj extra c-file out obj)))
       (else
-       (format "~a -I.~a -Wl,--export-dynamic -o ~a ~a ~a core.c" cc own-cflags out extra c-file)))))
+       (format "~a -I~a ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c" cc core-path own-cflags out extra c-file core-path)))))
 
 ;;;;;; main ;;;;;;
 
