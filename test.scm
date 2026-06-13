@@ -38,6 +38,12 @@
 
 (not (eq? 'abc 'AbC))
 
+(eq? (string->symbol "hello") (string->symbol "hello"))
+(eq? 'hello (string->symbol "hello"))
+(string? (symbol->string (gensym)))
+(string? (symbol->string (gensym "prefix")))
+(not (eq? (gensym "foo") (gensym "foo")))
+
 ;;
 
 (eq? 100 (if #t 100 200))
