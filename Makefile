@@ -5,7 +5,7 @@ SRC_FILES = whisper.scm utils.scm format.scm qq.scm macro.scm preprocess.scm
 all: whisper-v10
 
 stage0: $(SRC_FILES)
-	./whisper-v9 whisper.scm -o stage0
+	./whisper-v9 whisper.scm -o stage0 -C prev
 
 stage1: stage0 core.h core.c $(SRC_FILES)
 	./stage0 whisper.scm -o stage1 -f "-Wl,-s $(CFLAGS)"
