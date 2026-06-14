@@ -99,7 +99,7 @@ void print_stacktrace(void) {
 
     int idx = 1;
     for (int i = 0; i < stacktrace_size; ++i) {
-        struct symbols_ht_ctx ctx;
+        struct symbol_ht_ctx ctx;
         ctx.name_len = 0;
         ctx.func = stacktrace[i];
         hash_table_each(&symbols, symbols_ht_each, &ctx);
@@ -111,7 +111,7 @@ void print_stacktrace(void) {
             continue;
         }
 
-        fprintf(stderr, "[%d] %.*s\n", idx++, ctx.name_len, ctx.name);
+        fprintf(stderr, "[%d] %.*s\n", idx++, (int)ctx.name_len, ctx.name);
     }
 }
 
@@ -1569,7 +1569,7 @@ value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
     if (!IS_STRING(msg)) { RAISE("error argument is not a string"); }
     fprintf(stderr, "error: ");
     _display(msg, OBJECT(&current_error_port));
-    printf("\n");
+    fprintf(stderr, "\n");
     print_stacktrace();
     cleanup();
     exit(1);
