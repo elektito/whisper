@@ -971,6 +971,19 @@
           (gen-code func indent "env_define(global_env, symb~a, x~a);\n" (mangle-name name) init-varnum))
         init-varnum))))
 
+;; The "declare" form is temporary until we add proper library and
+;; import support.
+(define (compile-declare func indent form)
+  (if (func-parent func)
+      (compile-error "declare only allowed at top-level"))
+  (let loop ((names (cdr form)))
+    (unless (null? names)
+      (let ((name (car names)))
+        (intern (func-program func) (identifier-meaning name))
+        (func-add-binding func name (make-meaning 'global #f)))
+      (loop (cdr names))))
+  -1)
+
 (define (compile-if func indent form)
   (if (or (< (length form) 3) (> (length form) 4))
       (compile-error "malformed if"))
@@ -1055,6 +1068,7 @@
 (define (compile-special func indent form kind)
   (case kind
     ((begin) (compile-begin func indent form))
+    ((declare) (compile-declare func indent form))
     ((define) (compile-define func indent form))
     ((define-syntax) (compile-define-syntax func indent form))
     ((include) (compile-include func indent form))
@@ -1243,6 +1257,7 @@
         (compile-form func indent form))))
 
 (define *root-identifiers* (list (identifier 'special 'begin 'begin)
+                                 (identifier 'special 'declare 'declare)
                                  (identifier 'special 'define 'define)
                                  (identifier 'special 'define-syntax 'define-syntax)
                                  (identifier 'special 'if 'if)
