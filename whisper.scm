@@ -417,6 +417,7 @@
          (display "    global_env = make_global_env();\n" port)
          (display "    register_globals();\n" port)
          (display "    init_ports();\n" port)
+         (display "    run_static_libs(global_env);\n" port)
          (display "    cmdline_argc = argc;\n" port)
          (display "    cmdline_argv = argv;\n" port)
          (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
@@ -1444,7 +1445,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path archives)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -1457,7 +1458,8 @@
   (debug cmdline-debug cmdline-debug-set!)
   (cflags cmdline-cflags cmdline-cflags-set!)
   (library-mode cmdline-library-mode cmdline-library-mode-set!)
-  (core-path cmdline-core-path cmdline-core-path-set!))
+  (core-path cmdline-core-path cmdline-core-path-set!)
+  (archives cmdline-archives cmdline-archives-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
@@ -1472,6 +1474,7 @@
                 ""  ; cflags
                 #f  ; library mode
                 "." ; core path
+                '() ; archives
                 ))
 
 (define (command-line-error fmt . args)
@@ -1511,6 +1514,12 @@
                  (begin
                    (cmdline-core-path-set! args (cadr cl))
                    (loop (cddr cl)))))
+            ((string=? (car cl) "-a")
+             (if (null? (cdr cl))
+                 (command-line-error "missing argument to -a")
+                 (begin
+                   (cmdline-archives-set! args (cons (cadr cl) (cmdline-archives args)))
+                   (loop (cddr cl)))))
             ((string=? (car cl) "-f")
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -f")
@@ -1530,7 +1539,7 @@
                         (loop (cdr cl)))))))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-g]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
@@ -1540,6 +1549,7 @@
  -o\tthe name of the output file. defaults to b.c, b.out, b.so, or b.a
 \tdepending on -c, -l, -L, or neither.
  -f\tuse the given options when invoking the C compiler
+ -a\tlink a static archive (may be repeated)
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
 " (car (command-line)))
@@ -1589,10 +1599,16 @@
         (cmdline-c-file-set! args (string-append (temp-filename) ".c"))
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
+(define (all-archive-flags archives)
+  (if (null? archives)
+      ""
+      (string-append "-Wl,--whole-archive " (string-join archives " "))))
+
 (define (build-compile-cmd cc own-cflags args c-file)
   (let ((out (cmdline-executable-file args))
         (extra (cmdline-cflags args))
-        (core-path (cmdline-core-path args)))
+        (core-path (cmdline-core-path args))
+        (archive-flags (all-archive-flags (cmdline-archives args))))
     (case (cmdline-library-mode args)
       ((so)
        (format "~a -I~a ~a -fPIC -shared -o ~a ~a ~a" cc core-path own-cflags out extra c-file))
@@ -1600,7 +1616,7 @@
        (let ((obj (string-append (temp-filename) ".o")))
          (format "~a -I~a ~a -fPIC -c -o ~a ~a ~a && ar rcs ~a ~a" cc core-path own-cflags obj extra c-file out obj)))
       (else
-       (format "~a -I~a ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c" cc core-path own-cflags out extra c-file core-path)))))
+       (format "~a -I~a ~a -Wl,--export-dynamic -o ~a ~a ~a ~a ~a/core.c" cc core-path own-cflags out extra c-file archive-flags core-path)))))
 
 ;;;;;; main ;;;;;;
 
