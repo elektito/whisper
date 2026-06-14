@@ -1290,10 +1290,15 @@ void init_symbols(void) {
 }
 
 value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
-    value sym = make_symbol(name, name_len, kind);
     struct symbol_name *k = malloc(sizeof(struct symbol_name) + name_len);
     k->len = name_len;
     memcpy(k->name, name, name_len);
+    value existing = hash_table_get(&symbols, 0, k);
+    if (existing != SENTINEL) {
+        free(k);
+        return existing;
+    }
+    value sym = make_symbol(name, name_len, kind);
     hash_table_set(&symbols, 0, k, sym);
     return sym;
 }

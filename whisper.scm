@@ -401,6 +401,7 @@
         ((eq? lib-mode 'static)
          (display "static value _lib_init(value env) {\n" port)
          (display "    global_env = env;\n" port)
+         (display "    register_globals();\n" port)
          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
          (display "}\n\n" port)
          (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
@@ -1602,7 +1603,7 @@
 (define (all-archive-flags archives)
   (if (null? archives)
       ""
-      (string-append "-Wl,--whole-archive " (string-join archives " "))))
+      (string-append "-Wl,--whole-archive " (string-join archives " ") " -Wl,--no-whole-archive")))
 
 (define (build-compile-cmd cc own-cflags args c-file)
   (let ((out (cmdline-executable-file args))
