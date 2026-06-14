@@ -330,14 +330,11 @@ extern const char *find_func_name(funcptr func);
 extern void env_define(value e, value sym, value val);
 extern value env_ref(value e, value sym);
 
-extern void hash_table_init(struct hash_table *ht, size_t initial_size, hash_fn hash_fn, eq_fn eq_fn);
-extern void hash_table_set(struct hash_table *ht, volatile value owner, value k, value v);
+extern void init_symbols(void);
+extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
-
-extern uint64_t symbol_name_hash(struct hash_table *ht, value key);
-extern int symbol_name_eq(struct hash_table *ht, value k1, value k2);
 
 extern value primcall_apply(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);

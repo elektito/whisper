@@ -1275,6 +1275,21 @@ value env_ref(value e, value sym) {
     return result;
 }
 
+/************ global environment functions ***********/
+
+void init_symbols(void) {
+    hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);
+}
+
+value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
+    value sym = make_symbol(name, name_len, kind);
+    struct symbol_name *k = malloc(sizeof(struct symbol_name) + name_len);
+    k->len = name_len;
+    memcpy(k->name, name, name_len);
+    hash_table_set(&symbols, 0, k, sym);
+    return sym;
+}
+
 /************ port init functions ***********/
 
 void init_ports() {

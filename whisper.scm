@@ -360,20 +360,15 @@
 
 (define (gen-register-globals program output)
   (display "static void register_globals() {\n" output)
-  (format output "    struct symbol_name *k;\n")
-  (format output "    hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);\n")
   (let loop ((symbols (program-symbols program)))
     (if (not (null? symbols))
         (let* ((sym (car symbols))
                (primcall-info (hash-table-ref/default *primcalls-table* sym #f))
                (sym-name (symbol->string sym))
                (sym-len (string-length sym-name)))
-          (format output "    symb~a = make_symbol(\"~a\", ~a, ~a);\n"
-                  (mangle-name sym) sym sym-len (if primcall-info "sym_value" "sym_unbound"))
-          (format output "    k = malloc(sizeof(struct symbol_name) + ~a);\n" sym-len)
-          (format output "    k->len = ~a;\n" sym-len)
-          (format output "    memcpy(k->name, \"~a\", ~a);\n" sym sym-len)
-          (format output "    hash_table_set(&symbols, 0, k, symb~a);\n" (mangle-name sym))
+          (format output "    symb~a = extend_global_env(\"~a\", ~a, ~a);\n"
+                  (mangle-name sym) sym sym-len
+                  (if primcall-info "sym_value" "sym_unbound"))
           (when primcall-info
             (let* ((c-name (cadr primcall-info))
                    (min-args (caddr primcall-info))
@@ -419,6 +414,7 @@
          (display "    uint64_t ss;\n" port)
          (display "    stack_start = &ss;\n" port)
          (display "    init_memory();\n" port)
+         (display "    init_symbols();\n" port)
          (display "    register_globals();\n" port)
          (display "    init_ports();\n" port)
          (display "    cmdline_argc = argc;\n" port)
