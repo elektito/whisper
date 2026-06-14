@@ -384,8 +384,7 @@
   (let ((port (open-output-file filename)))
     (display "#include \"core.h\"\n\n" port)
     (gen-symbol-defines program port)
-    (when (program-library-mode program)
-      (display "\nstatic value eval_env;" port))
+    (display "\nstatic value global_env;\n" port)
     (newline port)
     (gen-func-prototypes program port)
     (newline port)
@@ -396,12 +395,12 @@
       (cond
         ((eq? lib-mode 'so)
          (display "value whisper_main(value env) {\n" port)
-         (display "    eval_env = env;\n" port)
+         (display "    global_env = env;\n" port)
          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
          (display "}\n" port))
         ((eq? lib-mode 'static)
          (display "static value _lib_init(value env) {\n" port)
-         (display "    eval_env = env;\n" port)
+         (display "    global_env = env;\n" port)
          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
          (display "}\n\n" port)
          (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
@@ -415,6 +414,7 @@
          (display "    stack_start = &ss;\n" port)
          (display "    init_memory();\n" port)
          (display "    init_symbols();\n" port)
+         (display "    global_env = make_global_env();\n" port)
          (display "    register_globals();\n" port)
          (display "    init_ports();\n" port)
          (display "    cmdline_argc = argc;\n" port)
@@ -966,11 +966,7 @@
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
         (when init-form
-          (if (program-library-mode (func-program func))
-              (gen-code func indent "env_define(eval_env, symb~a, x~a);\n" (mangle-name name) init-varnum)
-              (begin
-                (gen-code func indent "GET_SYMBOL(symb~a)->value = x~a;\n" (mangle-name name) init-varnum)
-                (gen-code func indent "GET_SYMBOL(symb~a)->kind = sym_value;\n" (mangle-name name)))))
+          (gen-code func indent "env_define(global_env, symb~a, x~a);\n" (mangle-name name) init-varnum))
         init-varnum))))
 
 (define (compile-if func indent form)
@@ -1041,9 +1037,7 @@
         (meaning (lookup-identifier func (cadr form))))
     (case (meaning-kind meaning)
       ((global)
-       (if (program-library-mode (func-program func))
-           (gen-code func indent "env_define(eval_env, symb~a, x~a);\n" (mangle-name (cadr form)) value-varnum)
-           (gen-code func indent "GET_SYMBOL(symb~a)->value = x~a;\n" (mangle-name (cadr form)) value-varnum)))
+       (gen-code func indent "env_define(global_env, symb~a, x~a);\n" (mangle-name (cadr form)) value-varnum))
       ((local)
        (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (cadr form)) value-varnum))
       ((free)
@@ -1169,9 +1163,7 @@
            (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, ~a);\n" varnum (mangle-name form))
            (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))))
       ((global)
-       (if (program-library-mode (func-program func))
-           (gen-code func indent "value x~a = env_ref(eval_env, symb~a);\n" varnum (mangle-name form))
-           (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n" varnum (mangle-name form))))
+       (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
       ((free)
        (let ((freevar-idx (func-find-freevar func form)))
          (let ((freevar-idx (if freevar-idx
@@ -1196,9 +1188,7 @@
       ((unknown) (if (func-parent func)
                      (begin
                        (program-add-referenced-var (func-program func) form)
-                       (if (program-library-mode (func-program func))
-                           (gen-code func indent "value x~a = env_ref(eval_env, symb~a);\n" varnum (mangle-name form))
-                           (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n" varnum (mangle-name form))))
+                       (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
                      (compile-error "unbound identifier: ~a" form)))
 
       ((macro) (compile-error "invalid use of macro name: ~a" form))

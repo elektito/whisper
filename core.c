@@ -427,7 +427,8 @@ static void gc_recurse(value v) {
                 }
             }
         } else if (GET_OBJECT(v)->type == OBJ_ENVIRONMENT) {
-            gc_recurse(GET_OBJECT(v)->environment.hash_table);
+            if (GET_OBJECT(v)->environment.hash_table != FALSE)
+                gc_recurse(GET_OBJECT(v)->environment.hash_table);
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -1262,11 +1263,18 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
 
 void env_define(value e, value sym, value val) {
     value ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == FALSE) {
+        GET_SYMBOL(sym)->value = val;
+        GET_SYMBOL(sym)->kind = sym_value;
+        return;
+    }
     hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, sym, val);
 }
 
 value env_ref(value e, value sym) {
     value ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == FALSE)
+        return GET_SYMBOL(sym)->value;
     value result = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, sym);
     if (result == SENTINEL) {
         struct symbol *s = GET_SYMBOL(sym);
@@ -1288,6 +1296,13 @@ value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
     memcpy(k->name, name, name_len);
     hash_table_set(&symbols, 0, k, sym);
     return sym;
+}
+
+value make_global_env(void) {
+    struct object *obj = malloc(sizeof(struct object));
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = FALSE;
+    return OBJECT(obj);
 }
 
 /************ port init functions ***********/

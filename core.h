@@ -333,6 +333,8 @@ extern value env_ref(value e, value sym);
 extern void init_symbols(void);
 extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
+extern value make_global_env(void);
+
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
 
