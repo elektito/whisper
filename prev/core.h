@@ -28,23 +28,23 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define CLOSURE_TAG 0x02
 #define STRING_TAG 0x03
 #define PAIR_TAG 0x04
-#define SENTINEL_TAG 0x5       /*   0...0_101 */
-#define VOID_TAG 0x15          /*      10_101 */
-#define BOOL_TAG 0xd           /*       1_101 */
-#define TRUE_TAG 0x1d          /*      11_101 */
-#define FALSE_TAG 0x0d         /*      01_101 */
-#define CHAR_TAG 0x25          /*     100_101 */
-#define SYMBOL_TAG 0x45        /*    1000_101 */
-#define NIL_TAG 0x85           /*   10000_101 */
-#define EOFOBJ_TAG 0x105       /*  100000_101 */
-#define HT_TOMBSTONE_TAG 0x205 /* 1000000_101 */
+#define SENTINEL_TAG 0x5       /*  0...0_101 */
+#define VOID_TAG 0x15          /*     10_101 */
+#define BOOL_TAG 0xd           /*      1_101 */
+#define TRUE_TAG 0x1d          /*     11_101 */
+#define FALSE_TAG 0x0d         /*     01_101 */
+#define CHAR_TAG 0x25          /*    100_101 */
+#define NIL_TAG 0x45           /*   1000_101 */
+#define EOFOBJ_TAG 0x85        /*  10000_101 */
+#define HT_TOMBSTONE_TAG 0x105 /* 100000_101 */
+#define SYMBOL_TAG 0x06
 
 #define TAG_MASK 0x7
 #define VALUE_MASK 0xfffffffffffffff8
 #define BOOL_TAG_MASK 0xf
 #define VOID_TAG_MASK 0x1f
 #define CHAR_TAG_MASK 0x3f
-#define SYMBOL_TAG_MASK 0x7f
+#define SYMBOL_TAG_MASK 0x7
 #define EOFOBJ_TAG_MASK 0x1ff
 
 #define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)
@@ -53,7 +53,7 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define STRING(v) (value)((uint64_t)(v) | STRING_TAG)
 #define BOOL(v) ((v) ? TRUE : FALSE)
 #define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)
-#define SYMBOL(v) (value)((uint64_t)(v) << 32 | SYMBOL_TAG)
+#define SYMBOL(v) (value)((uint64_t)(v) | SYMBOL_TAG)
 #define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)
 
 #define SENTINEL (value)(SENTINEL_TAG)
@@ -147,6 +147,11 @@ enum sym_kind {
     sym_macro,   /* macro transformer (future) */
 };
 
+struct symbol_name {
+    size_t len;
+    char name[];
+};
+
 struct symbol {
     size_t name_len;
     char *name;
@@ -156,7 +161,6 @@ struct symbol {
 
 enum object_type {
     OBJ_PORT,
-    OBJ_SYMBOL, /* uninterned symbol */
     OBJ_ERROR,
     OBJ_VECTOR,
     OBJ_WRAPPED,
@@ -211,7 +215,6 @@ struct object {
         struct {
             value value;
         } box;
-        struct symbol symbol; /* used for uninterned symbols */
         struct {
             value hash_table; /* FALSE = global sentinel, hash table = local env */
         } environment;
@@ -226,7 +229,7 @@ struct object {
 #define GET_STRING(v) ((struct string *)((uint64_t)(v) & VALUE_MASK))
 #define GET_PAIR(v) ((struct pair *)((uint64_t)(v) & VALUE_MASK))
 #define GET_CHAR(v) ((char)((uint64_t)(v) >> 32))
-#define GET_SYMBOL(v) (IS_OBJECT(v)? &GET_OBJECT(v)->symbol : &symbols[((int)((uint64_t)(v) >> 32))])
+#define GET_SYMBOL(v) ((struct symbol *)((uint64_t)(v) & VALUE_MASK))
 #define GET_OBJECT(v) ((struct object *)((uint64_t)(v) & VALUE_MASK))
 
 #define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)
@@ -235,7 +238,7 @@ struct object {
 #define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)
 #define IS_VOID(v) (((uint64_t)(v) & VOID_TAG_MASK) == VOID_TAG)
 #define IS_CHAR(v) (((uint64_t)(v) & CHAR_TAG_MASK) == CHAR_TAG)
-#define IS_SYMBOL(v) ((((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG) || (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_SYMBOL))
+#define IS_SYMBOL(v) ((((uint64_t)(v) & SYMBOL_TAG_MASK) == SYMBOL_TAG))
 #define IS_NIL(v) ((uint64_t)(v) == NIL_TAG)
 #define IS_PAIR(v) (((uint64_t)(v) & TAG_MASK) == PAIR_TAG)
 #define IS_EOFOBJ(v) ((uint64_t)(v) == EOFOBJ_TAG)
@@ -307,8 +310,7 @@ static value envget(environment env, int index) {
 
 extern void *stack_start;
 
-extern int n_symbols;
-extern struct symbol *symbols;
+extern struct hash_table symbols;
 
 extern int cmdline_argc;
 extern const char **cmdline_argv;
@@ -317,6 +319,7 @@ extern const char **cmdline_argv;
 
 extern void init_memory(void);
 extern void init_ports(void);
+extern value make_symbol(char *name, size_t len, enum sym_kind kind);
 extern value make_closure(funcptr func, int min_args, int max_args, int nfreevars, ...);
 extern value make_string(const char *s, size_t len);
 extern value make_vector(size_t len, value fill);
@@ -326,6 +329,11 @@ extern void  print_stacktrace(void);
 extern const char *find_func_name(funcptr func);
 extern void env_define(value e, value sym, value val);
 extern value env_ref(value e, value sym);
+
+extern void init_symbols(void);
+extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
+
+extern value make_global_env(void);
 
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
@@ -390,7 +398,6 @@ extern value primcall_string_q(environment env, enum call_flags flags, int nargs
 extern value primcall_substring(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_symbol_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_system(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_uninterned_symbol_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_unread_char(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_urandom(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_unbox(environment env, enum call_flags flags, int nargs, ...);
@@ -442,6 +449,7 @@ extern value primcall_make_environment(environment env, enum call_flags flags, i
 extern value primcall_environment_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_define(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_run_so(environment env, enum call_flags flags, int nargs, ...);
 
 /************ static library registration ***********/
 

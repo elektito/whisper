@@ -1,5 +1,7 @@
 #include "core.h"
 
+#include <dlfcn.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -22,6 +24,7 @@ static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
 
 /* we're gonna call a linked list of pools, a heap. */
+static struct pool *symbols_heap;
 static struct pool *pairs_heap;
 static struct pool *objects_heap;
 static struct pool *strings_heap;
@@ -36,13 +39,31 @@ static struct pool *closures_heap;
 /* the stack address at the start of main function (used for gc) */
 void *stack_start;
 
-int n_symbols = 0;
-struct symbol *symbols = NULL;
+/* interned symbols: maps struct symbol_name to symbol objects */
+struct hash_table symbols;
 
 int cmdline_argc;
 const char **cmdline_argv;
 
 /*************** stack trace **************/
+
+/* these are also used by find_func_name so it's defined outside ifdef */
+static void hash_table_each(struct hash_table *ht, void (*fn)(value k, value v, void *ctx), void *ctx);
+struct symbol_ht_ctx {
+    char *name;
+    size_t name_len;
+    funcptr func;
+};
+
+static void symbols_ht_each(value k, value v, void *ctx) {
+    struct symbol_ht_ctx *c = ctx;
+    struct symbol *sym = GET_SYMBOL(v);
+    if (IS_CLOSURE(sym->value) && GET_CLOSURE(sym->value)->func == c->func) {
+        c->name = GET_SYMBOL(v)->name;
+        c->name_len = GET_SYMBOL(v)->name_len;
+    }
+}
+
 
 #ifdef DEBUG
 
@@ -80,23 +101,19 @@ void print_stacktrace(void) {
 
     int idx = 1;
     for (int i = 0; i < stacktrace_size; ++i) {
-        char *name;
-        int name_len = 0;
-        for (int j = 0; j < n_symbols; ++j) {
-            if (IS_CLOSURE(symbols[j].value) && GET_CLOSURE(symbols[j].value)->func == stacktrace[i]) {
-                name_len = symbols[j].name_len;
-                name = symbols[j].name;
-                break;
-            }
-        }
+        struct symbol_ht_ctx ctx;
+        ctx.name_len = 0;
+        ctx.func = stacktrace[i];
+        hash_table_each(&symbols, symbols_ht_each, &ctx);
 
         /* unknown names are either let blocks, or unnamed lambdas.
          * would have been nice if we could detect the difference and
          * for the lambda's show an entry in the stacktrace. */
-        if (name_len == 0)
+        if (ctx.name_len == 0) {
             continue;
+        }
 
-        fprintf(stderr, "[%d] %.*s\n", idx++, name_len, name);
+        fprintf(stderr, "[%d] %.*s\n", idx++, (int)ctx.name_len, ctx.name);
     }
 }
 
@@ -105,21 +122,22 @@ void print_stacktrace(void) {}
 #endif /* DEBUG */
 
 const char *find_func_name(funcptr func) {
-    for (int i = 0; i < n_symbols; ++i) {
-        if (IS_CLOSURE(symbols[i].value)) {
-            if (GET_CLOSURE(symbols[i].value)->func == func) {
-                char *buf = malloc(symbols[i].name_len + 1);
-                memcpy(buf, symbols[i].name, symbols[i].name_len);
-                buf[symbols[i].name_len] = 0;
-                return buf;
-            }
-        }
+    char *buf;
+    struct symbol_ht_ctx ctx;
+    ctx.name_len = 0;
+    ctx.func = func;
+    hash_table_each(&symbols, symbols_ht_each, &ctx);
+    if (ctx.name_len == 0) {
+        const char *unknown = "(unknown)";
+        buf = malloc(strlen(unknown) + 1);
+        memcpy(buf, unknown, strlen(unknown));
+        buf[strlen(unknown)] = 0;
+    } else {
+        buf = malloc(ctx.name_len + 1);
+        memcpy(buf, ctx.name, ctx.name_len);
+        buf[ctx.name_len] = 0;
     }
 
-    const char *unknown = "(unknown)";
-    char *buf = malloc(strlen(unknown) + 1);
-    memcpy(buf, unknown, strlen(unknown));
-    buf[strlen(unknown)] = 0;
     return buf;
 }
 
@@ -145,7 +163,7 @@ static int hash_table_default_eq(struct hash_table *ht, value k1, value k2) {
     return k1 == k2;
 }
 
-static void hash_table_init(struct hash_table *ht, size_t initial_size, hash_fn hash_fn, eq_fn eq_fn) {
+void hash_table_init(struct hash_table *ht, size_t initial_size, hash_fn hash_fn, eq_fn eq_fn) {
     ht->data = malloc(2 * initial_size * sizeof(value)); /* double because key+value */
     ht->size = 0;
     ht->cap = initial_size;
@@ -198,7 +216,7 @@ static void hash_table_grow(struct hash_table *ht, volatile value owner) {
 }
 
 /* owner: see hash_table_grow */
-static void hash_table_set(struct hash_table *ht, volatile value owner, value k, value v) {
+void hash_table_set(struct hash_table *ht, volatile value owner, value k, value v) {
     if (ht->size * 10 >= ht->cap * 7) { /* 70% */
         hash_table_grow(ht, owner);
     }
@@ -287,6 +305,24 @@ static void hash_table_each(struct hash_table *ht, void (*fn)(value k, value v, 
     }
 }
 
+static uint64_t hash_string_djb2(const char *s, size_t len);
+
+/* hash function for struct symbol_name */
+uint64_t symbol_name_hash(struct hash_table *ht, value key) {
+    struct symbol_name *sn = (struct symbol_name *) key;
+    return hash_string_djb2(sn->name, sn->len);
+}
+
+/* equivalence function for struct symbol_name */
+int symbol_name_eq(struct hash_table *ht, value k1, value k2) {
+    struct symbol_name *sn1 = (struct symbol_name *) k1;
+    struct symbol_name *sn2 = (struct symbol_name *) k2;
+    if (sn1->len != sn2->len)
+        return 0;
+    return memcmp(sn1->name, sn2->name, sn1->len) == 0;
+}
+
+
 /************ gc/memory helper functions ***********/
 
 static struct pool *create_heap(int object_size, uint64_t tag) {
@@ -324,6 +360,7 @@ static struct pool *add_pool(struct pool *pool) {
 }
 
 void init_memory(void) {
+    symbols_heap = create_heap(sizeof(struct symbol), SYMBOL_TAG);
     pairs_heap = create_heap(sizeof(struct pair), PAIR_TAG);
     objects_heap = create_heap(sizeof(struct object), OBJECT_TAG);
     strings_heap = create_heap(sizeof(struct string), STRING_TAG);
@@ -338,7 +375,7 @@ void init_memory(void) {
 }
 
 static void gc_recurse(value v) {
-    if (!IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v)) {
+    if (!IS_SYMBOL(v) && !IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v)) {
         return;
     }
 
@@ -347,7 +384,12 @@ static void gc_recurse(value v) {
         return;
     }
 
-    if (IS_PAIR(v)) {
+    if (IS_SYMBOL(v)) {
+        block->mark = 1;
+        if (GET_SYMBOL(v)->kind == sym_value) {
+            gc_recurse(GET_SYMBOL(v)->value);
+        }
+    } else if (IS_PAIR(v)) {
         /* iterate along the cdr chain instead of recursing, to avoid
          * O(n) stack depth for lists of length n. we still recurse on
          * car, but that is bounded by tree depth rather than list
@@ -387,7 +429,8 @@ static void gc_recurse(value v) {
                 }
             }
         } else if (GET_OBJECT(v)->type == OBJ_ENVIRONMENT) {
-            gc_recurse(GET_OBJECT(v)->environment.hash_table);
+            if (GET_OBJECT(v)->environment.hash_table != FALSE)
+                gc_recurse(GET_OBJECT(v)->environment.hash_table);
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -547,7 +590,9 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
 
                 if (block->in_use && !block->mark) {
                     void *v = p + ALIGN16(sizeof(struct block));
-                    if (heaps[i] == strings_heap) {
+                    if (heaps[i] == symbols_heap) {
+                        free(((struct symbol *) v)->name);
+                    } else if (heaps[i] == strings_heap) {
                         free(((struct string *) v)->s);
                     } else if (heaps[i] == closures_heap) {
                         free(((struct closure *) v)->freevars);
@@ -557,9 +602,6 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
                         case OBJ_PORT:
                             free(obj->port.filename);
                             free(obj->port.string);
-                            break;
-                        case OBJ_SYMBOL:
-                            free(obj->symbol.name);
                             break;
                         case OBJ_VECTOR:
                             free(obj->vector.data);
@@ -588,6 +630,10 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
 
 }
 
+static void gc_symbol_each(value k, value v, void *ctx) {
+    gc_recurse(v);
+}
+
 /* this function would cause a false positive stack-buffer-overflow with
  * address sanitizer. address sanitizer itself says this about the issue:
  *
@@ -611,9 +657,7 @@ static void gc(void) {
     void *cur_stack = &env;
 
     /* recursively mark values accessible from global symbols */
-    for (int i = 0; i < n_symbols; ++i) {
-        gc_recurse(symbols[i].value);
-    }
+    hash_table_each(&symbols, gc_symbol_each, NULL);
 
     /* scan any malloc'd args arrays live on the call stack (see args_array_stack) */
     for (struct args_array_frame *f = args_array_stack; f; f = f->prev)
@@ -621,6 +665,7 @@ static void gc(void) {
             gc_recurse(f->args[i]);
 
     struct pool *heaps[] = {
+        symbols_heap,
         pairs_heap,
         objects_heap,
         strings_heap,
@@ -685,6 +730,10 @@ static void *alloc_from_heap(struct pool *head) {
     }
 }
 
+static struct symbol *alloc_symbol(void) {
+    return alloc_from_heap(symbols_heap);
+}
+
 static struct pair *alloc_pair(void) {
     return alloc_from_heap(pairs_heap);
 }
@@ -732,7 +781,16 @@ static struct closure *alloc_closure(int nfreevars) {
     }
 }
 
-/************ pair/vector/string functions ***********/
+/************ pair/vector/string/symbol functions ***********/
+
+value make_symbol(char *name, size_t len, enum sym_kind kind) {
+    struct symbol *sym = alloc_symbol();
+    sym->name = name;
+    sym->name_len = len;
+    sym->kind = kind;
+    sym->value = VOID;
+    return SYMBOL(sym);
+}
 
 value make_closure(funcptr func, int min_args, int max_args, int nfreevars, ...) {
     va_list args;
@@ -1149,19 +1207,24 @@ static void _write(value v, value port) {
 /************ symbol helper functions ***********/
 
 static value string_to_symbol(value v) {
-    for (int i = 0; i < n_symbols; ++i) {
-        if (symbols[i].name_len == GET_STRING(v)->len && memcmp(symbols[i].name, GET_STRING(v)->s, symbols[i].name_len) == 0) {
-            return SYMBOL(i);
-        }
+    struct string *s = GET_STRING(v);
+    struct symbol_name *name = malloc(sizeof(struct symbol_name) + s->len);
+    name->len = s->len;
+    memcpy(name->name, s->s, s->len);
+    value sym = hash_table_get(&symbols, 0, name);
+    if (sym != SENTINEL) {
+        free(name);
+        return sym;
     }
 
-    n_symbols++;
-    symbols = realloc(symbols, n_symbols * sizeof(struct symbol));
-    symbols[n_symbols - 1].name_len = GET_STRING(v)->len;
-    symbols[n_symbols - 1].name = malloc(GET_STRING(v)->len);
-    memcpy(symbols[n_symbols - 1].name, GET_STRING(v)->s, GET_STRING(v)->len);
-    symbols[n_symbols - 1].value = VOID;
-    return SYMBOL(n_symbols - 1);
+    char *buf = malloc(s->len);
+    memcpy(buf, s->s, s->len);
+    sym = make_symbol(buf, s->len, sym_unbound);
+    hash_table_set(&symbols, 0, (value) name, sym);
+
+    /* do not free name; it stays as the key to the hash table. */
+
+    return sym;
 }
 
 static value symbol_to_string(value v) {
@@ -1202,17 +1265,51 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
 
 void env_define(value e, value sym, value val) {
     value ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == FALSE) {
+        GET_SYMBOL(sym)->value = val;
+        GET_SYMBOL(sym)->kind = sym_value;
+        return;
+    }
     hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, sym, val);
 }
 
 value env_ref(value e, value sym) {
     value ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == FALSE)
+        return GET_SYMBOL(sym)->value;
     value result = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, sym);
     if (result == SENTINEL) {
         struct symbol *s = GET_SYMBOL(sym);
         RAISE("unbound variable: %.*s", (int)s->name_len, s->name);
     }
     return result;
+}
+
+/************ global environment functions ***********/
+
+void init_symbols(void) {
+    hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);
+}
+
+value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
+    struct symbol_name *k = malloc(sizeof(struct symbol_name) + name_len);
+    k->len = name_len;
+    memcpy(k->name, name, name_len);
+    value existing = hash_table_get(&symbols, 0, k);
+    if (existing != SENTINEL) {
+        free(k);
+        return existing;
+    }
+    value sym = make_symbol(name, name_len, kind);
+    hash_table_set(&symbols, 0, k, sym);
+    return sym;
+}
+
+value make_global_env(void) {
+    struct object *obj = malloc(sizeof(struct object));
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = FALSE;
+    return OBJECT(obj);
 }
 
 /************ port init functions ***********/
@@ -1479,7 +1576,7 @@ value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
     if (!IS_STRING(msg)) { RAISE("error argument is not a string"); }
     fprintf(stderr, "error: ");
     _display(msg, OBJECT(&current_error_port));
-    printf("\n");
+    fprintf(stderr, "\n");
     print_stacktrace();
     cleanup();
     exit(1);
@@ -1527,8 +1624,7 @@ value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { RAISE("gensym needs zero or one argument"); }
     init_args();
 
-    struct object *sym = alloc_object();
-    sym->type = OBJ_SYMBOL;
+    struct symbol *sym;
 
     if (nargs == 1) {
         value name = next_arg();
@@ -1537,22 +1633,22 @@ value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
         int prefix_len = (int)GET_STRING(name)->len;
         int suffix_len = snprintf(NULL, 0, "%lu", n);
         int len = prefix_len + suffix_len;
-        sym->symbol.name_len = len;
-        sym->symbol.name = malloc(len);
-        memcpy(sym->symbol.name, GET_STRING(name)->s, prefix_len);
-        snprintf(sym->symbol.name + prefix_len, suffix_len + 1, "%lu", n);
+        char *sym_name = malloc(len);
+        memcpy(sym_name, GET_STRING(name)->s, prefix_len);
+        snprintf(sym_name + prefix_len, suffix_len + 1, "%lu", n);
+        sym = make_symbol(sym_name, len, sym_unbound);
     } else {
         char buf[32];
         snprintf(buf, sizeof(buf), "g%lu", gensym_counter++);
         int len = strlen(buf);
-        sym->symbol.name_len = len;
-        sym->symbol.name = malloc(len);
-        memcpy(sym->symbol.name, buf, len);
+        char *name = malloc(len);
+        memcpy(name, buf, len);
+        sym = make_symbol(name, len, sym_unbound);
     }
 
     free_args();
 
-    return OBJECT(sym);
+    return SYMBOL(sym);
 }
 
 value primcall_get_environment_variable(environment env, enum call_flags flags, int nargs, ...) {
@@ -2008,14 +2104,6 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     int ret = system(cmdz);
     free(cmdz);
     return FIXNUM(ret);
-}
-
-value primcall_uninterned_symbol_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("uninterned-symbol? needs a single argument"); }
-    init_args();
-    value v = next_arg();
-    free_args();
-    return BOOL(IS_SYMBOL(v) && IS_OBJECT(v));
 }
 
 value primcall_unread_char(environment env, enum call_flags flags, int nargs, ...) {
@@ -2848,6 +2936,12 @@ value primcall_hash_table_hash_function(environment env, enum call_flags flags, 
     return GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
 }
 
+void make_env_ht_copy(value k, value v, void *ctx) {
+    value e = ctx;
+    if (GET_SYMBOL(v)->kind == sym_value)
+        env_define(e, v, GET_SYMBOL(v)->value);
+}
+
 /* this is a primitive that returns an environment that's a copy of
  * current global environment. it's to make things easier until we have
  * proper (environment ...) in place.*/
@@ -2858,11 +2952,7 @@ value primcall_make_environment(environment env, enum call_flags flags, int narg
     obj->type = OBJ_ENVIRONMENT;
     obj->environment.hash_table = ht;
     value e = OBJECT(obj);
-    for (int i = 0; i < n_symbols; i++) {
-        if (symbols[i].kind == sym_value) {
-            env_define(e, SYMBOL(i), symbols[i].value);
-        }
-    }
+    hash_table_each(&symbols, make_env_ht_copy, e);
     return e;
 }
 
@@ -2896,4 +2986,30 @@ value primcall_environment_q(environment env, enum call_flags flags, int nargs, 
     value v = next_arg();
     free_args();
     return BOOL(IS_ENVIRONMENT(v));
+}
+
+value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("run-so needs two arguments"); }
+    init_args();
+    value filename = next_arg();
+    value e = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename)) { RAISE("run-so first argument (filename) must be a string"); }
+    if (!IS_ENVIRONMENT(e)) { RAISE("run-so second argument (environment) must be an environment"); }
+
+    char *filenamez = strz(filename);
+    void *handle = dlopen(filenamez, RTLD_NOW | RTLD_LOCAL);
+    free(filenamez);
+    if (!handle) { RAISE("run-so: cannot load file: %.*s", (int) GET_STRING(filename)->len, GET_STRING(filename)->s); }
+
+    value (*whisper_main_sym)(value env) = dlsym(handle, "whisper_main");
+    if (!whisper_main_sym) { RAISE("run-so: cannot find symbol whisper_main in shared object"); }
+
+    value result = whisper_main_sym(e);
+
+    /* leave the handle open since otherwise we won't have access to
+     * functionality inside it afterwards */
+
+    return result;
 }
