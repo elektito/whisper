@@ -1,5 +1,7 @@
 #include "core.h"
 
+#include <dlfcn.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -2984,4 +2986,30 @@ value primcall_environment_q(environment env, enum call_flags flags, int nargs, 
     value v = next_arg();
     free_args();
     return BOOL(IS_ENVIRONMENT(v));
+}
+
+value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("run-so needs two arguments"); }
+    init_args();
+    value filename = next_arg();
+    value e = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename)) { RAISE("run-so first argument (filename) must be a string"); }
+    if (!IS_ENVIRONMENT(e)) { RAISE("run-so second argument (environment) must be an environment"); }
+
+    char *filenamez = strz(filename);
+    void *handle = dlopen(filenamez, RTLD_NOW | RTLD_LOCAL);
+    free(filenamez);
+    if (!handle) { RAISE("run-so: cannot load file: %.*s", (int) GET_STRING(filename)->len, GET_STRING(filename)->s); }
+
+    value (*whisper_main_sym)(value env) = dlsym(handle, "whisper_main");
+    if (!whisper_main_sym) { RAISE("run-so: cannot find symbol whisper_main in shared object"); }
+
+    value result = whisper_main_sym(e);
+
+    /* leave the handle open since otherwise we won't have access to
+     * functionality inside it afterwards */
+
+    return result;
 }

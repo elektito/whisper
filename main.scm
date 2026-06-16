@@ -1,35 +1,13 @@
 (include "whisper.scm")
 
-(define (hex-encode s)
-  (let loop ((i 0) (x ""))
-    (if (= i (string-length s))
-        x
-        (let ((c (char->integer (string-ref s i))))
-          (if (< c 16)
-              (loop (+ i 1) (format "~a0~x" x c))
-              (loop (+ i 1) (format "~a~x" x c)))))))
-
-(define (temp-filename)
-  (format "/tmp/~a" (hex-encode (urandom 6))))
-
-(define (all-archive-flags archives)
-  (if (null? archives)
-      ""
-      (string-append "-Wl,--whole-archive " (string-join archives " ") " -Wl,--no-whole-archive")))
-
-(define (build-compile-cmd cc own-cflags args c-file)
-  (let ((out (cmdline-executable-file args))
-        (extra (cmdline-cflags args))
-        (core-path (cmdline-core-path args))
-        (archive-flags (all-archive-flags (cmdline-archives args))))
-    (case (cmdline-library-mode args)
-      ((so)
-       (format "~a -I~a ~a -fPIC -shared -o ~a ~a ~a" cc core-path own-cflags out extra c-file))
-      ((static)
-       (let ((obj (string-append (temp-filename) ".o")))
-         (format "~a -I~a ~a -fPIC -c -o ~a ~a ~a && rm -f ~a && ar rcs ~a ~a" cc core-path own-cflags obj extra c-file out out obj)))
-      (else
-       (format "~a -I~a ~a -Wl,--export-dynamic -o ~a ~a ~a ~a ~a/core.c" cc core-path own-cflags out extra c-file archive-flags core-path)))))
+(define (build-compile-cmd-from-args cc own-cflags args)
+  (build-compile-cmd cc
+                     (cmdline-library-mode args)
+                     (format "~a ~a" own-cflags (cmdline-cflags args))
+                     (cmdline-c-file args)
+                     (cmdline-executable-file args)
+                     (cmdline-core-path args)
+                     (cmdline-archives args)))
 
 ;;;;;; command-line parsing ;;;;;;
 
@@ -194,7 +172,7 @@
           (let ((cc (get-environment-variable "CC")))
             (let ((cc (if cc cc "gcc"))
                   (own-cflags (if (program-debug program) " -DDEBUG" "")))
-              (let ((cmd (build-compile-cmd cc own-cflags args (cmdline-c-file args))))
+              (let ((cmd (build-compile-cmd-from-args cc own-cflags args)))
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))

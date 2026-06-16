@@ -449,6 +449,7 @@ extern value primcall_make_environment(environment env, enum call_flags flags, i
 extern value primcall_environment_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_define(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_run_so(environment env, enum call_flags flags, int nargs, ...);
 
 /************ static library registration ***********/
 
