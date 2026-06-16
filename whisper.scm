@@ -393,6 +393,7 @@
         ((eq? lib-mode 'so)
          (display "value whisper_main(value env) {\n" port)
          (display "    global_env = env;\n" port)
+         (display "    register_globals();\n" port)
          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
          (display "}\n" port))
         ((eq? lib-mode 'static)
