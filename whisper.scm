@@ -199,11 +199,11 @@
 (define (read-identifier-or-number port first-char)
   (let loop ((first-iter #t) (ch first-char) (s ""))
     (cond ((char-is-separator? ch) (sym-or-num s))
-          ((eq? #\\ ch) (if (not first-iter) (read-char port))
+          ((eq? #\\ ch) (unless first-iter (read-char port))
                         (let ((escaped-char (read-escaped-char port)))
                           (loop #f (peek-char port) (string-append-char s escaped-char))))
-          (else (if (not first-iter)
-                    (read-char port))
+          (else (unless first-iter
+                  (read-char port))
                 (loop #f (peek-char port) (string-append-char s ch))))))
 
 (define (read-sharp-thing port)
@@ -247,8 +247,8 @@
 
 (define (read-char-literal port)
   (read-char port) ; skip the backslash
-  (if (eof-object? (peek-char port))
-      (compile-error "eof inside character literal"))
+  (when (eof-object? (peek-char port))
+    (compile-error "eof inside character literal"))
   (let ((s (make-string 1 (read-char port))))
     (let loop ((ch (peek-char port))
                (s s))
@@ -326,57 +326,54 @@
   (let loop ((vars (program-referenced-vars program)))
     (if (null? vars)
         (program-referenced-vars-set! program (cons var (program-referenced-vars program)))
-        (if (not (free-identifier=? var (car vars)))
-            (loop (cdr vars))))))
+        (unless (free-identifier=? var (car vars))
+          (loop (cdr vars))))))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
-    (if (not (null? funcs))
-        (begin
-          (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...);\n" (func-name (car funcs)))
-          (loop (cdr funcs))))))
+    (unless (null? funcs)
+      (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...);\n" (func-name (car funcs)))
+      (loop (cdr funcs)))))
 
 (define (gen-func-bodies program output)
   (let loop ((funcs (program-funcs program)))
-    (if (not (null? funcs))
-        (begin
-          (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...) {\n" (func-name (car funcs)))
-          (if (program-debug program)
-              (format output "    enter_proc(~a);\n" (func-name (car funcs))))
-          (display (get-output-string (func-port (car funcs))) output)
-          (format output "}\n")
-          (format output "\n")
-          (loop (cdr funcs))))))
+    (unless (null? funcs)
+      (format output "static value ~a(environment env, enum call_flags flags, int nargs, ...) {\n" (func-name (car funcs)))
+      (if (program-debug program)
+          (format output "    enter_proc(~a);\n" (func-name (car funcs))))
+      (display (get-output-string (func-port (car funcs))) output)
+      (format output "}\n")
+      (format output "\n")
+      (loop (cdr funcs)))))
 
 (define (intern-primcalls program)
   (for-each (lambda (p) (intern program (car p))) *primcalls*))
 
 (define (gen-symbol-defines program output)
   (let loop ((symbols (program-symbols program)))
-    (if (not (null? symbols))
-        (begin
-          (format output "static value symb~a;\n" (mangle-name (car symbols)))
-          (loop (cdr symbols))))))
+    (unless (null? symbols)
+      (format output "static value symb~a;\n" (mangle-name (car symbols)))
+      (loop (cdr symbols)))))
 
 (define (gen-register-globals program output)
   (display "static void register_globals() {\n" output)
   (let loop ((symbols (program-symbols program)))
-    (if (not (null? symbols))
-        (let* ((sym (car symbols))
-               (primcall-info (hash-table-ref/default *primcalls-table* sym #f))
-               (sym-name (symbol->string sym))
-               (sym-len (string-length sym-name)))
-          (format output "    symb~a = extend_global_env(\"~a\", ~a, ~a);\n"
-                  (mangle-name sym) sym sym-len
-                  (if primcall-info "sym_value" "sym_unbound"))
-          (when primcall-info
-            (let* ((c-name (cadr primcall-info))
-                   (min-args (caddr primcall-info))
-                   (max-args (cadddr primcall-info))
-                   (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
-              (format output "    GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
-                      (mangle-name sym) c-name min-args c-max-args)))
-          (loop (cdr symbols)))))
+    (unless (null? symbols)
+      (let* ((sym (car symbols))
+             (primcall-info (hash-table-ref/default *primcalls-table* sym #f))
+             (sym-name (symbol->string sym))
+             (sym-len (string-length sym-name)))
+        (format output "    symb~a = extend_global_env(\"~a\", ~a, ~a);\n"
+                (mangle-name sym) sym sym-len
+                (if primcall-info "sym_value" "sym_unbound"))
+        (when primcall-info
+          (let* ((c-name (cadr primcall-info))
+                 (min-args (caddr primcall-info))
+                 (max-args (cadddr primcall-info))
+                 (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
+            (format output "    GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
+                    (mangle-name sym) c-name min-args c-max-args)))
+        (loop (cdr symbols)))))
   (display "}\n" output))
 
 (define (output-program-code program filename)
@@ -651,10 +648,9 @@
 (define *primcalls-table*
   (let ((ht (make-eq-hash-table)))
     (let loop ((lst *primcalls*))
-      (if (not (null? lst))
-          (begin
-            (hash-table-set! ht (caar lst) (car lst))
-            (loop (cdr lst)))))
+      (unless (null? lst)
+        (hash-table-set! ht (caar lst) (car lst))
+        (loop (cdr lst))))
     ht))
 
 ;;; compiles a list of forms and returns their varnums as a list
@@ -775,8 +771,8 @@
                 (else (loop (cons (car params) proper-params) (cdr params))))))))
 
 (define (compile-lambda func indent form known-freevars)
-  (if (< (length form) 3)
-      (compile-error "malformed lambda"))
+  (when (< (length form) 3)
+    (compile-error "malformed lambda"))
   (let ((params-and-rest (parse-lambda-params form)))
     (let ((params (car params-and-rest))
           (rest-param (cadr params-and-rest)))
@@ -786,10 +782,9 @@
                                     rest-param)))
         ;; add known free vars to the beginning of the list of free vars
         (let loop ((known-freevars known-freevars))
-          (if (not (null? known-freevars))
-              (begin
-                (func-add-freevar new-func (car known-freevars))
-                (loop (cdr known-freevars)))))
+          (unless (null? known-freevars)
+            (func-add-freevar new-func (car known-freevars))
+            (loop (cdr known-freevars))))
 
         (if (eq? rest-param #f)
             (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
@@ -798,20 +793,18 @@
         ;; generate code for reading arguments
         (gen-code new-func 1 "init_args();\n")
         (let loop ((params params))
-          (if (not (null? params))
-              (begin
-                (if (not (identifier? (car params)))
-                    (compile-error "parameter not an identifier: ~a" (car params)))
-                (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-name (car params)))
-                (when (var-is-modified? func (car params))
-                  (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-name (car params)) (mangle-name (car params))))
-                (loop (cdr params)))))
+          (unless (null? params)
+            (unless (identifier? (car params))
+              (compile-error "parameter not an identifier: ~a" (car params)))
+            (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-name (car params)))
+            (when (var-is-modified? func (car params))
+              (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-name (car params)) (mangle-name (car params))))
+            (loop (cdr params))))
 
-        (if (not (eq? rest-param #f))
-            (begin
-              (gen-code new-func 1 "value ~a = NIL;\n" (mangle-name rest-param))
-              (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))
-              (gen-code new-func 1 "~a = reverse_list(~a, NIL);\n" (mangle-name rest-param) (mangle-name rest-param))))
+        (unless (eq? rest-param #f)
+          (gen-code new-func 1 "value ~a = NIL;\n" (mangle-name rest-param))
+          (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))
+          (gen-code new-func 1 "~a = reverse_list(~a, NIL);\n" (mangle-name rest-param) (mangle-name rest-param)))
 
         (gen-code new-func 1 "\n")
 
@@ -820,8 +813,8 @@
           (if (null? body)
               (begin
                 (gen-code new-func 1 "free_args();\n")
-                (if (program-debug (func-program func))
-                    (gen-code new-func 1 "leave_proc();\n"))
+                (when (program-debug (func-program func))
+                  (gen-code new-func 1 "leave_proc();\n"))
                 (when (negative? varnum)
                   (compile-error "function body is empty"))
                 (gen-code new-func 1 "return x~a;\n" varnum))
@@ -837,17 +830,16 @@
                     (if rest-param "MAX_ARGS" (length params))
                     (length (func-freevars new-func)))
           (let loop ((freevars (func-freevars new-func)))
-            (if (not (null? freevars))
-                (begin
-                  (if (func-has-param func (car freevars))
-                      (gen-code func 0 ", ~a" (mangle-name (car freevars))) ;; generate mangled param name
-                      (if (member (car freevars) known-freevars free-identifier=?)
-                          (gen-code func 0 ", (value) 0")
-                          (let ((freevar (func-find-freevar func (car freevars))))
-                            (if freevar
-                                (gen-code func 0 ", envget(env, ~a)" freevar)
-                                (gen-code func 0 ", envget(env, ~a)" (func-add-freevar func (car freevars)))))))
-                  (loop (cdr freevars)))))
+            (unless (null? freevars)
+              (if (func-has-param func (car freevars))
+                  (gen-code func 0 ", ~a" (mangle-name (car freevars))) ;; generate mangled param name
+                  (if (member (car freevars) known-freevars free-identifier=?)
+                      (gen-code func 0 ", (value) 0")
+                      (let ((freevar (func-find-freevar func (car freevars))))
+                        (if freevar
+                            (gen-code func 0 ", envget(env, ~a)" freevar)
+                            (gen-code func 0 ", envget(env, ~a)" (func-add-freevar func (car freevars)))))))
+              (loop (cdr freevars))))
           (gen-code func 0 ");\n")
 
           ;; return function varnum
@@ -882,10 +874,10 @@
       (let ((varnum (compile-body-level-form func (+ 1 indent) (car body))))
         (if (null? (cdr body))
             (begin
-              (if (negative? varnum)
-                  (if (negative? last-varnum)
-                      (compile-error "empty let body: ~s" form)
-                      (gen-code func (+ 1 indent) "x~a = x~a;\n" let-varnum last-varnum)))
+              (when (negative? varnum)
+                (if (negative? last-varnum)
+                    (compile-error "empty let body: ~s" form)
+                    (gen-code func (+ 1 indent) "x~a = x~a;\n" let-varnum last-varnum)))
               (gen-code func (+ 1 indent) "x~a = x~a;\n" let-varnum varnum))
             (loop (cdr body) varnum))))
     (gen-code func indent "}\n")
@@ -918,14 +910,14 @@
                 (loop (cdr bindings) (cons (car binding) params) (cons (cadr binding) init-forms))))))))
 
 (define (compile-define func indent form)
-  (if (< (length form) 2)
-      (compile-error "malformed define: ~s" form))
-  (if (and (identifier? (cadr form))
-           (> (length form) 3))
-      (compile-error "malformed define: ~s" form))
-  (if (and (list? (cadr form))
-           (< (length form) 3))
-      (compile-error "malformed define: ~s" form))
+  (when (< (length form) 2)
+    (compile-error "malformed define: ~s" form))
+  (when (and (identifier? (cadr form))
+             (> (length form) 3))
+    (compile-error "malformed define: ~s" form))
+  (when (and (list? (cadr form))
+             (< (length form) 3))
+    (compile-error "malformed define: ~s" form))
 
   ;; we could maybe allow this, and then further on, declare the
   ;; variable in-place as opposed to setting the global variable.
@@ -937,8 +929,8 @@
   ;;
   ;; this is technically incorrect though, since it can't shadow current
   ;; function parameters while it should.
-  (if (func-parent func)
-      (compile-error "define currently only supported at the top-level"))
+  (when (func-parent func)
+    (compile-error "define currently only supported at the top-level"))
 
   ;; convert the function form to normal form
   (let ((form (if (pair? (cadr form))
@@ -952,8 +944,8 @@
                          (caddr form))))
       ;; check for re-definition
       (let ((meaning (lookup-identifier func name)))
-        (if (and meaning (eq? 'global (meaning-kind meaning)))
-            (compile-error "re-defining: ~a" name)))
+        (when (and meaning (eq? 'global (meaning-kind meaning)))
+          (compile-error "re-defining: ~a" name)))
 
       ;; top-level variable names are all interned, since the values of
       ;; global variables are stored in the symbol table.
@@ -974,8 +966,8 @@
 ;; The "declare" form is temporary until we add proper library and
 ;; import support.
 (define (compile-declare func indent form)
-  (if (func-parent func)
-      (compile-error "declare only allowed at top-level"))
+  (when (func-parent func)
+    (compile-error "declare only allowed at top-level"))
   (let loop ((names (cdr form)))
     (unless (null? names)
       (let ((name (car names)))
@@ -985,8 +977,8 @@
   -1)
 
 (define (compile-if func indent form)
-  (if (or (< (length form) 3) (> (length form) 4))
-      (compile-error "malformed if"))
+  (when (or (< (length form) 3) (> (length form) 4))
+    (compile-error "malformed if"))
   (let ((cond-varnum (compile-form func indent (cadr form)))
         (one-legged (= (length form) 3)))
     (let ((ret-varnum (func-next-varnum func)))
@@ -1004,9 +996,9 @@
       ret-varnum)))
 
 (define (compile-include func indent form)
-  (if (or (!= (length form) 2)
-          (not (string? (cadr form))))
-      (compile-error "bad include form: ~s" form))
+  (when (or (!= (length form) 2)
+            (not (string? (cadr form))))
+    (compile-error "bad include form: ~s" form))
   (let ((port (open-input-file (cadr form))))
     (program-push-port (func-program func) port))
   -1)
@@ -1033,13 +1025,13 @@
     (compile-error "invalid define-syntax"))
   (let ((name (cadr form))
         (transformer (caddr form)))
-    (if (or (not (list? transformer))
-            (not (pair? transformer))
-            (not (identifier? (car transformer))))
-        (compile-error "invalid macro transformer"))
+    (when (or (not (list? transformer))
+              (not (pair? transformer))
+              (not (identifier? (car transformer))))
+      (compile-error "invalid macro transformer"))
     (let ((transformer (compile-form func indent transformer)))
-      (if (not (transformer? transformer))
-          (compile-error "invalid macro transformer"))
+      (unless (transformer? transformer)
+        (compile-error "invalid macro transformer"))
       (func-add-binding func name (make-meaning 'macro transformer))))
   -1)
 
@@ -1218,10 +1210,10 @@
   (let ((varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = make_vector(~a, VOID);\n" varnum (vector-length form))
     (let loop ((i 0))
-      (if (< i (vector-length form))
-          (let ((value-varnum (compile-quoted-item func indent (vector-ref form i))))
-            (gen-code func indent "GET_OBJECT(x~a)->vector.data[~a] = x~a;\n" varnum i value-varnum)
-            (loop (+ i 1)))))
+      (when (< i (vector-length form))
+        (let ((value-varnum (compile-quoted-item func indent (vector-ref form i))))
+          (gen-code func indent "GET_OBJECT(x~a)->vector.data[~a] = x~a;\n" varnum i value-varnum)
+          (loop (+ i 1)))))
     varnum))
 
 (define (compile-form func indent form)
@@ -1434,8 +1426,8 @@
       (if (eof-object? form)
           (if (= (length (program-ports program)) 1)
               (begin
-                (if (program-is-test-suite program)
-                    (gen-code func 1 "printf(\"\\n\");\n"))
+                (when (program-is-test-suite program)
+                  (gen-code func 1 "printf(\"\\n\");\n"))
                 (gen-code func 1 "return VOID;\n"))
               (begin
                 (program-pop-port program)
