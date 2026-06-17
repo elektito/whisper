@@ -1503,3 +1503,9 @@
         (unless (zero? ret)
           (error (format "gcc returned non-zero exit code: ~a\n" ret)))))
     so-file))
+
+(define (eval expr env)
+  (let ((so (compile-expr-to-so expr)))
+    (let ((result (run-so so env)))
+      (delete-file so)
+      result)))

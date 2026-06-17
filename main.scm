@@ -12,7 +12,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path archives)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path archives repl)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -26,7 +26,8 @@
   (cflags cmdline-cflags cmdline-cflags-set!)
   (library-mode cmdline-library-mode cmdline-library-mode-set!)
   (core-path cmdline-core-path cmdline-core-path-set!)
-  (archives cmdline-archives cmdline-archives-set!))
+  (archives cmdline-archives cmdline-archives-set!)
+  (repl cmdline-repl cmdline-repl-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
@@ -42,6 +43,7 @@
                 #f  ; library mode
                 "." ; core path
                 '() ; archives
+                #f  ; repl
                 ))
 
 (define (command-line-error fmt . args)
@@ -99,6 +101,9 @@
                  (begin
                    (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
+            ((string=? (car cl) "-R")
+             (cmdline-repl-set! args #t)
+             (loop (cdr cl)))
             (else (if (cmdline-input-file args)
                       (command-line-error "unexpected argument: ~a" (car cl))
                       (begin
@@ -137,7 +142,7 @@
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g]
+  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g] [-R]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
@@ -150,13 +155,27 @@
  -a\tlink a static archive (may be repeated)
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
+ -R\tstart a repl.
 " (car (command-line)))
   (exit 0)
   )
 
+;;;;;; repl ;;;;;;
+
+(define (repl env)
+  (display "> ")
+  (let ((expr (read (current-input-port))))
+    (unless (eof-object? expr)
+      (display (eval expr env))
+      (newline)
+      (repl env))))
+
 ;;;;;; main ;;;;;;
 
 (let ((args (parse-command-line-args)))
+  (when (cmdline-repl args)
+    (repl (make-environment))
+    (exit 0))
   (postprocess-cmdline args)
   (let ((port (open-input-file (cmdline-input-file args))))
     (let ((program (create-program port)))
