@@ -1148,17 +1148,7 @@
           ((local global free) (compile-call func indent form))
           ((primcall) (compile-primcall func indent form (meaning-info meaning)))
           ((special) (compile-special func indent form (meaning-info meaning)))
-
-          ;; allow use not-yet defined variables only in non-top-level
-          ;; functions, i.e. inside a lambda or let, but not directly.
-          ;; for example:
-          ;;     (define foo bar)
-          ;; is not allowed where bar is undefined, but:
-          ;;     (define foo (lambda () bar))
-          ;; is allowed.
-          ((unknown) (if (func-parent func)
-                         (compile-call func indent form)
-                         (compile-error "unbound identifier: ~a" (car form))))
+          ((unknown) (compile-call func indent form))
           ((macro) (error (format "internal error: unexpanded macro ~a reached codegen" (car form))))
           (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
 
@@ -1190,18 +1180,16 @@
                  varnum (mangle-name form)))
       ((special) (compile-error "invalid use of special: ~a" form))
 
-      ;; allow use of not-yet defined variables only in non-top-level
-      ;; functions, i.e. inside a lambda or let, but not directly.
-      ;; for example:
-      ;;     (define foo bar)
-      ;; is not allowed where bar is undefined, but:
-      ;;     (define foo (lambda () bar))
-      ;; is allowed.
-      ((unknown) (if (func-parent func)
-                     (begin
-                       (program-add-referenced-var (func-program func) form)
-                       (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
-                     (compile-error "unbound identifier: ~a" form)))
+      ;; we now allow not-yet defined variables to be used even in
+      ;; top-level forms like in a top-level (define foo bar) where bar
+      ;; is undefined. this is because we allow undefined variables when
+      ;; compiling to shared objects, where the variable might be
+      ;; defined at runtime. this is why we even intern the variable so
+      ;; that there's a global variable for it.
+      ((unknown)
+       (intern (func-program func) (identifier-name form))
+       (program-add-referenced-var (func-program func) form)
+       (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
 
       ((macro) (compile-error "invalid use of macro name: ~a" form))
 
@@ -1453,12 +1441,16 @@
     (check-for-undefined-vars program)))
 
 (define (check-for-undefined-vars program)
-  (let ((init-func (program-init-func program)))
-    (let loop ((vars (program-referenced-vars program)))
-      (unless (null? vars)
-        (unless (func-has-param init-func (car vars))
-          (compile-error "undefined variable: ~a" (car vars)))
-        (loop (cdr vars))))))
+  ;; we don't error out in .so mode, because shared objects are meant to
+  ;; be loaded and runtime and might refer to varaibles in an
+  ;; environment passed to them.
+  (unless (eq? 'so (program-library-mode program))
+    (let ((init-func (program-init-func program)))
+      (let loop ((vars (program-referenced-vars program)))
+        (unless (null? vars)
+          (unless (func-has-param init-func (car vars))
+            (compile-error "undefined variable: ~a" (car vars)))
+          (loop (cdr vars)))))))
 
 (define (all-archive-flags archives)
   (if (null? archives)
