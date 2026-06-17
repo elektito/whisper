@@ -964,7 +964,8 @@
         ;; variables are initialized with VOID at the top-level.
         (when init-form
           (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name name) init-varnum))
-        init-varnum))))
+        ;; define returns no meaningful value (unspecified in Scheme)
+        -1))))
 
 ;; The "declare" form is temporary until we add proper library and
 ;; import support.
@@ -1495,7 +1496,10 @@
          (env (preprocess-create-environment *root-identifiers*)))
     (program-init-func-set! program func)
     (program-library-mode-set! program 'so)
-    (compile-one-form func env expr)
+    (let ((varnum (compile-one-form func env expr)))
+      (if (negative? varnum)
+          (gen-code func 1 "return VOID;\n")
+          (gen-code func 1 "return x~a;\n" varnum)))
     (check-for-undefined-vars program)
     (output-program-code program c-file)
     (let ((cc (or (get-environment-variable "CC") "gcc"))
