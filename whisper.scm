@@ -962,7 +962,7 @@
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
         (when init-form
-          (gen-code func indent "env_define(global_env, symb~a, x~a);\n" (mangle-name name) init-varnum))
+          (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name name) init-varnum))
         init-varnum))))
 
 ;; The "declare" form is temporary until we add proper library and
@@ -1046,7 +1046,7 @@
         (meaning (lookup-identifier func (cadr form))))
     (case (meaning-kind meaning)
       ((global)
-       (gen-code func indent "env_define(global_env, symb~a, x~a);\n" (mangle-name (cadr form)) value-varnum))
+       (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name (cadr form)) value-varnum))
       ((local)
        (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (cadr form)) value-varnum))
       ((free)

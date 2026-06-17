@@ -374,6 +374,13 @@ void init_memory(void) {
      * gc() function too */
 }
 
+static void gc_recurse(value v);
+static void gc_recurse_env_ht_each(value k, value v, void *ctx) {
+    struct binding *binding = (struct binding *) v;
+    gc_recurse(k);
+    gc_recurse(binding->value);
+}
+
 static void gc_recurse(value v) {
     if (!IS_SYMBOL(v) && !IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v)) {
         return;
@@ -429,8 +436,8 @@ static void gc_recurse(value v) {
                 }
             }
         } else if (GET_OBJECT(v)->type == OBJ_ENVIRONMENT) {
-            if (GET_OBJECT(v)->environment.hash_table != FALSE)
-                gc_recurse(GET_OBJECT(v)->environment.hash_table);
+            if (GET_OBJECT(v)->environment.hash_table != NULL)
+                hash_table_each(GET_OBJECT(v)->environment.hash_table, gc_recurse_env_ht_each, NULL);
         }
     } else if (IS_STRING(v)) {
         block->mark = 1;
@@ -580,6 +587,11 @@ static void gc_free_empty_pools(struct pool **heaps, int n_heaps) {
     }
 }
 
+static void gc_sweep_env_ht_each(value k, value v, void *ctx) {
+    struct binding *binding = (struct binding *) v;
+    free(binding);
+}
+
 static void gc_sweep(struct pool **heaps, int n_heaps) {
     /* free unmarked objects and reset marks */
     for (int i = 0; i < n_heaps; ++i) {
@@ -605,6 +617,13 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
                             break;
                         case OBJ_VECTOR:
                             free(obj->vector.data);
+                            break;
+                        case OBJ_ENVIRONMENT:
+                            if (obj->environment.hash_table != NULL) {
+                                hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
+                                hash_table_cleanup(obj->environment.hash_table);
+                                free(obj->environment.hash_table);
+                            }
                             break;
                         default:
                             /* do nothing */
@@ -1263,26 +1282,54 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
 
 /************ environment functions ***********/
 
-void env_define(value e, value sym, value val) {
-    value ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == FALSE) {
+void env_define(value e, value sym, value val, enum sym_kind kind) {
+    struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == NULL) {
         GET_SYMBOL(sym)->value = val;
-        GET_SYMBOL(sym)->kind = sym_value;
+        GET_SYMBOL(sym)->kind = kind;
         return;
     }
-    hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, sym, val);
+    struct binding *binding = malloc(sizeof(struct binding));
+    binding->value = val;
+    binding->kind = kind;
+    hash_table_set(ht, 0, sym, binding);
 }
 
 value env_ref(value e, value sym) {
-    value ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == FALSE)
-        return GET_SYMBOL(sym)->value;
-    value result = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, sym);
-    if (result == SENTINEL) {
-        struct symbol *s = GET_SYMBOL(sym);
-        RAISE("unbound variable: %.*s", (int)s->name_len, s->name);
+    struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
+    struct symbol *s = GET_SYMBOL(sym);
+    if (ht == NULL) {
+        switch (s->kind) {
+        case sym_unbound:
+            RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+        case sym_macro:
+            RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+        case sym_special:
+            RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+        case sym_value:
+            return GET_SYMBOL(sym)->value;
+        default:
+            RAISE("internal error: unhandled sym_kind case");
+        }
     }
-    return result;
+
+    struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
+    if (binding == SENTINEL) {
+        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+    }
+
+    switch (binding->kind) {
+    case sym_unbound:
+        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+    case sym_macro:
+        RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+    case sym_special:
+        RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+    case sym_value:
+        return binding->value;
+    default:
+        RAISE("internal error: unhandled sym_kind case");
+    }
 }
 
 /************ global environment functions ***********/
@@ -1308,7 +1355,7 @@ value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
 value make_global_env(void) {
     struct object *obj = malloc(sizeof(struct object));
     obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = FALSE;
+    obj->environment.hash_table = NULL;
     return OBJECT(obj);
 }
 
@@ -2938,8 +2985,9 @@ value primcall_hash_table_hash_function(environment env, enum call_flags flags, 
 
 void make_env_ht_copy(value k, value v, void *ctx) {
     value e = ctx;
-    if (GET_SYMBOL(v)->kind == sym_value)
-        env_define(e, v, GET_SYMBOL(v)->value);
+    if (GET_SYMBOL(v)->kind != sym_unbound) {
+        env_define(e, v, GET_SYMBOL(v)->value, GET_SYMBOL(v)->kind);
+    }
 }
 
 /* this is a primitive that returns an environment that's a copy of
@@ -2947,10 +2995,10 @@ void make_env_ht_copy(value k, value v, void *ctx) {
  * proper (environment ...) in place.*/
 value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("make-environment takes no arguments"); }
-    value ht = primcall_percent_make_hash_table(NULL, NO_CALL_FLAGS, 2, FALSE, FALSE);
     struct object *obj = alloc_object();
     obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = ht;
+    obj->environment.hash_table = malloc(sizeof(struct hash_table));
+    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
     value e = OBJECT(obj);
     hash_table_each(&symbols, make_env_ht_copy, e);
     return e;
@@ -2976,7 +3024,7 @@ value primcall_environment_define(environment env, enum call_flags flags, int na
     free_args();
     if (!IS_ENVIRONMENT(e)) { RAISE("environment-define first argument is not an environment"); }
     if (!IS_SYMBOL(sym)) { RAISE("environment-define second argument is not a symbol"); }
-    env_define(e, sym, val);
+    env_define(e, sym, val, sym_value);
     return VOID;
 }
 
