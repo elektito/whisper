@@ -1413,10 +1413,10 @@
             (loop (cdr f)))))))
 
 (define (compile-one-form func env form)
-  (preprocess-form env form)
-  (let ((expanded (expand-form func form)))
-    (collect-modified-vars func expanded)
-    (compile-body-level-form func 1 expanded)))
+  (let ((preprocessed (preprocess-form env form)))
+    (let ((expanded (expand-form func preprocessed)))
+      (collect-modified-vars func expanded)
+      (compile-body-level-form func 1 expanded))))
 
 (define (compile-program program)
   (let ((func (add-function program #f '() #f))
