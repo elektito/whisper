@@ -12,7 +12,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path archives repl)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path archives)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -26,8 +26,7 @@
   (cflags cmdline-cflags cmdline-cflags-set!)
   (library-mode cmdline-library-mode cmdline-library-mode-set!)
   (core-path cmdline-core-path cmdline-core-path-set!)
-  (archives cmdline-archives cmdline-archives-set!)
-  (repl cmdline-repl cmdline-repl-set!))
+  (archives cmdline-archives cmdline-archives-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
@@ -43,7 +42,6 @@
                 #f  ; library mode
                 "." ; core path
                 '() ; archives
-                #f  ; repl
                 ))
 
 (define (command-line-error fmt . args)
@@ -101,9 +99,6 @@
                  (begin
                    (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
-            ((string=? (car cl) "-R")
-             (cmdline-repl-set! args #t)
-             (loop (cdr cl)))
             (else (if (cmdline-input-file args)
                       (command-line-error "unexpected argument: ~a" (car cl))
                       (begin
@@ -111,8 +106,6 @@
                         (loop (cdr cl)))))))))
 
 (define (postprocess-cmdline args)
-  (if (not (cmdline-input-file args))
-      (command-line-error "missing input file"))
   (if (and (cmdline-just-compile args) (cmdline-run args))
       (command-line-error "-r and -c are mutually exclusive"))
   (if (and (cmdline-library-mode args) (cmdline-run args))
@@ -142,7 +135,7 @@
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a input-file [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g] [-R]
+  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
@@ -155,7 +148,7 @@
  -a\tlink a static archive (may be repeated)
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
- -R\tstart a repl.
+ if no input file is given, a repl is started.
 " (car (command-line)))
   (exit 0)
   )
@@ -177,7 +170,7 @@
 ;;;;;; main ;;;;;;
 
 (let ((args (parse-command-line-args)))
-  (when (cmdline-repl args)
+  (when (not (cmdline-input-file args))
     (repl (make-environment))
     (exit 0))
   (postprocess-cmdline args)
