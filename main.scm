@@ -166,8 +166,12 @@
   (display "> ")
   (let ((expr (read (current-input-port))))
     (unless (eof-object? expr)
-      (display (eval expr env))
-      (newline)
+      (let ((result (eval expr env)))
+        ;; TODO replace this with (void? result) when we can use that
+        ;; primcall in the compiler in the next version bump
+        (unless (eq? result (void))
+          (write (eval expr env))
+          (newline)))
       (repl env))))
 
 ;;;;;; main ;;;;;;
