@@ -2249,6 +2249,14 @@ value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
     return VOID;
 }
 
+value primcall_void_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("void? accepts a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_VOID(v));
+}
+
 value primcall_wrap(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { RAISE("wrap needs two arguments"); }
     init_args();

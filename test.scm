@@ -44,6 +44,8 @@
 (string? (symbol->string (gensym "prefix")))
 (not (eq? (gensym "foo") (gensym "foo")))
 
+(void? (void))
+
 ;;
 
 (eq? 100 (if #t 100 200))

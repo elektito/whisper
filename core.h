@@ -415,6 +415,7 @@ extern value primcall_vector_length(environment env, enum call_flags flags, int 
 extern value primcall_vector_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_void(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_void_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_wrap(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_wrapped_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_wrapped_kind(environment env, enum call_flags flags, int nargs, ...);
