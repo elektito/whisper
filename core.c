@@ -1368,6 +1368,7 @@ void init_ports() {
     current_input_port.port.read_char = file_read_char;
     current_input_port.port.peek_char = file_peek_char;
     current_input_port.port.read_line = file_read_line;
+    current_input_port.port.unread_char = file_unread_char;
 
     current_output_port.type = OBJ_PORT;
     current_output_port.port.direction = PORT_DIR_WRITE;
