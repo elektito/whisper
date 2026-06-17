@@ -1394,7 +1394,7 @@
           (if (and (identifier? (car form))
                    (eq? 'macro (meaning-kind (lookup-identifier func (car form)))))
               (expand-form func
-                ((transformer-func (meaning-info (lookup-identifier func (car form)))) form))
+                           ((transformer-func (meaning-info (lookup-identifier func (car form)))) form))
               (expand-form-list func form)))))
 
 (define (expand-form-list func form)
@@ -1418,7 +1418,7 @@
           (let ((prog (func-program func)))
             (unless (member (cadr form) (program-modified-vars prog) bound-identifier=?)
               (program-modified-vars-set! prog
-                (cons (cadr form) (program-modified-vars prog))))))
+                                          (cons (cadr form) (program-modified-vars prog))))))
         (let loop ((f form))
           (when (pair? f)
             (collect-modified-vars func (car f))
