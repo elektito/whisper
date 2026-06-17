@@ -147,6 +147,7 @@ enum sym_kind {
     sym_macro,   /* macro transformer (future) */
 };
 
+/* used as a key into the symbols hash table */
 struct symbol_name {
     size_t len;
     char name[];
