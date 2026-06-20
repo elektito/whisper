@@ -286,6 +286,48 @@
   (set-cdr! x 10)
   (equal? x '(1 . 10)))
 
+;; letrec
+
+(letrec ((is-even? (lambda (n)
+                     (or (= n 0)
+                         (is-odd? (- n 1)))))
+         (is-odd? (lambda (n)
+                    (and (not (= n 0))
+                         (is-even? (- n 1))))))
+  (is-odd? 11))
+
+(letrec ()
+  #t)
+
+(letrec ((fib (lambda (n)
+                (if (< n 2)
+                    n
+                    (+ (fib (- n 1)) (fib (- n 2)))))))
+  (= 55 (fib 10)))
+
+;; letrec*
+
+(letrec* ((is-even? (lambda (n)
+                      (or (= n 0)
+                          (is-odd? (- n 1)))))
+          (is-odd? (lambda (n)
+                     (and (not (= n 0))
+                          (is-even? (- n 1))))))
+  (is-odd? 11))
+
+(letrec* ()
+  #t)
+
+(letrec* ((fib (lambda (n)
+                 (if (< n 2)
+                     n
+                     (+ (fib (- n 1)) (fib (- n 2)))))))
+  (= 55 (fib 10)))
+
+(letrec* ((x 10)
+          (y x))
+  (= y 10))
+
 ;; map
 
 (equal? '() (map (lambda (x) (* x x)) '()))

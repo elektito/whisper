@@ -909,6 +909,113 @@
                 (compile-error "bad let binding: ~s" binding)
                 (loop (cdr bindings) (cons (car binding) params) (cons (cadr binding) init-forms))))))))
 
+(define (compile-letrec func indent form)
+  (when (or (< (length form) 3)
+            (not (or (null? (cadr form))
+                     (pair? (cadr form)))))
+    (compile-error "malformed letrec"))
+  (let ((letrec-varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
+    (gen-code func indent "{\n")
+
+    ;; unconditionally mark all letrec vars as "modified vars" so
+    ;; they're boxed and accessed by reference. without this, the
+    ;; variables can be captured as VOID by lambdas and then changing
+    ;; them wouldn't make any difference.
+    (let ((prog (func-program func)))
+      (let loop ((bindings (cadr form)))
+        (unless (null? bindings)
+          (unless (member (caar bindings) (program-modified-vars prog) bound-identifier=?)
+            (program-modified-vars-set! prog (cons (caar bindings) (program-modified-vars prog))))
+          (loop (cdr bindings)))))
+
+    ;; declare all variables as boxed(void) (since they are all marked
+    ;; as modified) and bind them all into scope so later init code can
+    ;; use them
+    (let loop ((bindings (cadr form)))
+      (unless (null? bindings)
+        (unless (identifier? (caar bindings))
+          (compile-error "bad letrec variable name: ~a" (caar bindings)))
+        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-name (caar bindings)))
+        (func-add-binding func (caar bindings) (make-meaning 'local #f))
+        (loop (cdr bindings))))
+
+    ;; evaluate all inits
+    (let ((init-varnums
+           (let loop ((bindings (cadr form)) (acc '()))
+             (if (null? bindings)
+                 (reverse acc)
+                 (loop (cdr bindings)
+                       (cons (compile-form func (+ 1 indent) (cadar bindings)) acc))))))
+      ;; assign results
+      (let loop ((bindings (cadr form)) (varnums init-varnums))
+        (unless (null? bindings)
+          (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n"
+                    (mangle-name (caar bindings)) (car varnums))
+          (loop (cdr bindings) (cdr varnums))))
+
+      ;; compile the body
+      (let loop ((body (cddr form)) (last-varnum -1))
+        (if (null? body)
+            (if (negative? last-varnum)
+                (compile-error "empty letrec body")
+                (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum))
+            (loop (cdr body)
+                  (compile-body-level-form func (+ 1 indent) (car body)))))
+
+      (gen-code func indent "}\n")
+      letrec-varnum)))
+
+(define (compile-letrec* func indent form)
+  (when (or (< (length form) 3)
+            (not (or (null? (cadr form))
+                     (pair? (cadr form)))))
+    (compile-error "malformed letrec*"))
+  (let ((letrec-varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
+    (gen-code func indent "{\n")
+
+    ;; unconditionally mark all letrec* vars as "modified vars" so
+    ;; they're boxed and accessed by reference. without this, the
+    ;; variables can be captured as VOID by lambdas and then changing
+    ;; them wouldn't make any difference.
+    (let ((prog (func-program func)))
+      (let loop ((bindings (cadr form)))
+        (unless (null? bindings)
+          (unless (member (caar bindings) (program-modified-vars prog) bound-identifier=?)
+            (program-modified-vars-set! prog (cons (caar bindings) (program-modified-vars prog))))
+          (loop (cdr bindings)))))
+
+    ;; declare all variables as boxed(void) and bring them all into
+    ;; scope
+    (let loop ((bindings (cadr form)))
+      (unless (null? bindings)
+        (unless (identifier? (caar bindings))
+          (compile-error "bad letrec* variable name: ~a" (caar bindings)))
+        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-name (caar bindings)))
+        (func-add-binding func (caar bindings) (make-meaning 'local #f))
+        (loop (cdr bindings))))
+
+    ;; evaluate each initializer and assign immediately before moving to
+    ;; the next
+    (let loop ((bindings (cadr form)))
+      (unless (null? bindings)
+        (let ((varnum (compile-form func (+ 1 indent) (cadar bindings))))
+          (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (caar bindings)) varnum))
+        (loop (cdr bindings))))
+
+    ;; compile the body
+    (let loop ((body (cddr form)) (last-varnum -1))
+      (if (null? body)
+          (if (negative? last-varnum)
+              (compile-error "empty letrec* body")
+              (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum))
+          (loop (cdr body)
+                (compile-body-level-form func (+ 1 indent) (car body)))))
+
+    (gen-code func indent "}\n")
+    letrec-varnum))
+
 (define (compile-define func indent form)
   (when (< (length form) 2)
     (compile-error "malformed define: ~s" form))
@@ -1067,6 +1174,8 @@
     ((include) (compile-include func indent form))
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
+    ((letrec) (compile-letrec func indent form))
+    ((letrec*) (compile-letrec* func indent form))
     ((lambda) (compile-lambda func indent form '()))
     ((quasiquote) (compile-quasiquote func indent form))
     ((quote) (compile-quote func indent form))
@@ -1245,6 +1354,8 @@
                                  (identifier 'special 'include 'include)
                                  (identifier 'special 'lambda 'lambda)
                                  (identifier 'special 'let 'let)
+                                 (identifier 'special 'letrec 'letrec)
+                                 (identifier 'special 'letrec* 'letrec*)
                                  (identifier 'special 'quasiquote 'quasiquote)
                                  (identifier 'special 'quote 'quote)
                                  (identifier 'special 'set! 'set!)
