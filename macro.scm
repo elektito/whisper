@@ -58,7 +58,7 @@
   (let ((p (assoc var (store-vars store) free-identifier=?)))
     (if p
         (set-cdr! p value)
-        (store-add-value var value))))
+        (store-add-value store var value))))
 
 (define (store-get-var store var)
   (let ((p (assoc var (store-vars store) free-identifier=?)))
