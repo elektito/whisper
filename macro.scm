@@ -73,11 +73,9 @@
   (map car (store-vars store)))
 
 (define (store-update-from-alist store alist)
-  ;; unless
-  (if (not (null? alist))
-      (begin
-        (store-set-var store (caar alist) (cdar alist))
-        (store-update-from-alist store (cdr alist)))))
+  (unless (null? alist)
+    (store-set-var store (caar alist) (cdar alist))
+    (store-update-from-alist store (cdr alist))))
 
 (define (starts-with-seq? ls ellipsis)
   (and (pair? ls)

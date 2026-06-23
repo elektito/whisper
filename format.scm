@@ -258,8 +258,8 @@ OPTION  [MNEMONIC]      DESCRIPTION     -- Implementation Assumes ASCII Text Enc
        (anychar-dispatch (+ pos 1) arglist #t port length-of-format-string format-strg)
        )
       ((#\&)      ; Freshline
-       (if (not last-was-newline) ;; (unless last-was-newline ..
-           (newline port))
+       (when (not last-was-newline) ;; (unless last-was-newline ..
+         (newline port))
        (anychar-dispatch (+ pos 1) arglist #t port length-of-format-string format-strg)
        )
       ((#\_)       ; Space
