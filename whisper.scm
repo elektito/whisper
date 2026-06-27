@@ -1363,6 +1363,7 @@
                                  (identifier 'aux 'else 'else)
                                  (identifier 'aux '=> '=>)
                                  (identifier 'aux '... '...)
+                                 (identifier 'aux '_ '_)
                                  (identifier 'aux 'unquote 'unquote)
                                  (identifier 'aux 'unquote-splicing 'unquote-splicing)
                                  (identifier 'primcall '%make-hash-table '%make-hash-table)
