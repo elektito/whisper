@@ -366,6 +366,12 @@ OPTION  [MNEMONIC]      DESCRIPTION     -- Implementation Assumes ASCII Text Enc
          (let ((port (open-output-string)))
            (%format port (car args) (cdr args))
            (get-output-string port)))
+        ((eq? #f (car args)) ; return string
+         (let ((port (open-output-string)))
+           (%format port (cadr args) (cddr args))
+           (get-output-string port)))
+        ((eq? #t (car args)) ; stdout
+         (%format (current-output-port) (cadr args) (cddr args)))
         (else (let ((port (car args))
                     (fmt (cadr args))
                     (args (cddr args)))
