@@ -1048,7 +1048,8 @@
     (let ((name (cadr form))
           (init-form (if (< (length form) 3)
                          #f
-                         (caddr form))))
+                         (caddr form)))
+          (has-init (>= (length form) 3)))
       ;; check for re-definition
       (let ((meaning (lookup-identifier func name)))
         (when (and meaning (eq? 'global (meaning-kind meaning)))
@@ -1066,8 +1067,9 @@
       (let ((init-varnum (compile-form func indent init-form)))
         ;; if not init value, we won't initialize here. all global
         ;; variables are initialized with VOID at the top-level.
-        (when init-form
-          (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name name) init-varnum))
+        (if has-init
+            (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name name) init-varnum)
+            (gen-code func indent "env_define(global_env, symb~a, VOID, sym_value);\n" (mangle-name name)))
         ;; define returns no meaningful value (unspecified in Scheme)
         -1))))
 
