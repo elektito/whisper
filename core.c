@@ -1681,7 +1681,7 @@ value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
         int prefix_len = (int)GET_STRING(name)->len;
         int suffix_len = snprintf(NULL, 0, "%lu", n);
         int len = prefix_len + suffix_len;
-        char *sym_name = malloc(len);
+        char *sym_name = malloc(len + 1); /* plus one for NULL terminator */
         memcpy(sym_name, GET_STRING(name)->s, prefix_len);
         snprintf(sym_name + prefix_len, suffix_len + 1, "%lu", n);
         sym = make_symbol(sym_name, len, sym_unbound);
