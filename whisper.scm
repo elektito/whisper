@@ -178,7 +178,7 @@
 
 (define (sym-or-num s)
   (let ((n (string->number s)))
-    (if (char=? n #f)
+    (if (not n)
         (string->symbol s)
         n)))
 
