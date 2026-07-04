@@ -1826,7 +1826,7 @@ value primcall_open_input_file(environment env, enum call_flags flags, int nargs
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
     FILE *fp = fopen(obj->port.filename, "r");
-    if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
+    if (!fp) { RAISE("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
 
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_READ;
@@ -1846,8 +1846,8 @@ value primcall_open_output_file(environment env, enum call_flags flags, int narg
     if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
     char *filenamez = strz(GET_STRING(filename));
     FILE *fp = fopen(filenamez, "w");
+    if (!fp) { RAISE("error opening file '%s': %s", filenamez, strerror(errno)); }
     free(filenamez);
-    if (!fp) { RAISE("error opening file: %s", strerror(errno)); }
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
