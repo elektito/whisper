@@ -1,8 +1,8 @@
 (include "utils.scm")
 (include "format.scm")
 (include "qq.scm")
-(include "macro.scm")
-(include "preprocess.scm")
+(include "expand.scm")
+(include "syntax-rules.scm")
 
 (define *indent-size* 4)
 
@@ -265,31 +265,29 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program ports funcs funcnum interned-symbols init-func referenced-vars is-test-suite test-counter debug modified-vars library-mode)
+  (make-program env ports funcs funcnum interned-symbols init-func is-test-suite test-counter debug library-mode)
   program?
+  (env program-env program-env-set!)
   (ports program-ports program-ports-set!)
   (funcs program-funcs program-funcs-set!)
   (funcnum program-funcnum program-funcnum-set!)
   (interned-symbols program-symbols program-symbols-set!)
   (init-func program-init-func program-init-func-set!)
-  (referenced-vars program-referenced-vars program-referenced-vars-set!)
   (is-test-suite program-is-test-suite program-is-test-suite-set!)
   (test-counter program-test-counter program-test-counter-set!)
   (debug program-debug program-debug-set!)
-  (modified-vars program-modified-vars program-modified-vars-set!)
   (library-mode program-library-mode program-library-mode-set!))
 
 (define (create-program port)
-  (make-program (list port)
+  (make-program (make-expand-env *root-identifiers* #f)
+                (list port)
                 '() ; funcs
                 0   ; funcnum (function counter)
                 '() ; interned symbols
                 #f  ; init func, to be set later
-                '() ; referenced variables
                 #f  ; is test suite?
                 0   ; test counter
                 #f  ; debug instrumentation
-                '() ; modified variables
                 #f  ; library mode
                 ))
 
@@ -321,13 +319,6 @@
   (let ((c (+ 1 (program-test-counter program))))
     (program-test-counter-set! program c)
     c))
-
-(define (program-add-referenced-var program var)
-  (let loop ((vars (program-referenced-vars program)))
-    (if (null? vars)
-        (program-referenced-vars-set! program (cons var (program-referenced-vars program)))
-        (unless (free-identifier=? var (car vars))
-          (loop (cdr vars))))))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
@@ -424,27 +415,20 @@
     (close-port port)))
 
 (define-record-type <function>
-  (make-function port varnum name program bindings parent freevars)
+  (make-function port varnum name program parent freevars)
   function?
   (port func-port)
   (varnum func-varnum func-varnum-set!)
   (name func-name)
   (program func-program)
-  (bindings func-bindings func-bindings-set!)
   (parent func-parent)
   (freevars func-freevars func-freevars-set!))
 
-(define (add-function program parent params rest-param)
-  (unless (all? (map identifier? params))
-    (error "not all params passed to add-function are identifiers"))
-  (unless (or (not rest-param) (identifier? rest-param))
-    (error (format "rest-param passed to add-function is not an identifier: ~s" rest-param)))
+(define (add-function program parent)
   (let ((func (make-function (open-output-string) ; port
                              0  ; varnum
                              (format "f~a" (program-next-funcnum program)) ; name
                              program
-                             (let ((params (if rest-param (append params (list rest-param)) params)))
-                               (map (lambda (p) (cons p (make-meaning (if parent 'local 'global) #f))) params))
                              parent
                              '() ; freevars
                              )))
@@ -456,35 +440,18 @@
     (func-varnum-set! func (+ n 1))
     n))
 
-(define (func-add-freevar func var)
-  (let ((new-freevars (append (func-freevars func) (list var))))
+(define (func-add-freevar func binding)
+  (let ((new-freevars (append (func-freevars func) (list binding))))
     (func-freevars-set! func new-freevars)
 
     ;; return the index of the new freevar
     (- (length new-freevars) 1)))
 
-(define (func-add-binding func var meaning)
-  (unless (identifier? var)
-    (error "var name passed to func-add-binding is not an identifier"))
-  (let ((new-bindings (cons (cons var meaning) (func-bindings func))))
-    (func-bindings-set! func new-bindings)))
-
-(define (func-lookup-binding func identifier)
-  (let ((r (assoc identifier (func-bindings func) bound-identifier=?)))
-    (if r (cdr r) #f)))
-
-(define (func-has-param func name)
-  (let ((m (func-lookup-binding func name)))
-    (not (not m))))
-
-(define (func-find-freevar func var)
+(define (func-find-freevar func binding)
   (let loop ((i 0) (freevars (func-freevars func)))
-    (if (null? freevars)
-        #f
-        (if (and (eq? 'local (identifier-kind (car freevars)))
-                 (bound-identifier=? var (car freevars)))
-            i
-            (loop (+ i 1) (cdr freevars))))))
+    (cond ((null? freevars) #f)
+          ((eq? binding (car freevars)) i)
+          (else (loop (+ i 1) (cdr freevars))))))
 
 (define (gen-code func indent fmt . args)
   (let ((port (func-port func)))
@@ -690,8 +657,10 @@
     varnum))
 
 (define (mangle-name name)
-  (let ((name (cond ((identifier? name) (symbol->string (or (identifier-meaning name)
-                                                            (identifier-name name))))
+  (let ((name (cond ((identifier? name)
+                     (symbol->string (or (and (identifier-binding name)
+                                              (binding-meaning (identifier-binding name)))
+                                         (identifier-name name))))
                     ((symbol? name) (symbol->string name))
                     ((string? name) name)
                     (else (error "mangle-name argument not a string or symbol")))))
@@ -705,6 +674,12 @@
                   ((char=? #\- ch) (loop (+ i 1) (string-append mangled "_")))
                   ((char=? #\_ ch) (loop (+ i 1) (string-append mangled "__")))
                   (else (loop (+ i 1) (format "~a_~a" mangled (char->integer ch))))))))))
+
+(define (mangle-unique-name id)
+  (mangle-name (binding-meaning (identifier-binding id))))
+
+(define (mangle-unique-name-for-binding b)
+  (mangle-name (binding-meaning b)))
 
 (define (intern program sym)
   (let loop ((i 0) (symbols (program-symbols program)))
@@ -751,9 +726,6 @@
       (compile-error "quote expects a single argument")
       (compile-quoted-item func indent (cadr form))))
 
-(define (compile-quasiquote func indent form)
-  (compile-form func indent (qq-quasiquote form)))
-
 (define (parse-lambda-params form)
   ;; given a lambda form, parse its arguments and return a list with two
   ;; elements: (params rest-param). params is the list of arguments
@@ -773,21 +745,18 @@
                 ((atom? params) (list (reverse proper-params) params))
                 (else (loop (cons (car params) proper-params) (cdr params))))))))
 
-(define (compile-lambda func indent form known-freevars)
-  (when (< (length form) 3)
-    (compile-error "malformed lambda"))
+(define (compile-lambda func indent form)
   (let ((params-and-rest (parse-lambda-params form)))
     (let ((params (car params-and-rest))
           (rest-param (cadr params-and-rest)))
-      (let ((new-func (add-function (func-program func)
-                                    func
-                                    params
-                                    rest-param)))
-        ;; add known free vars to the beginning of the list of free vars
-        (let loop ((known-freevars known-freevars))
-          (unless (null? known-freevars)
-            (func-add-freevar new-func (car known-freevars))
-            (loop (cdr known-freevars))))
+      (let ((new-func (add-function (func-program func) func)))
+        ;; add binding owners
+        (let loop ((params params))
+          (unless (null? params)
+            (binding-owner-set! (identifier-binding (car params)) new-func)
+            (loop (cdr params))))
+        (when rest-param
+          (binding-owner-set! (identifier-binding rest-param) new-func))
 
         (if (eq? rest-param #f)
             (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
@@ -797,15 +766,13 @@
         (gen-code new-func 1 "init_args();\n")
         (let loop ((params params))
           (unless (null? params)
-            (unless (identifier? (car params))
-              (compile-error "parameter not an identifier: ~a" (car params)))
-            (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-name (car params)))
-            (when (var-is-modified? func (car params))
-              (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-name (car params)) (mangle-name (car params))))
+            (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-unique-name (car params)))
+            (when (var-is-modified? (car params))
+              (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-unique-name (car params)) (mangle-unique-name (car params))))
             (loop (cdr params))))
 
         (unless (eq? rest-param #f)
-          (gen-code new-func 1 "value ~a = NIL;\n" (mangle-name rest-param))
+          (gen-code new-func 1 "value ~a = NIL;\n" (mangle-unique-name rest-param))
           (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))
           (gen-code new-func 1 "~a = reverse_list(~a, NIL);\n" (mangle-name rest-param) (mangle-name rest-param)))
 
@@ -818,11 +785,9 @@
                 (gen-code new-func 1 "free_args();\n")
                 (when (program-debug (func-program func))
                   (gen-code new-func 1 "leave_proc();\n"))
-                (when (negative? varnum)
-                  (compile-error "function body is empty"))
                 (gen-code new-func 1 "return x~a;\n" varnum))
               (let ((form (car body)))
-                (loop (cdr body) (compile-body-level-form new-func 1 form)))))
+                (loop (cdr body) (compile-form new-func 1 form)))))
 
         ;; generate the code for referencing the function
         (let ((varnum (func-next-varnum func)))
@@ -834,14 +799,12 @@
                     (length (func-freevars new-func)))
           (let loop ((freevars (func-freevars new-func)))
             (unless (null? freevars)
-              (if (func-has-param func (car freevars))
-                  (gen-code func 0 ", ~a" (mangle-name (car freevars))) ;; generate mangled param name
-                  (if (member (car freevars) known-freevars free-identifier=?)
-                      (gen-code func 0 ", (value) 0")
-                      (let ((freevar (func-find-freevar func (car freevars))))
-                        (if freevar
-                            (gen-code func 0 ", envget(env, ~a)" freevar)
-                            (gen-code func 0 ", envget(env, ~a)" (func-add-freevar func (car freevars)))))))
+              (let ((b (car freevars)))
+                (if (eq? (binding-owner b) func)
+                    (gen-code func 0 ", ~a" (mangle-unique-name-for-binding b))
+                    (let ((idx (or (func-find-freevar func b)
+                                   (func-add-freevar func b))))
+                      (gen-code func 0 ", envget(env, ~a)" idx))))
               (loop (cdr freevars))))
           (gen-code func 0 ");\n")
 
@@ -849,71 +812,27 @@
           varnum)))))
 
 (define (compile-let func indent form)
-  (if (and (pair? (cdr form)) (identifier? (cadr form)))
-      (compile-named-let func indent form)
-      (compile-unnamed-let func indent form)))
-
-(define (compile-unnamed-let func indent form)
-  (when (< (length form) 3)
-    (compile-error "malformed let"))
   (let ((let-varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = VOID;\n" let-varnum)
     (gen-code func indent "{\n")
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (unless (identifier? (caar bindings))
-          (compile-error "bad let variable name: ~a" (caar bindings)))
+        (binding-owner-set! (identifier-binding (caar bindings)) func)
         (let ((varnum (compile-form func (+ 1 indent) (cadar bindings))))
-          (if (var-is-modified? func (caar bindings))
-              (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-name (caar bindings)) varnum)
-              (gen-code func (+ 1 indent) "value ~a = x~a;\n" (mangle-name (caar bindings)) varnum))
+          (if (var-is-modified? (caar bindings))
+              (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-unique-name (caar bindings)) varnum)
+              (gen-code func (+ 1 indent) "value ~a = x~a;\n" (mangle-unique-name (caar bindings)) varnum))
           (loop (cdr bindings)))))
-    (let loop ((bindings (cadr form)))
-      (unless (null? bindings)
-        (func-add-binding func (caar bindings) (make-meaning 'local #f))
-        (loop (cdr bindings))))
     (let loop ((body (cddr form))
                (last-varnum -1))
       (if (null? body)
-          (if (negative? last-varnum)
-              (compile-error "empty let body")
-              (gen-code func (+ 1 indent) "x~a = x~a;\n" let-varnum last-varnum))
+          (gen-code func (+ 1 indent) "x~a = x~a;\n" let-varnum last-varnum)
           (loop (cdr body)
-                (compile-body-level-form func (+ 1 indent) (car body)))))
+                (compile-form func (+ 1 indent) (car body)))))
     (gen-code func indent "}\n")
     let-varnum))
 
-(define (compile-named-let func indent form)
-  (when (< (length form) 4)
-    (compile-error "malformed let"))
-  (let ((name (cadr form))
-        (body (cdddr form)))
-    (let loop ((bindings (caddr form))
-               (params '())
-               (init-forms '()))
-      (if (null? bindings)
-          (let ((func-varnum (compile-lambda func indent (append (list (identifier 'special 'lambda 'lambda) (reverse params)) body) (list name) )))
-            (gen-code func indent "GET_CLOSURE(x~a)->freevars[0] = x~a;\n" func-varnum func-varnum)
-            (let ((arg-varnums (compile-list-of-forms func indent (reverse init-forms))))
-              (let ((ret-varnum (func-next-varnum func)))
-                (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
-                          ret-varnum
-                          func-varnum
-                          func-varnum
-                          (length arg-varnums)
-                          (if (eq? '() arg-varnums) "" ", ")
-                          (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
-                ret-varnum)))
-          (let ((binding (car bindings)))
-            (if (!= (length binding) 2)
-                (compile-error "bad let binding: ~s" binding)
-                (loop (cdr bindings) (cons (car binding) params) (cons (cadr binding) init-forms))))))))
-
 (define (compile-letrec func indent form)
-  (when (or (< (length form) 3)
-            (not (or (null? (cadr form))
-                     (pair? (cadr form)))))
-    (compile-error "malformed letrec"))
   (let ((letrec-varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
     (gen-code func indent "{\n")
@@ -925,8 +844,8 @@
     (let ((prog (func-program func)))
       (let loop ((bindings (cadr form)))
         (unless (null? bindings)
-          (unless (member (caar bindings) (program-modified-vars prog) bound-identifier=?)
-            (program-modified-vars-set! prog (cons (caar bindings) (program-modified-vars prog))))
+          (binding-owner-set! (identifier-binding (caar bindings)) func)
+          (mark-var-as-modified (caar bindings))
           (loop (cdr bindings)))))
 
     ;; declare all variables as boxed(void) (since they are all marked
@@ -934,10 +853,7 @@
     ;; use them
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (unless (identifier? (caar bindings))
-          (compile-error "bad letrec variable name: ~a" (caar bindings)))
-        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-name (caar bindings)))
-        (func-add-binding func (caar bindings) (make-meaning 'local #f))
+        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-unique-name (caar bindings)))
         (loop (cdr bindings))))
 
     ;; evaluate all inits
@@ -957,20 +873,14 @@
       ;; compile the body
       (let loop ((body (cddr form)) (last-varnum -1))
         (if (null? body)
-            (if (negative? last-varnum)
-                (compile-error "empty letrec body")
-                (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum))
+            (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum)
             (loop (cdr body)
-                  (compile-body-level-form func (+ 1 indent) (car body)))))
+                  (compile-form func (+ 1 indent) (car body)))))
 
       (gen-code func indent "}\n")
       letrec-varnum)))
 
 (define (compile-letrec* func indent form)
-  (when (or (< (length form) 3)
-            (not (or (null? (cadr form))
-                     (pair? (cadr form)))))
-    (compile-error "malformed letrec*"))
   (let ((letrec-varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
     (gen-code func indent "{\n")
@@ -982,18 +892,15 @@
     (let ((prog (func-program func)))
       (let loop ((bindings (cadr form)))
         (unless (null? bindings)
-          (unless (member (caar bindings) (program-modified-vars prog) bound-identifier=?)
-            (program-modified-vars-set! prog (cons (caar bindings) (program-modified-vars prog))))
+          (binding-owner-set! (identifier-binding (caar bindings)) func)
+          (mark-var-as-modified (caar bindings))
           (loop (cdr bindings)))))
 
     ;; declare all variables as boxed(void) and bring them all into
     ;; scope
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (unless (identifier? (caar bindings))
-          (compile-error "bad letrec* variable name: ~a" (caar bindings)))
-        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-name (caar bindings)))
-        (func-add-binding func (caar bindings) (make-meaning 'local #f))
+        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-unique-name (caar bindings)))
         (loop (cdr bindings))))
 
     ;; evaluate each initializer and assign immediately before moving to
@@ -1001,94 +908,39 @@
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
         (let ((varnum (compile-form func (+ 1 indent) (cadar bindings))))
-          (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (caar bindings)) varnum))
+          (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-unique-name (caar bindings)) varnum))
         (loop (cdr bindings))))
 
     ;; compile the body
     (let loop ((body (cddr form)) (last-varnum -1))
       (if (null? body)
-          (if (negative? last-varnum)
-              (compile-error "empty letrec* body")
-              (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum))
+          (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum)
           (loop (cdr body)
-                (compile-body-level-form func (+ 1 indent) (car body)))))
+                (compile-form func (+ 1 indent) (car body)))))
 
     (gen-code func indent "}\n")
     letrec-varnum))
 
 (define (compile-define func indent form)
-  (when (< (length form) 2)
-    (compile-error "malformed define: ~s" form))
-  (when (and (identifier? (cadr form))
-             (> (length form) 3))
-    (compile-error "malformed define: ~s" form))
-  (when (and (list? (cadr form))
-             (< (length form) 3))
-    (compile-error "malformed define: ~s" form))
+  (let ((name (cadr form))
+        (init-form (caddr form)))
+    ;; top-level variable names are all interned, since the values of
+    ;; global variables are stored in the symbol table. intern the
+    ;; binding's meaning (not the source name), since a macro-introduced
+    ;; global's meaning is a hygienic gensym distinct from its source
+    ;; name, and that is the symbol mangle-unique-name below actually
+    ;; emits.
+    (intern (func-program func) (binding-meaning (identifier-binding name)))
 
-  ;; we could maybe allow this, and then further on, declare the
-  ;; variable in-place as opposed to setting the global variable.
-  ;; something like this:
-  ;;
-  ;; (if (null? (func-parent func))
-  ;;     (gen-code func indent "~a = x~a;\n" (mangle-name name) init-varnum)
-  ;;     (gen-code func indent "value ~a = x~a;\n" (mangle-name name) init-varnum))
-  ;;
-  ;; this is technically incorrect though, since it can't shadow current
-  ;; function parameters while it should.
-  (when (func-parent func)
-    (compile-error "define currently only supported at the top-level"))
+    ;; compile init form and either set it as a global variable (if in
+    ;; the top-level), or declare it as a variable.
+    (let ((init-varnum (compile-form func indent init-form)))
+      (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name name) init-varnum)
 
-  ;; convert the function form to normal form
-  (let ((form (if (pair? (cadr form))
-                  (list 'define
-                        (caadr form)
-                        (append (list (identifier 'special 'lambda 'lambda) (cdadr form)) (cddr form)))
-                  form)))
-    (let ((name (cadr form))
-          (init-form (if (< (length form) 3)
-                         #f
-                         (caddr form)))
-          (has-init (>= (length form) 3)))
-      ;; check for re-definition
-      (let ((meaning (lookup-identifier func name)))
-        (when (and meaning (eq? 'global (meaning-kind meaning)))
-          (compile-error "re-defining: ~a" name)))
-
-      ;; top-level variable names are all interned, since the values of
-      ;; global variables are stored in the symbol table.
-      (intern (func-program func) (identifier-meaning name))
-
-      ;; add the name to the list of current (top-level) function bindings
-      (func-add-binding func name (make-meaning 'global #f))
-
-      ;; compile init form and either set it as a global variable (if in
-      ;; the top-level), or declare it as a variable.
-      (let ((init-varnum (compile-form func indent init-form)))
-        ;; if not init value, we won't initialize here. all global
-        ;; variables are initialized with VOID at the top-level.
-        (if has-init
-            (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name name) init-varnum)
-            (gen-code func indent "env_define(global_env, symb~a, VOID, sym_value);\n" (mangle-name name)))
-        ;; define returns no meaningful value (unspecified in Scheme)
-        -1))))
-
-;; The "declare" form is temporary until we add proper library and
-;; import support.
-(define (compile-declare func indent form)
-  (when (func-parent func)
-    (compile-error "declare only allowed at top-level"))
-  (let loop ((names (cdr form)))
-    (unless (null? names)
-      (let ((name (car names)))
-        (intern (func-program func) (identifier-meaning name))
-        (func-add-binding func name (make-meaning 'global #f)))
-      (loop (cdr names))))
-  -1)
+      ;; define returns no meaningful value (unspecified in Scheme)
+      -1)))
 
 (define (compile-if func indent form)
-  (when (or (< (length form) 3) (> (length form) 4))
-    (compile-error "malformed if"))
   (let ((cond-varnum (compile-form func indent (cadr form)))
         (one-legged (= (length form) 3)))
     (let ((ret-varnum (func-next-varnum func)))
@@ -1128,39 +980,18 @@
                 (loop (cdr exprs))))))
     ret-varnum))
 
-(define (compile-define-syntax func indent form)
-  (when (func-parent func)
-    (compile-error "define-syntax only supported at the top-level at the moment"))
-  (when (!= (length form) 3)
-    (compile-error "invalid define-syntax"))
-  (let ((name (cadr form))
-        (transformer (caddr form)))
-    (when (or (not (list? transformer))
-              (not (pair? transformer))
-              (not (identifier? (car transformer))))
-      (compile-error "invalid macro transformer"))
-    (let ((transformer (compile-form func indent transformer)))
-      (unless (transformer? transformer)
-        (compile-error "invalid macro transformer"))
-      (func-add-binding func name (make-meaning 'macro transformer))))
-  -1)
-
 (define (compile-set! func indent form)
-  (unless (= (length form) 3)
-    (compile-error "bad set! form: ~s" form))
-  (unless (identifier? (cadr form))
-    (compile-error "bad set! form: ~s" form))
   (let ((value-varnum (compile-form func indent (caddr form)))
-        (meaning (lookup-identifier func (cadr form))))
-    (case (meaning-kind meaning)
+        (b (identifier-binding (cadr form))))
+    (case (binding-kind b)
       ((global)
-       (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-name (cadr form)) value-varnum))
-      ((local)
-       (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-name (cadr form)) value-varnum))
-      ((free)
-       (let* ((freevar-idx (or (func-find-freevar func (cadr form))
-                               (func-add-freevar func (cadr form)))))
-         (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, envget(env, ~a), x~a);\n" freevar-idx value-varnum)))
+       (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name (cadr form)) value-varnum))
+      ((lexical)
+       (if (eq? (binding-owner b) func)
+           (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-unique-name (cadr form)) value-varnum)
+           (let ((idx (or (func-find-freevar func b)
+                          (func-add-freevar func b))))
+             (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, envget(env, ~a), x~a);\n" idx value-varnum))))
       (else
        (compile-error "set! target is not a variable: ~a" (cadr form)))))
   (let ((varnum (func-next-varnum func)))
@@ -1170,19 +1001,15 @@
 (define (compile-special func indent form kind)
   (case kind
     ((begin) (compile-begin func indent form))
-    ((declare) (compile-declare func indent form))
     ((define) (compile-define func indent form))
-    ((define-syntax) (compile-define-syntax func indent form))
     ((include) (compile-include func indent form))
     ((if) (compile-if func indent form))
     ((let) (compile-let func indent form))
     ((letrec) (compile-letrec func indent form))
     ((letrec*) (compile-letrec* func indent form))
-    ((lambda) (compile-lambda func indent form '()))
-    ((quasiquote) (compile-quasiquote func indent form))
+    ((lambda) (compile-lambda func indent form))
     ((quote) (compile-quote func indent form))
     ((set!) (compile-set! func indent form))
-    ((syntax-rules) (compile-syntax-rules form))
     (else -1)))
 
 (define (compile-call func indent form)
@@ -1199,111 +1026,54 @@
                   (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
         ret-varnum))))
 
-(define (lookup-primcall identifier)
-  (hash-table-ref/default *primcalls-table* (identifier-meaning identifier) #f))
-
-(define-record-type <meaning>
-  (make-meaning kind info)
-  meaning?
-  (kind meaning-kind)
-  (info meaning-info))
-
-(define (lookup-identifier func identifier)
-  ;; returned types
-  ;;  - local: it's a local variable in current function
-  ;;
-  ;;  - free: it's a free variable in current function but a local in
-  ;;    one of its parents (but not top-level). this is also used for
-  ;;    variables that are not local to the parent, but set by the
-  ;;    caller in the environment (like referring to the name of a named
-  ;;    let block).
-  ;;
-  ;;  - global: it's defined in top-level
-  ;;
-  ;;  - primcall: it's a primcall
-  ;;
-  ;;  - special: it's a special form
-  ;;
-  ;;  - unknown: neither of the previous ones
-  (cond ((identifier-is-special identifier)
-         (make-meaning 'special (identifier-meaning identifier)))
-        ((identifier-is-primcall identifier)
-         (let ((primcall-info (lookup-primcall identifier)))
-           (if primcall-info
-               (make-meaning 'primcall primcall-info)
-               (error (format "cannot find info about primcall '~s'; this must be a bug." identifier)))))
-        (else
-         (let ((meaning (func-lookup-binding func identifier)))
-           (if meaning
-               meaning
-               (let loop ((func func))
-                 (if (not func)
-                     (make-meaning 'unknown #f)
-                     (let ((meaning (func-lookup-binding func identifier)))
-                       (if meaning
-                           (if (eq? (meaning-kind meaning) 'local)
-                               (make-meaning 'free #f)
-                               meaning)
-                           (if (func-find-freevar func identifier)
-                               (make-meaning 'free #f)
-                               (loop (func-parent func))))))))))))
+(define (lookup-primcall meaning)
+  (hash-table-ref/default *primcalls-table* meaning #f))
 
 (define (compile-list func indent form)
   (if (not (identifier? (car form)))
       (compile-call func indent form)
-      (let ((meaning (lookup-identifier func (car form))))
-        (case (meaning-kind meaning)
-          ((local global free) (compile-call func indent form))
-          ((primcall) (compile-primcall func indent form (meaning-info meaning)))
-          ((special) (compile-special func indent form (meaning-info meaning)))
-          ((unknown) (compile-call func indent form))
-          ((macro) (error (format "internal error: unexpanded macro ~a reached codegen" (car form))))
-          (else (error (format "unhandled identifier kind: ~a" (meaning-kind meaning))))))))
+      (let* ((binding (identifier-binding (car form)))
+             (meaning (binding-meaning binding)))
+        (case (binding-kind binding)
+          ((lexical global) (compile-call func indent form))
+          ((primcall) (compile-primcall func indent form (lookup-primcall meaning)))
+          ((special) (compile-special func indent form meaning))
+          (else (error (format "unhandled identifier kind: ~a" meaning)))))))
 
-(define (var-is-modified? func var)
-  (let ((program (func-program func)))
-    (member var (program-modified-vars program) bound-identifier=?)))
+(define (var-is-modified? var)
+  (let ((b (identifier-binding var)))
+    (and b (binding-mutated? b))))
+
+(define (mark-var-as-modified var)
+  (binding-mutated?-set! (identifier-binding var) #t))
 
 (define (compile-identifier func indent form)
-  (let ((meaning (lookup-identifier func form))
-        (varnum (func-next-varnum func)))
-    (case (meaning-kind meaning)
-      ((local)
-       (if (var-is-modified? func form)
-           (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, ~a);\n" varnum (mangle-name form))
-           (gen-code func indent "value x~a = ~a;\n" varnum (mangle-name form))))
+  (let ((varnum (func-next-varnum func))
+        (b (identifier-binding form)))
+    (case (binding-kind b)
+      ((lexical)
+       (if (eq? (binding-owner b) func)
+           (if (binding-mutated? b)
+               (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, ~a);\n" varnum (mangle-unique-name form))
+               (gen-code func indent "value x~a = ~a;\n" varnum (mangle-unique-name form)))
+           (let ((idx (or (func-find-freevar func b)
+                          (func-add-freevar func b))))
+             (if (binding-mutated? b)
+                 (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, envget(env, ~a));\n" varnum idx)
+                 (gen-code func indent "value x~a = envget(env, ~a);\n" varnum idx)))))
       ((global)
        (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
-      ((free)
-       (let ((freevar-idx (func-find-freevar func form)))
-         (let ((freevar-idx (if freevar-idx
-                                freevar-idx
-                                (func-add-freevar func form))))
-           (if (var-is-modified? func form)
-               (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, envget(env, ~a));\n" varnum freevar-idx)
-               (gen-code func indent "value x~a = envget(env, ~a);\n" varnum freevar-idx)))))
       ((primcall)
        (intern (func-program func) (identifier-name form))
        (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n"
                  varnum (mangle-name form)))
       ((special) (compile-error "invalid use of special: ~a" form))
 
-      ;; we now allow not-yet defined variables to be used even in
-      ;; top-level forms like in a top-level (define foo bar) where bar
-      ;; is undefined. this is because we allow undefined variables when
-      ;; compiling to shared objects, where the variable might be
-      ;; defined at runtime. this is why we even intern the variable so
-      ;; that there's a global variable for it.
-      ((unknown)
-       (intern (func-program func) (identifier-name form))
-       (program-add-referenced-var (func-program func) form)
-       (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
-
       ((macro) (compile-error "invalid use of macro name: ~a" form))
 
       ((aux) (compile-error "invalid use of aux keyword: ~a" form))
 
-      (else (error (format "unknown identifier kind: ~a" (identifier-kind form)))))
+      (else (error (format "unknown identifier kind: ~a" (binding-kind b)))))
     varnum))
 
 (define (compile-vector func indent form)
@@ -1332,22 +1102,6 @@
   (newline (current-error-port))
   (exit 1))
 
-(define (compile-body-level-form func indent form)
-  (let ((varnum -1))
-    (if (and (pair? form)
-             (identifier-is-special (car form) 'begin)) ;; top/body level "begin" form
-        (if (null? (cdr form))
-            varnum
-            (let loop ((rest (cdr form))
-                       (last-varnum varnum))
-              (let ((new-varnum (compile-body-level-form func indent (car rest))))
-                (if (null? (cdr rest))
-                    (if (negative? new-varnum)
-                        last-varnum
-                        new-varnum)
-                    (loop (cdr rest) new-varnum)))))
-        (compile-form func indent form))))
-
 (define *root-identifiers* (list (identifier 'special 'begin 'begin)
                                  (identifier 'special 'declare 'declare)
                                  (identifier 'special 'define 'define)
@@ -1358,6 +1112,8 @@
                                  (identifier 'special 'let 'let)
                                  (identifier 'special 'letrec 'letrec)
                                  (identifier 'special 'letrec* 'letrec*)
+                                 (identifier 'special 'let-syntax 'let-syntax)
+                                 (identifier 'special 'letrec-syntax 'letrec-syntax)
                                  (identifier 'special 'quasiquote 'quasiquote)
                                  (identifier 'special 'quote 'quote)
                                  (identifier 'special 'set! 'set!)
@@ -1482,56 +1238,16 @@
                                  (identifier 'primcall '<= '<=)
                                  (identifier 'primcall '>= '>=)))
 
-(define (expand-form func form)
-  ;; recursively expand all macro calls in an already-preprocessed form.
-  ;; only quote is not descended into. all other forms (lambda bodies,
-  ;; let bodies, if branches, etc.) may contain macro calls.
-  (if (not (pair? form))
-      form
-      (if (identifier-is-special (car form) 'quote)
-          form
-          (if (and (identifier? (car form))
-                   (eq? 'macro (meaning-kind (lookup-identifier func (car form)))))
-              (expand-form func
-                           ((transformer-func (meaning-info (lookup-identifier func (car form)))) form))
-              (expand-form-list func form)))))
-
-(define (expand-form-list func form)
-  ;; rebuild a list or dotted-pair by expanding each element. handles
-  ;; improper lists (e.g. lambda rest params in templates).
-  (if (not (pair? form))
-      form
-      (cons (expand-form func (car form))
-            (expand-form-list func (cdr form)))))
-
-(define (collect-modified-vars func form)
-  ;; walk an already-expanded form and record every set! target in
-  ;; program-modified-vars. descends into all subforms including lambda
-  ;; bodies -- a set! of an outer variable inside a nested lambda still
-  ;; needs to trigger boxing at the outer binding site.
-  ;; only quote is skipped (inert data).
-  (when (and (pair? form)
-             (not (identifier-is-special (car form) 'quote)))
-    (if (identifier-is-special (car form) 'set!)
-        (when (and (pair? (cdr form)) (identifier? (cadr form)))
-          (let ((prog (func-program func)))
-            (unless (member (cadr form) (program-modified-vars prog) bound-identifier=?)
-              (program-modified-vars-set! prog
-                                          (cons (cadr form) (program-modified-vars prog))))))
-        (let loop ((f form))
-          (when (pair? f)
-            (collect-modified-vars func (car f))
-            (loop (cdr f)))))))
-
-(define (compile-one-form func env form)
-  (let ((preprocessed (preprocess-form env form)))
-    (let ((expanded (expand-form func preprocessed)))
-      (collect-modified-vars func expanded)
-      (compile-body-level-form func 1 expanded))))
+(define (compile-top-level-form func env form)
+  (let ((expanded (expand-top-level-form form env)))
+    (let loop ((forms expanded) (varnum -1))
+      (if (null? forms)
+          varnum
+          (loop (cdr forms) (compile-form func 1 (car forms)))))))
 
 (define (compile-program program)
-  (let ((func (add-function program #f '() #f))
-        (env (preprocess-create-environment *root-identifiers*)))
+  (let ((func (add-function program #f))
+        (env (program-env program)))
     (program-init-func-set! program func)
     (let loop ((form (read (program-port program))))
       (if (eof-object? form)
@@ -1543,7 +1259,7 @@
               (begin
                 (program-pop-port program)
                 (loop (read (program-port program)))))
-          (let ((varnum (compile-one-form func env form)))
+          (let ((varnum (compile-top-level-form func env form)))
             (when (and (!= varnum -1)
                        (program-is-test-suite program)
                        (program-is-main-file program))
@@ -1556,12 +1272,13 @@
   ;; be loaded and runtime and might refer to varaibles in an
   ;; environment passed to them.
   (unless (eq? 'so (program-library-mode program))
-    (let ((init-func (program-init-func program)))
-      (let loop ((vars (program-referenced-vars program)))
-        (unless (null? vars)
-          (unless (func-has-param init-func (car vars))
-            (compile-error "undefined variable: ~a" (car vars)))
-          (loop (cdr vars)))))))
+    (let* ((env (program-env program))
+           (undefined (expand-env-get-undefined-globals env)))
+      (unless (null? undefined)
+        (compile-error "undefined variable~a: ~a"
+                       (if (= 1 (length undefined)) "" "s")
+                       (string-join (map (lambda (id) (symbol->string (identifier-name id))) undefined) ", "))))))
+
 
 (define (all-archive-flags archives)
   (if (null? archives)
@@ -1592,14 +1309,17 @@
   (format "/tmp/~a" (hex-encode (urandom 6))))
 
 (define (compile-expr-to-so expr)
+  ;; TODO note that we're creating a new expand env per compilation, so
+  ;; a macro defined in an earlier compilation won't be available. this
+  ;; should be fixed.
   (let* ((c-file (string-append (temp-filename) ".c"))
          (so-file (string-append (temp-filename) ".so"))
          (program (create-program #f))
-         (func (add-function program #f '() #f))
-         (env (preprocess-create-environment *root-identifiers*)))
+         (func (add-function program #f))
+         (env (program-env program)))
     (program-init-func-set! program func)
     (program-library-mode-set! program 'so)
-    (let ((varnum (compile-one-form func env expr)))
+    (let ((varnum (compile-top-level-form func env expr)))
       (if (negative? varnum)
           (gen-code func 1 "return VOID;\n")
           (gen-code func 1 "return x~a;\n" varnum)))

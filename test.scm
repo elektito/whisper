@@ -935,6 +935,8 @@
   (let ((c (make-counter)))
     (and (= (c) 1) (= (c) 2) (= (c) 3))))
 
+;; macros
+
 ;; regression: set! introduced by a macro expansion must correctly trigger
 ;; boxing for the target variable. previously this failed at runtime with
 ;; "set-box! first argument is not a box".
@@ -946,22 +948,322 @@
   (increment! x)
   (= x 1))
 
-;; regression: preprocess-define-syntax was calling preprocess-form on
-;; the syntax-rules body, causing preprocess-let to misparse templates
-;; that use (let ((v ...) ...) ...) as executable code, failing when it
-;; called (length '...) on the ellipsis symbol.
-(define-syntax bind-to-zero
+;; template-introduced binding must not capture a same-named global
+(define a1-t 5)
+(define-syntax a1-or
   (syntax-rules ()
-    ((bind-to-zero (v ...) body ...)
-     (let ((v 0) ...)
-       body ...))))
-(= (bind-to-zero (x y) (+ x y)) 0)
+    ((_) #f)
+    ((_ e) e)
+    ((_ e1 e2 ...) (let ((a1-t e1)) (if a1-t a1-t (a1-or e2 ...))))))
+(= 5 (a1-or #f a1-t))
+(= 50 (let ((a1-t 50)) (a1-or #f a1-t)))
+(= 5 (a1-or #f #f a1-t))
 
-;; regression: pp-compile-literal used eq? for non-identifier literals,
-;; so string literals in syntax-rules patterns compared by identity and
-;; never matched across separate string objects.
-(define-syntax double-via-aux
+;; set! inside a macro argument must write through to the user's
+;; global, not the template's own same-named binding
+(define a2-acc 99)
+(define-syntax a2-twice
+  (syntax-rules () ((_ e) (let ((a2-acc 0)) e e a2-acc))))
+(and (= 0 (a2-twice (set! a2-acc (+ a2-acc 1))))
+     (= 101 a2-acc))
+
+(define-syntax a2-addx (syntax-rules () ((_ e) (let ((x e)) (+ x x)))))
+(= 20 (let ((x 10)) (a2-addx x)))
+
+;; macro that ignores its argument must not choke on the argument's
+;; shape, since it is inert data until the macro examines it
+(define-syntax b1-ignore-it (syntax-rules () ((_ x) 'ok)))
+(eq? 'ok (b1-ignore-it (lambda 5 6)))
+
+;; a macro that only inspects the head of a let-shaped argument must not
+;; have that argument parsed as a real let
+(define-syntax b2-fst (syntax-rules () ((_ (a . rest)) (quote a))))
+(eq? 'let (b2-fst (let ((1 2)) 3)))
+
+;; internal defines are converted to letrec*
+(define (c1-f x)
+  (define y (+ x 1))
+  (define z (* y 2))
+  z)
+(= 10 (c1-f 4))
+
+;; internal defines see each other, including forward references
+(define (c1b-f)
+  (define (even2? n) (if (= n 0) #t (odd2? (- n 1))))
+  (define (odd2? n) (if (= n 0) #f (even2? (- n 1))))
+  (even2? 10))
+(c1b-f)
+
+;; let-syntax introduces a local macro
+(= 42 (let-syntax ((c2-dbl (syntax-rules () ((_ x) (* 2 x)))))
+        (c2-dbl 21)))
+
+;; letrec-syntax siblings see each other, including self-reference
+(equal? '(5) (letrec-syntax ((c2b-m1 (syntax-rules () ((_ x) (c2b-m2 x))))
+                             (c2b-m2 (syntax-rules () ((_ x) (list x)))))
+               (c2b-m1 5)))
+(equal? '(((0))) (letrec-syntax ((c2b-cnt (syntax-rules ()
+                                            ((_ ()) 0)
+                                            ((_ (a . r)) (list (c2b-cnt r))))))
+                   (c2b-cnt (x y z))))
+
+;; under let-syntax (not letrec-syntax), siblings do NOT see each other;
+;; a use of the sibling name stays an ordinary (unexpanded) call
+(define (lrs3-p2 x) (list 'plain x))
+(equal? '(plain 5)
+        (let-syntax ((lrs3-p1 (syntax-rules () ((_ x) (lrs3-p2 x))))
+                     (lrs3-p2 (syntax-rules () ((_ x) (list 'macro x)))))
+          (lrs3-p1 5)))
+
+;; body-level define-syntax
+(define (c3-f)
+  (define-syntax c3-q (syntax-rules () ((_ x) (+ x 1))))
+  (c3-q 5))
+(= 6 (c3-f))
+
+;; `_` is a non-capturing wildcard, and two underscores in one pattern
+;; do not conflict with each other
+(define-syntax d1-second (syntax-rules () ((_ (a b _)) b)))
+(= 20 (d1-second (10 20 30)))
+(define-syntax d1-two-wild (syntax-rules () ((_ (a _ _)) a)))
+(= 1 (d1-two-wild (1 2 3)))
+
+;; vector patterns, matched against (not just built by, as in E11)
+(define-syntax d1-vfirst (syntax-rules () ((_ #(a b ...)) a)))
+(= 1 (d1-vfirst #(1 2 3)))
+
+;; a macro expanding to a pair of top-level defines (hidden state) must
+;; not capture, and must not be captured by, a same-named global
+(define-syntax e1-def-counter
   (syntax-rules ()
-    ((double-via-aux "go" x) (* x 2))
-    ((double-via-aux x) (double-via-aux "go" x))))
-(= (double-via-aux 21) 42)
+    ((_ name)
+     (begin
+       (define n 0)
+       (define (name) (set! n (+ n 1)) n)))))
+(define n 'user)
+(e1-def-counter e1-tick)
+(equal? (list 1 2 'user) (list (e1-tick) (e1-tick) n))
+
+;; independent expansions of the same macro get independent hidden
+;; state, since each expansion gets a fresh hygienic rename
+(e1-def-counter e2-a)
+(e1-def-counter e2-b)
+(let ()
+  (e2-a)
+  (e2-a)
+  (e2-b)
+  (equal? '(3 2) (list (e2-a) (e2-b))))
+
+;; the same hidden-state macro used inside a body goes through the
+;; internal-define (letrec*) path instead of top-level begin splicing:
+;; the two introduced defines must still connect and the introduced n
+;; must still be boxed
+(equal? '(1 2)
+        (let ()
+          (e1-def-counter tick)
+          (list (tick) (tick))))
+
+;; a macro can generate a usable macro; the outer pattern variable flows
+;; into and is frozen inside the inner template
+(define-syntax e4-def-adder
+  (syntax-rules ()
+    ((_ name k)
+     (define-syntax name
+       (syntax-rules () ((_ x) (+ x k)))))))
+(e4-def-adder e4-add5 5)
+(= 15 (e4-add5 10))
+
+;; two-level referential transparency: a generated macro's reference to
+;; a helper traces back through the outer macro's definition site, even
+;; under a use-site shadow of the same name. rt-helper is deliberately
+;; shared with other tests too.
+(define (rt-helper x) (* x 100))
+(define-syntax e5-make-user
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules () ((_ e) (rt-helper e)))))))
+(e5-make-user e5-u)
+(= 500 (let ((rt-helper (lambda (x) (- x)))) (e5-u 5)))
+
+;; a generated macro can recurse on its own use-site name
+(define-syntax e6-def-len
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules ()
+         ((_ ()) 0)
+         ((_ (a . rest)) (+ 1 (name rest))))))))
+(e6-def-len e6-len)
+(= 3 (e6-len (a b c)))
+
+;; a generated macro's literal (here `=>`) is aliased consistently
+;; between its declaration and its pattern, so it is still recognized as
+;; a literal (not a pattern variable) after renaming
+(define-syntax e8-def-arrow
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules (=>) ((_ (a => b)) (list a b)))))))
+(e8-def-arrow e8-arrow)
+(equal? '(1 2) (e8-arrow (1 => 2)))
+
+;; the (... ...) escape emits a literal ... into a generated macro
+;; without the outer ellipsis consuming it
+(define-syntax e10-be-like-begin
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules () ((_ e (... ...)) (begin e (... ...))))))))
+(e10-be-like-begin e10-seq)
+(= 4 (e10-seq 1 2 3 4))
+
+;; the general escape (... <template>) driving a generated macro that
+;; itself uses a real ellipsis. the escape covers a whole compound
+;; template (not just a bare ...), so it must copy the pattern variable
+;; and the literal ellipsis through together
+(define-syntax e10b-def-wrap
+  (syntax-rules ()
+    ((_ name wrapper)
+     (define-syntax name
+       (syntax-rules ()
+         ((... (_ args ...)) (... (wrapper (quote tag) args ...))))))))
+(e10b-def-wrap e10b-listw list)
+(equal? '(tag 1 2 3) (e10b-listw 1 2 3))
+
+;; a custom ellipsis declared inside a generated macro is picked up over
+;; the default ...
+(define-syntax e11-def-cl
+  (syntax-rules ()
+    ((_ name)
+     (define-syntax name
+       (syntax-rules ::: () ((_ x :::) (vector x :::)))))))
+(e11-def-cl e11-vec)
+(equal? (vector 1 2 3) (e11-vec 1 2 3))
+
+;; an introduced define-syntax and an introduced define connect to each
+;; other through one expansion, while staying invisible to the outside
+(define-syntax e12-def-doubler
+  (syntax-rules ()
+    ((_ name)
+     (begin
+       (define-syntax dbl (syntax-rules () ((_ x) (* 2 x))))
+       (define (name v) (dbl v))))))
+(e12-def-doubler e12-fdbl)
+(= 42 (e12-fdbl 21))
+
+;; the same macro used inside a body: the introduced define-syntax and
+;; the introduced define both land in a letrec* and must still connect
+(= 42
+   (let ()
+     (e12-def-doubler doubler)
+     (doubler 21)))
+
+;; a macro expanding to (begin (define ...) (expr using it ...))
+;; connects the definition and use through one expansion (body position)
+(define-syntax e13-with-secret-body
+  (syntax-rules () ((_) (begin (define e13-foo 100) (+ e13-foo 200)))))
+(define (e13-body-test) (e13-with-secret-body))
+(= 300 (e13-body-test))
+
+(define (e13-body-sibling)
+  (let ((e13-foo 'sibling-value))
+    (e13-with-secret-body)
+    e13-foo))
+(eq? 'sibling-value (e13-body-sibling))
+
+;; the same shape at top level splices into two top-level forms, and a
+;; later top-level define of the same source name creates a distinct
+;; global rather than redefining the introduced one
+(define-syntax e13-with-secret-top
+  (syntax-rules ()
+    ((_) (begin
+           (define e13-top-foo 100)
+           (= 300 (+ e13-top-foo 200))))))
+(e13-with-secret-top)
+(define e13-top-foo 'unrelated)
+(eq? 'unrelated e13-top-foo)
+
+;; introduced temp does not capture a user local across set! (swap)
+(define-syntax k2-swp
+  (syntax-rules ()
+    ((_ a b) (let ((tmp a))
+               (set! a b)
+               (set! b tmp)))))
+(equal? '(2 1) (let ((tmp 1)
+                     (y 2))
+                 (k2-swp tmp y)
+                 (list tmp y)))
+
+;; referential transparency to a primitive under a local shadow
+(define-syntax k3-pairup
+  (syntax-rules ()
+    ((_ x) (cons x x))))
+(equal? '(7 . 7) (let ((cons (lambda (a b) 'hijacked)))
+                   (k3-pairup 7)))
+
+;; referential transparency to a global procedure under a local shadow
+(define-syntax k4-usehelper
+  (syntax-rules ()
+    ((_ e) (rt-helper e))))
+(= 500 (let ((rt-helper (lambda (x) (- x))))
+         (k4-usehelper 5)))
+
+;; recursive macro, nested ellipsis, dotted/tail patterns, and
+;; non-identifier literals
+(define-syntax k5-let*
+  (syntax-rules ()
+    ((_ ((v e) ...) body)
+     (let ((v e) ...) body))))
+(= 3 (k5-let* ((a 1) (b 2)) (+ a b)))
+(define-syntax k5-flatten2
+  (syntax-rules ()
+    ((_ ((x ...) ...))
+     (quote (x ... ...)))))
+(equal? '(1 2 3 4 5) (k5-flatten2 ((1 2) (3 4 5))))
+
+(define-syntax k5-double-via-aux
+  (syntax-rules ()
+    ((_ "go" x) (* x 2))
+    ((_ x) (k5-double-via-aux "go" x))))
+(= 42 (k5-double-via-aux 21))
+
+;; macro-introduced top-level definitions via begin splicing
+(define-syntax k6-def2
+  (syntax-rules ()
+    ((_ a b v) (begin
+                 (define a v)
+                 (define b v)))))
+(k6-def2 k6-p k6-q 42)
+(= 84 (+ k6-p k6-q))
+
+;; the same begin-spliced defines inside a body: the use-site names are
+;; bound as internal defines (letrec*) and stay referenceable afterward
+(= 84
+   (let ()
+     (k6-def2 p q 42)
+     (+ p q)))
+
+;; referential transparency to lexical variables
+(let ((x 5))
+  (define-syntax foo (syntax-rules ()
+                       ((_) x)))
+  (let ((x 10))
+    (= (foo) 5)))
+
+;; quasiquote inside macro
+(define-syntax qqm (syntax-rules ()
+                     ((_ a) `(x ,a ,@(list a a)))))
+(equal? '(x 5 5 5) (qqm 5))
+
+;; let-syntax shadowing
+(= 2 (let-syntax ((m (syntax-rules () ((_) 1))))
+       (let-syntax ((m (syntax-rules () ((_) 2))))
+         (m))))
+
+;; mix internal define-syntax and define
+(define (mixf)
+  (define-syntax getx (syntax-rules () ((_) x)))
+  (define x 42)
+  (getx))
+(= 42 (mixf))
