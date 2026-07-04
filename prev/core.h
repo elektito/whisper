@@ -147,9 +147,16 @@ enum sym_kind {
     sym_macro,   /* macro transformer (future) */
 };
 
+/* used as a key into the symbols hash table */
 struct symbol_name {
     size_t len;
     char name[];
+};
+
+/* in environment hash tables, a symbol is mapped to this struct */
+struct binding {
+    enum sym_kind kind;
+    value value;
 };
 
 struct symbol {
@@ -216,7 +223,8 @@ struct object {
             value value;
         } box;
         struct {
-            value hash_table; /* FALSE = global sentinel, hash table = local env */
+            /* maps a symbol to a struct binding (kind + value) */
+            struct hash_table *hash_table; /* NULL = global sentinel, hash table = local env */
         } environment;
     };
 };
@@ -327,7 +335,7 @@ extern value make_pair(value car, value cdr);
 extern value reverse_list(value list, value acc);
 extern void  print_stacktrace(void);
 extern const char *find_func_name(funcptr func);
-extern void env_define(value e, value sym, value val);
+extern void env_define(value e, value sym, value val, enum sym_kind kind);
 extern value env_ref(value e, value sym);
 
 extern void init_symbols(void);
@@ -407,6 +415,7 @@ extern value primcall_vector_length(environment env, enum call_flags flags, int 
 extern value primcall_vector_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_void(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_void_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_wrap(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_wrapped_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_wrapped_kind(environment env, enum call_flags flags, int nargs, ...);
