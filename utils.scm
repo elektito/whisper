@@ -90,6 +90,31 @@
        (let* ((name2 val2) ...)
          body1 body2 ...)))))
 
+(define-syntax case-lambda
+  (syntax-rules ()
+    ((case-lambda (params body0 ...) ...)
+     (lambda args
+       (let ((len (length args)))
+         (letrec-syntax
+             ((cl (syntax-rules ::: ()
+                    ((cl)
+                     (error "no matching clause"))
+                    ((cl ((p :::) . body) . rest)
+                     (if (= len (length '(p :::)))
+                         (apply (lambda (p :::)
+                                  . body)
+                                args)
+                         (cl . rest)))
+                    ((cl ((p ::: . tail) . body)
+                         . rest)
+                     (if (>= len (length '(p :::)))
+                         (apply
+                          (lambda (p ::: . tail)
+                            . body)
+                          args)
+                         (cl . rest))))))
+           (cl (params body0 ...) ...)))))))
+
 (define (eqv? x y)
   (eq? x y))
 
@@ -239,16 +264,13 @@
               (%append (reverse (car lists))
                        (apply append (cdr lists)))))))
 
-(define (make-list . args)
-  ;; case-lambda
-  (cond ((= (length args) 1)
-         (make-list (car args) (void)))
-        ((= (length args) 2)
-         (let loop ((n (car args)) (ls '()))
-           (if (zero? n)
-               ls
-               (loop (- n 1) (cons (cadr args) ls)))))
-        (else (error "invalid number of arguments to make-list"))))
+(define make-list
+  (case-lambda
+   ((n) (make-list n (void)))
+   ((n x) (let loop ((n n) (ls '()))
+            (if (zero? n)
+                ls
+                (loop (- n 1) (cons x ls)))))))
 
 (define (any? values)
   (if (null? values)
@@ -466,15 +488,11 @@
             (vector-set! r ridx (vector-ref vector vidx))
             (loop r (+ 1 vidx) (+ 1 ridx)))))))
 
-(define (vector-copy . args)
-  ;; case-lambda
-  (cond ((= (length args) 1)
-         (%vector-copy (car args) 0 (vector-length (car args))))
-        ((= (length args) 2)
-         (%vector-copy (car args) (cadr args) (vector-length (car args))))
-        ((= (length args) 3)
-         (%vector-copy (car args) (cadr args) (caddr args)))
-        (else (error "invalid number of arguments to vector-copy"))))
+(define vector-copy
+  (case-lambda
+   ((v) (%vector-copy v 0 (vector-length v)))
+   ((v start) (%vector-copy v start (vector-length v)))
+   ((v start end) (%vector-copy v start end))))
 
 (define (vector->list vec)
   (let ((result '()))
@@ -499,16 +517,13 @@
     (vector-copy! result 0 v1)
     (vector-copy! result (vector-length v1) v2)))
 
-(define (vector-append . args)
-  ;; case-lambda
-  (cond ((= (length args) 0)
-         #())
-        ((= (length args) 1)
-         (vector-copy (car args)))
-        ((= (length args) 2)
-         (%vector-append (car args) (cadr args)))
-        (else (%vector-append (%vector-append (car args) (cadr args))
-                              (apply vector-append (cddr args))))))
+(define vector-append
+  (case-lambda
+   (() #())
+   ((v) (vector-copy v))
+   ((v1 v2) (%vector-append v1 v2))
+   ((v1 v2 . rest) (%vector-append (%vector-append v1 v2)
+                                   (apply vector-append rest)))))
 
 (define (%vector-copy! to at from start end)
   (let ((n (- end start)))
@@ -519,27 +534,11 @@
             (vector-set! to to-idx (vector-ref from from-idx))
             (loop (+ from-idx 1) (+ to-idx 1)))))))
 
-(define (vector-copy! . args)
-  ;; case-lambda
-  (cond ((= (length args) 3)
-         (let ((to (car args))
-               (at (cadr args))
-               (from (caddr args)))
-           (%vector-copy! to at from 0 (vector-length from))))
-        ((= (length args) 4)
-         (let ((to (list-ref args 0))
-               (at (list-ref args 1))
-               (from (list-ref args 2))
-               (start (list-ref args 3)))
-           (%vector-copy! to at from start (vector-length from))))
-        ((= (length args) 5)
-         (let ((to (list-ref args 0))
-               (at (list-ref args 1))
-               (from (list-ref args 2))
-               (start (list-ref args 3))
-               (end (list-ref args 4)))
-           (%vector-copy! to at from start end)))
-        (else (error "invalid number of arguments to vector-copy!"))))
+(define vector-copy!
+  (case-lambda
+   ((to at from) (%vector-copy! to at from 0 (vector-length from)))
+   ((to at from start) (%vector-copy! to at from start (vector-length from)))
+   ((to at from start end) (%vector-copy! to at from start end))))
 
 (define (%string->vector str start end)
   (let ((n (- end start)))
@@ -552,15 +551,11 @@
             (vector-set! s vidx (string-ref str sidx))
             (loop s (+ vidx 1) (+ sidx 1)))))))
 
-(define (string->vector . args)
-  ;; case-lambda
-  (cond ((= 1 (length args))
-         (%string->vector (car args) 0 (string-length (car args))))
-        ((= 2 (length args))
-         (%string->vector (car args) (cadr args) (string-length (car args))))
-        ((= 3 (length args))
-         (%string->vector (car args) (cadr args) (caddr args)))
-        (else (error "invalid number of arguments for string->vector"))))
+(define string->vector
+  (case-lambda
+   ((str) (%string->vector str 0 (string-length str)))
+   ((str start) (%string->vector str start (string-length str)))
+   ((str start end) (%string->vector str start end))))
 
 (define (%vector->string vector start end)
   (let ((n (- end start)))
@@ -573,15 +568,11 @@
             (string-set! s sidx (vector-ref vector vidx))
             (loop s (+ vidx 1) (+ sidx 1)))))))
 
-(define (vector->string . args)
-  ;; case-lambda
-  (cond ((= 1 (length args))
-         (%vector->string (car args) 0 (vector-length (car args))))
-        ((= 2 (length args))
-         (%vector->string (car args) (cadr args) (vector-length (car args))))
-        ((= 3 (length args))
-         (%vector->string (car args) (cadr args) (caddr args)))
-        (else (error "invalid number of arguments for vector->string"))))
+(define vector->string
+  (case-lambda
+   ((v) (%vector->string v 0 (vector-length v)))
+   ((v start) (%vector->string v start (vector-length v)))
+   ((v start end) (%vector->string v start end))))
 
 (define (%vector-fill! vec fill start end)
   (let loop ((i start))
@@ -591,15 +582,11 @@
           (vector-set! vec i fill)
           (loop (+ i 1))))))
 
-(define (vector-fill! . args)
-  ;; case-lambda
-  (cond ((= 2 (length args))
-         (%vector-fill! (car args) (cadr args) 0 (vector-length (car args))))
-        ((= 3 (length args))
-         (%vector-fill! (car args) (cadr args) (caddr args) (vector-length (car args))))
-        ((= 4 (length args))
-         (%vector-fill! (car args) (cadr args) (caddr args) (cadddr args)))
-        (else (error "invalid number of arguments to vector-fill!"))))
+(define vector-fill!
+  (case-lambda
+   ((v fill) (%vector-fill! v fill 0 (vector-length v)))
+   ((v fill start) (%vector-fill! v fill start (vector-length v)))
+   ((v fill start end) (%vector-fill! v fill start end))))
 
 (define (typeof x)
   (cond ((number? x) 'number)
