@@ -300,11 +300,11 @@
         ((vector? item) (apply append (vector->list (vector-map find-all-seqs item))))
         (else '())))
 
-(define (multiply-seqs item)
+(define (zip-seqs item)
   ;; find all sequences in item
   ;; error if none
   ;; error if not all have the same length
-  ;; perform a cartesian multiplication: (1 [2 3] [a b]) => (1 2 a) (1 3 b)
+  ;; zip the sequences: (1 [2 3] [a b]) => (1 2 a) (1 3 b)
   (let ((seqs (find-all-seqs item)))
     (when (null? seqs)
       (error "no sequences in expanded element"))
@@ -317,21 +317,61 @@
             (reverse result)
             (loop (+ i 1) (cons (index-seqs item i) result)))))))
 
+;; returns the pattern variables of `template` that are bound to a
+;; <sequence> in `store`, by walking `template` and collecting any
+;; symbol or identifier found in `store` whose value is a <sequence>.
+(define (template-seq-vars template store)
+  (cond ((and (symbol-or-identifier? template) (store-has-var store template))
+         (if (sequence? (store-get-var store template)) (list template) '()))
+        ((pair? template)
+         (append (template-seq-vars (car template) store)
+                 (template-seq-vars (cdr template) store)))
+        ((vector? template)
+         (apply append (map (lambda (x) (template-seq-vars x store))
+                             (vector->list template))))
+        (else '())))
+
+;; expand `template` once per repetition of the ellipsis that follows
+;; it. For each repetition i, build a copy of `store` where every
+;; variable this ellipsis iterates over is rebound to its i-th slice,
+;; then recursively expand the (unmodified) template against that sliced
+;; store. slicing before expanding, rather than expanding then searching
+;; the result for sequences to multiply, is what keeps a nested ellipsis
+;; inside `template` from seeing (and consuming) a dimension that
+;; belongs to this outer ellipsis instead.
+(define (expand-ellipsis template store is-ellipsis? rename)
+  (let ((vars (template-seq-vars template store)))
+    (when (null? vars)
+      (error "no sequences in expanded element"))
+    (let ((lengths (map (lambda (v) (sequence-length (store-get-var store v))) vars)))
+      (unless (apply = lengths)
+        (error "sequences do not have the same sizes"))
+      (let ((len (car lengths)))
+        (let loop ((i 0) (result '()))
+          (if (= i len)
+              (reverse result)
+              (let ((sliced (store-copy store)))
+                (for-each (lambda (v)
+                            (store-set-var sliced v (sequence-ref (store-get-var store v) i)))
+                          vars)
+                (loop (+ i 1)
+                      (cons (expand template sliced is-ellipsis? rename) result)))))))))
+
 (define (expand-vector vec store is-ellipsis? rename)
   (let loop ((result #()) (i 0) (veclen (vector-length vec)))
     (if (= i veclen)
         result
         (if (and (< i (- veclen 1))
                  (is-ellipsis? (vector-ref vec (+ i 1))))
-            (let ((expanded (expand (vector-ref vec i) store is-ellipsis? rename)))
-              (let inner ((multiplied (multiply-seqs expanded)) (next (+ i 2)))
-                (if (and (< next (- veclen 1))
-                         (is-ellipsis? (vector-ref vec next)))
-                    (inner (apply append (map multiply-seqs multiplied))
-                           (+ next 1))
-                    (loop (vector-append result (list->vector multiplied))
-                          next
-                          veclen))))
+            (let inner ((multiplied (expand-ellipsis (vector-ref vec i) store is-ellipsis? rename))
+                        (next (+ i 2)))
+              (if (and (< next (- veclen 1))
+                       (is-ellipsis? (vector-ref vec next)))
+                  (inner (apply append (map zip-seqs multiplied))
+                         (+ next 1))
+                  (loop (vector-append result (list->vector multiplied))
+                        next
+                        veclen)))
             (let ((expanded (expand (vector-ref vec i) store is-ellipsis? rename)))
               (loop (vector-append result (vector expanded)) (+ i 1) veclen))))))
 
@@ -346,13 +386,12 @@
                (error "lone ellipsis in template")))
           ((and (pair? (cdr item))
                 (is-ellipsis? (cadr item)))
-           (let ((expanded (expand (car item) store is-ellipsis? rename)))
-             (let inner ((multiplied (multiply-seqs expanded))
-                         (rest (cddr item)))
-               (if (and (pair? rest)
-                        (is-ellipsis? (car rest)))
-                   (inner (apply append (map multiply-seqs multiplied)) (cdr rest))
-                   (loop (append result multiplied) rest)))))
+           (let inner ((multiplied (expand-ellipsis (car item) store is-ellipsis? rename))
+                       (rest (cddr item)))
+             (if (and (pair? rest)
+                      (is-ellipsis? (car rest)))
+                 (inner (apply append (map zip-seqs multiplied)) (cdr rest))
+                 (loop (append result multiplied) rest))))
           (else (let ((expanded (expand (car item) store is-ellipsis? rename)))
                   (loop (append result (list expanded)) (cdr item)))))))
 

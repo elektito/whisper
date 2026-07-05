@@ -1222,6 +1222,68 @@
      (quote (x ... ...)))))
 (equal? '(1 2 3 4 5) (k5-flatten2 ((1 2) (3 4 5))))
 
+;; nested ellipsis where the inner ellipsis is inside its own
+;; parentheses, and there are different inner lengths per outer
+;; repetition. this used to fail to a bug in how nested ellipses were
+;; handled.
+(define-syntax k5-nested-ragged
+  (syntax-rules ()
+    ((_ (tag item ...) ...)
+     (list (list 'tag item ...) ...))))
+(equal? '((a 1 2) (b 3 4 5))
+        (k5-nested-ragged (a 1 2) (b 3 4 5)))
+
+;; same shape as k5-flatten2, but with vector patterns/templates instead
+;; of list ones
+(define-syntax k5-vec-flatten
+  (syntax-rules ()
+    ((_ #(#(x ...) ...))
+     (vector x ... ...))))
+(equal? #(1 2 3 4 5) (k5-vec-flatten #(#(1 2) #(3 4 5))))
+
+;; same shape as k5-nested-ragged, but with vector patterns/templates
+;; instead of list ones
+(define-syntax k5-vec-nested-ragged
+  (syntax-rules ()
+    ((_ #(#(tag item ...) ...))
+     (vector (vector 'tag item ...) ...))))
+(equal? #(#(a 1 2) #(b 3 4 5))
+        (k5-vec-nested-ragged #(#(a 1 2) #(b 3 4 5))))
+
+;; a list of vectors, each vector with its own nested ellipsis: list
+;; and vector nesting combined, ragged inner lengths
+(define-syntax k5-combo-list-of-vecs
+  (syntax-rules ()
+    ((_ #(tag item ...) ...)
+     (list (vector 'tag item ...) ...))))
+(equal? '(#(a 1 2) #(b 3 4 5))
+        (k5-combo-list-of-vecs #(a 1 2) #(b 3 4 5)))
+
+;; the reverse combination: a vector of lists, each list with its own
+;; nested ellipsis
+(define-syntax k5-combo-vec-of-lists
+  (syntax-rules ()
+    ((_ #((tag item ...) ...))
+     (vector (list 'tag item ...) ...))))
+(equal? #((a 1 2) (b 3 4 5))
+        (k5-combo-vec-of-lists #((a 1 2) (b 3 4 5))))
+
+;; three levels of ellipsis, ragged at every level
+(define-syntax k5-depth3-ragged
+  (syntax-rules ()
+    ((_ ((b ...) ...) ...)
+     (list (list (list b ...) ...) ...))))
+(equal? '(((1 2) (3 4 5)) ((6)))
+        (k5-depth3-ragged ((1 2) (3 4 5)) ((6))))
+
+;; four levels of ellipsis, ragged at every level
+(define-syntax k5-depth4-ragged
+  (syntax-rules ()
+    ((_ (((b ...) ...) ...) ...)
+     (list (list (list (list b ...) ...) ...) ...))))
+(equal? '((((1 2) (3)) ((4 5 6))) (((7))))
+        (k5-depth4-ragged (((1 2) (3)) ((4 5 6))) (((7)))))
+
 (define-syntax k5-double-via-aux
   (syntax-rules ()
     ((_ "go" x) (* x 2))
