@@ -388,6 +388,24 @@
                 (car ids)
                 (loop (cdr ids))))))))
 
+;; called on a template-introduced identifier not shadowed by an
+;; enclosing template-introduced binder. registers its placeholder
+;; global binding (create by the rename closure in syntax-rules.scm) so
+;; it is tracked like any other free reference, reusing an existing
+;; global of the same name if there is one.
+(define (resolve-free-template-identifier form env)
+  (let ((binding (identifier-binding form)))
+    (if (not (eq? 'global (binding-kind binding)))
+        form
+        (let* ((global-env (find-global-env env))
+               (existing (get-global global-env 'global (identifier-name form))))
+          (if existing
+              existing
+              (begin
+                (binding-defined?-set! binding #f)
+                (expand-env-add-identifier! global-env form)
+                form))))))
+
 (define (void-identifier env)
   (let ((id (get-global env 'primcall 'void)))
     (or id
@@ -557,7 +575,7 @@
              (let ((b (expand-env-lookup env (identifier-rename form))))
                (if b
                    (make-identifier (identifier-name form) b)
-                   form))
+                   (resolve-free-template-identifier form env)))
              form))
         ((symbol? form)
          (let ((binding (expand-env-lookup env form)))
