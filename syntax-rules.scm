@@ -310,7 +310,7 @@
       (error "no sequences in expanded element"))
     (unless (or (< (length seqs) 2)
                 (apply = (map sequence-length seqs)))
-        (error "sequences do not have the same sizes"))
+      (error "sequences do not have the same sizes"))
     (let ((len (sequence-length (car seqs))))
       (let loop ((i 0) (result '()))
         (if (= i len)
