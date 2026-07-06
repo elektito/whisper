@@ -145,15 +145,11 @@
 (define (zero? x)
   (eq? x 0))
 
-(define (min . args)
-  (if (null? args)
-      (error "not enough arguments to min")
-      (if (null? (cdr args))
-          (car args)
-          (let ((min-rest (apply min (cdr args))))
-            (if (< (car args) min-rest)
-                (car args)
-                min-rest)))))
+(define min
+  (case-lambda
+   ((x) x)
+   ((x y) (if (< x y) x y))
+   ((x y . rest) (apply min (min x y) rest))))
 
 (define (caar x) (car (car x)))
 (define (cadr x) (car (cdr x)))
@@ -316,12 +312,10 @@
           list
           (%member obj (cdr list) compare))))
 
-(define (member . args)
-  (cond ((= 2 (length args))
-         (%member (car args) (cadr args) equal?))
-        ((= 3 (length args))
-         (%member (car args) (cadr args) (caddr args)))
-        (else (error "invalid numbe rof arguments to member"))))
+(define member
+  (case-lambda
+   ((obj list) (%member obj list equal?))
+   ((obj list compare) (%member obj list compare))))
 
 (define (memq obj ls)
   (%member obj ls eq?))
@@ -329,19 +323,15 @@
 (define (memv obj ls)
   (%member obj ls eqv?))
 
-(define (assoc . args)
-  (cond ((= 2 (length args))
-         (apply assoc (append args (list equal?))))
-        ((= 3 (length args))
-         (let ((obj (car args))
-               (alist (cadr args))
-               (compare (caddr args)))
-           (if (null? alist)
-               #f
-               (if (compare obj (caar alist))
-                   (car alist)
-                   (assoc obj (cdr alist) compare)))))
-        (else (error "invalid number of arguments to assoc"))))
+(define assoc
+  (case-lambda
+   ((obj alist) (assoc obj alist equal?))
+   ((obj alist compare)
+    (if (null? alist)
+        #f
+        (if (compare obj (caar alist))
+            (car alist)
+            (assoc obj (cdr alist) compare))))))
 
 (define (assq obj alist)
   (assoc obj alist eq?))
@@ -737,27 +727,20 @@
 (define (make-eq-hash-table)
   (%make-hash-table #f #f))
 
-(define (make-hash-table . args)
-  (let ((nargs (length args)))
-    (cond ((= nargs 0)
-           (%make-hash-table #f #f))
-          ((= nargs 1)
-           (%make-hash-table (car args) #f))
-          ((= nargs 2)
-           (%make-hash-table (car args) (cadr args)))
-          (else (error "make-hash-table accepts 0, 1, or 2 arguments")))))
+(define make-hash-table
+  (case-lambda
+   (() (%make-hash-table #f #f))
+   ((eq-fn) (%make-hash-table eq-fn #f))
+   ((eq-fn hash-fn) (%make-hash-table eq-fn hash-fn))))
 
-(define (alist->hash-table . args)
-  (let ((nargs (length args)))
-    (let ((ht (cond ((= nargs 1)
-                     (%make-hash-table #f #f))
-                    ((= nargs 2)
-                     (%make-hash-table (cadr args) #f))
-                    ((= nargs 3)
-                     (%make-hash-table (cadr args) (caddr args)))
-                    (else (error "alist->hash-table accepts 1, 2, or 3 arguments")))))
-      (let loop ((alist (car args)))
+(define alist->hash-table
+  (case-lambda
+   ((alist) (alist->hash-table alist #f #f))
+   ((alist eq-fn) (alist->hash-table alist eq-fn #f))
+   ((alist eq-fn hash-fn)
+    (let ((ht (%make-hash-table eq-fn hash-fn)))
+      (let loop ((alist alist))
         (unless (null? alist)
           (hash-table-set! ht (caar alist) (cdar alist))
           (loop (cdr alist))))
-      ht)))
+      ht))))
