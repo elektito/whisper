@@ -160,9 +160,7 @@
   (let ((expr (read (current-input-port))))
     (unless (eof-object? expr)
       (let ((result (eval expr env)))
-        ;; TODO replace this with (void? result) when we can use that
-        ;; primcall in the compiler in the next version bump
-        (unless (eq? result (void))
+        (unless (void? result)
           (write (eval expr env))
           (newline)))
       (repl env))))
