@@ -141,7 +141,7 @@
                              ((symbol? x) (expand-env-lookup use-env x))
                              (else #f))))
       (if (and def-binding use-binding)
-          (eq? def-binding use-binding)
+          (binding-denotes-same? def-binding use-binding)
           (cond (def-binding #f)
                 (use-binding #f)
                 (else (let ((lit-name (if (identifier? lit) (identifier-name lit) lit))
@@ -428,7 +428,11 @@
   ;; occurrence shares that key, so is-ellipsis?/is-wildcard? resolve them
   ;; through the env like any other identifier.
   (let* ((custom-ellipsis (and (symbol-or-identifier? (cadr form)) (cadr form)))
-         (ellipsis-aux (new-binding 'aux '...))
+         ;; gensym meaning, not '... because if we used '... under
+         ;; denotation comparison (used for non-lexicals), a '... would
+         ;; mean the same thing as the custom ellipsis, instead of a
+         ;; literal ....
+         (ellipsis-aux (new-binding 'aux (gensym "ellipsis")))
          (def-env (if custom-ellipsis
                       (make-expand-env
                        (list (make-identifier (binder-key custom-ellipsis) ellipsis-aux))
@@ -444,10 +448,10 @@
               (error "no wildcard (_) in definition environment")))
          (is-ellipsis? (lambda (x)
                          (let ((b (resolve-head x def-env)))
-                           (and b (eq? b ellipsis-binding)))))
+                           (and b (binding-denotes-same? b ellipsis-binding)))))
          (is-wildcard? (lambda (x)
                          (let ((b (resolve-head x def-env)))
-                           (and b (eq? b wildcard-binding)))))
+                           (and b (binding-denotes-same? b wildcard-binding)))))
          (literals (if custom-ellipsis (caddr form) (cadr form)))
          (literal-bindings (map (lambda (x) ;; build an alist (symbol . binding-or-#f)
                                   (if (identifier? x)

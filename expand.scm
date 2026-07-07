@@ -37,9 +37,14 @@
 ;;
 ;; A binding object has the following fields:
 ;;  - kind: one of the following symbols: special, aux, primcall,
-;;    global, lexical.
-;;  - meaning: canonical name or  unique name for the identifier
-;;    (depends on kind)
+;;    global, lexical, macro.
+;;  - meaning: depends on kind: the canonical name for special/aux/
+;;    primcall, a transformer record for macro, a gensym for lexical,
+;;    and the binder key (see binder-key) for global. Two non-lexical
+;;    bindings with the same kind and meaning are considered to denote
+;;    the same thing regardless of object identity (see
+;;    binding-denotes-same? / free-identifier=?); lexical is the only
+;;    kind where the binding object's own identity matters.
 ;;  - mutated?: denotes whether the identifier is ever set!'ed. only
 ;;    applies to lexicals.
 ;;  - owner: to be used by codegen
@@ -50,17 +55,26 @@
 ;; How to use the expander
 ;; =======================
 ;;
-;; 1. The compiler creates an expansion environment object with the
-;;    (expand-env) function.
-;; 2. It then adds bindings for all known top-levels: specials,
-;;    auxiliary names, primcalls, and so on.
+;; 1. The compiler creates (or, for the repl, reuses) a runtime
+;;    environment object and seeds it with all known top-level names
+;;    (specials, auxiliary names, primcalls), skipping names already
+;;    bound so a repl session's redefinitions are never overwritten.
+;;    See seed-root-identifiers! in whisper.scm.
+;; 2. It wraps that environment object in a fresh <expand-root-env>,
+;;    pairing it with a fresh <compilation-unit> that buffers this
+;;    compilation's top-level defines and references until the
+;;    compilation either succeeds or fails.
 ;; 3. The compiler reads top-level forms one-by-one. "include"
 ;;    directives are to be handled directly by the compiler. Everything
 ;;    else is passed to the expand-top-level-form function, along with
-;;    the environment object.
+;;    the root env.
 ;; 4. expand-top-level-form returns a list of expanded forms per each
 ;;    form passed to it. This is necessary because the expander removes
 ;;    splicing begin forms.
+;; 5. Once compilation succeeds, commit-defines! writes the unit's
+;;    macro definitions into the environment object so they are visible
+;;    to a later compilation (eval) against the same environment. A
+;;    failed compilation leaves the environment untouched.
 ;;
 ;; Lowering
 ;; ========
@@ -136,7 +150,10 @@
 ;; (m)
 ;; =>
 ;; 42
-;; env is also updated to include top-level m macro
+;; m is also buffered in the compilation unit's defines, and committed
+;; to the environment object once compilation succeeds (see
+;; commit-defines!), so a later compilation against the same environment
+;; (i.e. a later eval) can see it too
 ;;
 ;; (let ()
 ;;   (define-syntax m
@@ -213,12 +230,6 @@
   ;; modifiable even without boxing.
   (mutated? binding-mutated? binding-mutated?-set!)
 
-  ;; whether this binding is defined. this only makes sense for global
-  ;; identifiers which can be used before being defined. this way at the
-  ;; end of compilation we can check all globals and if any is used
-  ;; without ever being defined, we can flag it as an error.
-  (defined? binding-defined? binding-defined?-set!)
-
   ;; not used by the expander but the codegen can store the lambda
   ;; associated with the identifier for its own purposes here
   (owner binding-owner binding-owner-set!))
@@ -229,15 +240,22 @@
 
 (define (new-binding kind meaning)
   (let ((b (make-binding kind meaning)))
-    (binding-defined?-set! b #f)
     (binding-mutated?-set! b #f)
     (binding-owner-set! b #f)
     b))
 
+(define (binding-denotes-same? bx by)
+  (or (eq? bx by)
+      (and (not (eq? 'lexical (binding-kind bx)))
+           (eq? (binding-kind bx) (binding-kind by))
+           (eq? (binding-meaning bx) (binding-meaning by)))))
+
 (define (free-identifier=? x y)
   (let ((bx (identifier-binding x))
         (by (identifier-binding y)))
-    (cond ((and bx by) (eq? bx by))
+    (cond ((and bx by)
+           (or (eq? bx by)
+               (binding-denotes-same? bx by)))
           ((or bx by) #f)
           (else (eq? (identifier-name x)
                      (identifier-name y))))))
@@ -288,8 +306,100 @@
 (define (new-expand-env)
   (make-expand-env '() #f))
 
+;;;;;; compilation unit ;;;;;;
+
+;; per-compilation-unit buffer for top-level defines and references.
+;; nothing here reaches the environment object until commit-defines!
+;; runs after a successful compilation, so a failed unit leaves no trace
+;; behind.
+(define-record-type <compilation-unit>
+  (make-compilation-unit defines refs)
+  compilation-unit?
+
+  ;; mapping name (binder key) to binding record, for defines/declares/
+  ;; define-syntax seen textually earlier in this unit
+  (defines compilation-unit-defines)
+
+  ;; mapping name to ref-info, recorded during expansion for the
+  ;; undefined variable check
+  (refs compilation-unit-refs))
+
+(define (new-compilation-unit)
+  (make-compilation-unit (make-hash-table) (make-hash-table)))
+
+;;;;;; expand root env ;;;;;;
+
+;; the root frame of an expand-env parent chain. pairs the runtime
+;; environment object (the durable half, living as long as the repl
+;; session and shared across evals) with a fresh compilation-unit (the
+;; transient half, holding this compilation's buffered defines and
+;; refs).
+;;
+;; the environment object is never mutated during expansion. its only
+;; writers are commit-defines! (which writes macro entries to the
+;; runtime environment, on successful compilation) and executed code
+;; (for values, via env_define). A transformer's captured def-env may
+;; hold a stale root-env whose unit table no longer reflects later
+;; evals; that is safe only because compilation unit part is not used
+;; for macro expansion.
+(define-record-type <expand-root-env>
+  (make-expand-root-env runtime-env compilation-unit)
+  expand-root-env?
+
+  ;; the runtime environment object
+  (runtime-env expand-root-env-runtime-env)
+
+  ;; this compilation's <compilation-unit>
+  (compilation-unit expand-root-env-compilation-unit))
+
+(define (new-expand-root-env env)
+  (make-expand-root-env env (new-compilation-unit)))
+
+;; write this compilation's macro defines into the runtime environment,
+;; making them persist across evals. call only after a successful
+;; compilation; value entries need no commit since executed code writes
+;; them itself via env_define, and a failed unit's defines are simply
+;; discarded along with the rest of the unit.
+(define (commit-defines! root-env)
+  (let ((env (expand-root-env-runtime-env root-env))
+        (defines (compilation-unit-defines (expand-root-env-compilation-unit root-env))))
+    (hash-table-walk defines
+                      (lambda (name binding)
+                        (when (eq? 'macro (binding-kind binding))
+                          (environment-bind! env name 'macro (binding-meaning binding)))))))
+
+;; fabricate a <binding> from an environment-lookup result. meaning is
+;; the canonical name for special/aux/primcall, the transformer for
+;; macro, and the binder key itself for globals (matching
+;; expand-top-level-define, where meaning = binder key always).
+(define (root-binding-from-entry kind value name)
+  (case kind
+    ((special) (new-binding 'special value))
+    ((aux) (new-binding 'aux value))
+    ((primcall) (new-binding 'primcall value))
+    ((macro) (new-binding 'macro value))
+    ((value) (new-binding 'global name))
+    (else (compile-error "internal error: unknown environment-lookup kind ~s" kind))))
+
+;; resolves a name at the root: first the compilation unit's own defines
+;; (same-compilation-unit visibility, including forward references
+;; within the unit), then the environment object, fabricating a binding
+;; from its (kind . value) pair. #f on a full miss.
+(define (expand-root-env-lookup root-env name)
+  (or (hash-table-ref/default
+       (compilation-unit-defines
+        (expand-root-env-compilation-unit root-env))
+       name #f)
+      (let ((entry (environment-lookup (expand-root-env-runtime-env root-env) name)))
+        (and entry (root-binding-from-entry (car entry) (cdr entry) name)))))
+
 ;; lookup name (which is a symbol) in the given expand environment and
 ;; return a binding object associated with it if found. #f otherwise.
+;; env may also be #f, meaning "no real environment" rather than a
+;; missing parent: qq.scm calls identifier-is-aux/identifier-is-special
+;; with a literal #f env while walking the already-processed qq-token
+;; tree, where a name can never be a real binding, so this must answer
+;; unbound rather than error.
 ;;
 ;; ORDERING CONTRACT: identifiers are scanned front to back and the
 ;; first match wins. expand-env-add-identifier! prepends, so a name
@@ -300,21 +410,25 @@
 ;; identifier list or change the prepend/first-match convention without
 ;; accounting for this.
 (define (expand-env-lookup env name)
-  (if (not env)
-      #f
-      (let loop ((ids (expand-env-identifiers env)))
-        (cond ((null? ids)
-               (expand-env-lookup (expand-env-parent env) name))
-              ((eq? (identifier-name (car ids)) name)
-               (identifier-binding (car ids)))
-              (else (loop (cdr ids)))))))
+  (cond ((not env) #f)
+        ((expand-root-env? env) (expand-root-env-lookup env name))
+        (else
+         (let loop ((ids (expand-env-identifiers env)))
+           (cond ((null? ids)
+                  (expand-env-lookup (expand-env-parent env) name))
+                 ((eq? (identifier-name (car ids)) name)
+                  (identifier-binding (car ids)))
+                 (else (loop (cdr ids))))))))
 
 ;; like expand-env-lookup but only checks the current frame, not its
 ;; parents. used to detect duplicate definitions within a single body,
 ;; where shadowing an outer binding is fine but redefining a name in the
 ;; same body is an error. Same front-to-back, first-match ordering
-;; contract as expand-env-lookup (see there).
+;; contract as expand-env-lookup (see there). lexical frames only; the
+;; compilation unit's defines table is what plays this role at the root.
 (define (expand-env-lookup-local env name)
+  (when (expand-root-env? env)
+    (compile-error "internal error: expand-env-lookup-local called on root env"))
   (let loop ((ids (expand-env-identifiers env)))
     (cond ((null? ids) #f)
           ((eq? (identifier-name (car ids)) name)
@@ -324,21 +438,33 @@
 ;; prepend an identifier to the frame. Prepending (rather than
 ;; appending) is required by the lookup ordering contract: a later
 ;; addition shadows an earlier same-named one because expand-env-lookup
-;; returns the first match. See expand-env-lookup.
+;; returns the first match. See expand-env-lookup. lexical frames only;
+;; top-level define/define-syntax/declare write the compilation unit's
+;; defines table or the environment object directly instead.
 (define (expand-env-add-identifier! env id)
+  (when (expand-root-env? env)
+    (compile-error "internal error: expand-env-add-identifier! called on root env"))
   (expand-env-identifiers-set! env (cons id (expand-env-identifiers env))))
 
-(define (expand-env-get-undefined-globals env)
-  (when (expand-env-parent env)
-    (compile-error "internal error: looking at local environment for globals"))
-  (let loop ((ids (expand-env-identifiers env))
-             (undefined '()))
-    (if (null? ids)
-        undefined
-        (if (and (eq? 'global (binding-kind (identifier-binding (car ids))))
-                 (not (binding-defined? (identifier-binding (car ids)))))
-            (loop (cdr ids) (cons (car ids) undefined))
-            (loop (cdr ids) undefined)))))
+;; the undefined-variable check for one compilation unit. mode is
+;; 'strict (batch) or 'eval. a ref passes if its name is in the unit's
+;; defines, or (eval only) already bound in the live environment from a
+;; prior eval. of what's left: strict flags every one, eval only flags
+;; immediate refs (deferred ones may still resolve at a later eval and
+;; raise "unbound variable" at run time if they don't). returns the
+;; list of offending identifiers. library (-l) builds never call this.
+(define (compilation-unit-undefined-refs unit env mode)
+  (let ((defines (compilation-unit-defines unit))
+        (undefined '()))
+    (hash-table-walk (compilation-unit-refs unit)
+                      (lambda (name entry)
+                        (let ((id (car entry))
+                              (immediate? (cdr entry)))
+                          (unless (or (hash-table-ref/default defines name #f)
+                                      (and (eq? mode 'eval) (environment-lookup env name)))
+                            (when (or (eq? mode 'strict) immediate?)
+                              (set! undefined (cons id undefined)))))))
+    undefined))
 
 
 ;;;;;; helpers ;;;;;;
@@ -366,70 +492,32 @@
         ((symbol? head) (expand-env-lookup env head))
         (else #f)))
 
-;; walks the chain of parents in the given expand-env until it finds the
-;; top-level one with parent set to #f.
+;; walks the chain of parents in the given expand-env until it finds
+;; the <expand-root-env> at the top.
 (define (find-global-env env)
-  (let loop ((env env))
-    (if (expand-env-parent env)
-        (loop (expand-env-parent env))
-        env)))
+  (if (expand-root-env? env)
+      env
+      (find-global-env (expand-env-parent env))))
 
-;; find and return the identifier with the given kind and meaning in the
-;; given global environment (walks the environment parents to find
-;; globals if needed)
-(define (get-global env kind meaning)
-  (let ((env (find-global-env env)))
-    (let loop ((ids (expand-env-identifiers env)))
-      (if (null? ids)
-          #f
-          (let ((binding (identifier-binding (car ids))))
-            (if (and (eq? kind (binding-kind binding))
-                     (eq? meaning (binding-meaning binding)))
-                (car ids)
-                (loop (cdr ids))))))))
-
-;; called on a template-introduced identifier not shadowed by an
-;; enclosing template-introduced binder. registers its placeholder
-;; global binding (create by the rename closure in syntax-rules.scm) so
-;; it is tracked like any other free reference, reusing an existing
-;; global of the same name if there is one.
-(define (resolve-free-template-identifier form env)
-  (let ((binding (identifier-binding form)))
-    (if (not (eq? 'global (binding-kind binding)))
-        form
-        (let* ((global-env (find-global-env env))
-               (existing (get-global global-env 'global (identifier-name form))))
-          (if existing
-              existing
-              (begin
-                (binding-defined?-set! binding #f)
-                (expand-env-add-identifier! global-env form)
-                form))))))
-
-(define (void-identifier env)
-  (let ((id (get-global env 'primcall 'void)))
-    (or id
-        (compile-error "No void primcall in global environment"))))
-
-(define (lambda-identifier env)
-  (let ((id (get-global env 'special 'lambda)))
-    (or id
-        (compile-error "No lambda special in global environment"))))
-
-(define (letrec-identifier env)
-  (let ((id (get-global env 'special 'letrec)))
-    (or id
-        (compile-error "No letrec special in global environment"))))
-
-(define (letrec*-identifier env)
-  (let ((id (get-global env 'special 'letrec*)))
-    (or id
-        (compile-error "No letrec* special in global environment"))))
-
-(define (begin-identifier env)
-  (let ((id (get-global env 'special 'begin)))
-    (or id
-        (compile-error "No begin special in global environment"))))
+;; record that global `id` was referenced, for the undefined-variable
+;; check. refs maps name to (id . immediate?-so-far); immediate? is #t
+;; when the reference occurs directly at the top level (root-env? env),
+;; as opposed to nested inside a lambda/let/etc. Only immediate refs
+;; can be flagged before running anything in eval mode; deferred ones
+;; are legitimate forward references (e.g. a function body calling a
+;; not-yet-defined helper) and are left to raise at run time if still
+;; unresolved when reached. Once #t for a name it stays #t.
+;;
+;; accepted edge: immediate? is root-env? at the reference site, so a
+;; reference inside a bare (let () ...) at the top level counts as
+;; deferred even though it runs immediately, same as one under a real
+;; lambda. Caught at run time instead of statically; not worth
+;; special-casing non-lambda frames for.
+(define (record-global-ref! root-env id immediate?)
+  (let* ((name (identifier-name id))
+         (refs (compilation-unit-refs (expand-root-env-compilation-unit root-env)))
+         (prior (hash-table-ref/default refs name #f)))
+    (hash-table-set! refs name (cons id (or immediate? (and prior (cdr prior)))))))
 
 ;;;;;; expander ;;;;;;
 
@@ -467,11 +555,8 @@
                        (identifier-name (cadr form))))
          (existing (expand-env-lookup env name-sym))
          (binding (or existing
-                      (new-binding 'global name-sym)))
-         (name (make-identifier name-sym binding)))
-    (binding-defined?-set! binding #t)
-    (unless existing
-      (expand-env-add-identifier! env name))))
+                      (new-binding 'global name-sym))))
+    (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) name-sym binding)))
 
 ;; expand the given list form, the head of which is known to be a macro.
 ;; head-binding is the pre-resolved binding of the head of the list,
@@ -493,10 +578,7 @@
 (define (expand-top-level-define head-binding form env)
   (let ((form (validate-and-normalize-define form env)))
     (let* ((name (cadr form))
-           (introduced? (and (identifier? name)
-                             (identifier-rename name)))
            (key (binder-key name))
-           (source-name (binder-source-name name))
            (existing (expand-env-lookup env key))
            ;; only reuse an existing binding if it is already a global,
            ;; that is a forward reference we are now defining. if the
@@ -506,13 +588,9 @@
            (reuse? (and existing (eq? 'global (binding-kind existing))))
            (binding (if reuse?
                         existing
-                        (new-binding 'global (if introduced?
-                                                 (gensym (symbol->string source-name))
-                                                 source-name))))
+                        (new-binding 'global key)))
            (name (make-identifier key binding)))
-      (binding-defined?-set! binding #t)
-      (unless reuse?
-        (expand-env-add-identifier! env name))
+      (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) key binding)
       (let ((define (if (identifier? (car form))
                         (car form)
                         (make-identifier (car form) head-binding)))
@@ -546,19 +624,21 @@
   (if (pair? (cadr form))
       (let ((define (car form))
             (name (caadr form))
-            (lambda (lambda-identifier env))
+            (lambda (identifier 'special 'lambda 'lambda))
             (formals (cdadr form))
             (body (cddr form)))
         `(,define ,name (,lambda ,formals ,@body)))
       (if (= 3 (length form))
           form
-          (append form (list (list (void-identifier env)))))))
+          (append form (list (list (identifier 'primcall 'void 'void)))))))
 
 (define (process-define-syntax form env)
   (let* ((transformer (compile-transformer (caddr form) env))
          (key (binder-key (cadr form)))
-         (name (make-identifier key (new-binding 'macro transformer))))
-    (expand-env-add-identifier! env name)))
+         (binding (new-binding 'macro transformer)))
+    (if (expand-root-env? env)
+        (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) key binding)
+        (expand-env-add-identifier! env (make-identifier key binding)))))
 
 (define (compile-transformer form env)
   (let ((b (resolve-head (car form) env)))
@@ -575,17 +655,23 @@
              (let ((b (expand-env-lookup env (identifier-rename form))))
                (if b
                    (make-identifier (identifier-name form) b)
-                   (resolve-free-template-identifier form env)))
+                   ;; free template identifier: could denote a global
+                   ;; (record it, meaning = source name already denotes
+                   ;; the right thing) or a special/primcall/aux from
+                   ;; the definition environment (e.g. a macro template
+                   ;; referencing if/begin/error), which is already
+                   ;; resolved and must not be tracked as a reference.
+                   (begin
+                     (when (eq? 'global (binding-kind (identifier-binding form)))
+                       (record-global-ref! (find-global-env env) form (expand-root-env? env)))
+                     form)))
              form))
         ((symbol? form)
-         (let ((binding (expand-env-lookup env form)))
-           (if binding
-               (make-identifier form binding)
-               (let* ((binding (new-binding 'global form))
-                      (id (make-identifier form binding)))
-                 (binding-defined?-set! binding #f)
-                 (expand-env-add-identifier! (find-global-env env) id)
-                 id))))
+         (let* ((binding (or (expand-env-lookup env form) (new-binding 'global form)))
+                (id (make-identifier form binding)))
+           (when (eq? 'global (binding-kind binding))
+             (record-global-ref! (find-global-env env) id (expand-root-env? env)))
+           id))
         ((atom? form) form)
         (else ;; pair
          (let* ((head (car form))
@@ -706,9 +792,9 @@
 
   (if (symbol-or-identifier? (cadr form))
       ;; named let
-      (let ((letrec (letrec-identifier env))
+      (let ((letrec (identifier 'special 'letrec 'letrec))
             (name (cadr form))
-            (lambda (lambda-identifier env))
+            (lambda (identifier 'special 'lambda 'lambda))
             (vars (map car (caddr form)))
             (inits (map cadr (caddr form)))
             (body (cdddr form)))
@@ -799,7 +885,7 @@
                                       (compile-transformer (cadr b) def-env)))
               bindings ids)
     (let ((expanded-body (expand-body (cddr form) new-env)))
-      `(,(begin-identifier env)
+      `(,(identifier 'special 'begin 'begin)
         ,@expanded-body))))
 
 (define (expand-let-syntax head-binding form env)
@@ -857,7 +943,7 @@
                 (let ((bindings (map (lambda (x)
                                        (list (car x) (cdr x)))
                                      expanded-defines)))
-                  (list `(,(letrec*-identifier env)
+                  (list `(,(identifier 'special 'letrec* 'letrec*)
                           (,@bindings)
                           ,@(reverse expanded)))))
             (loop (cdr forms)

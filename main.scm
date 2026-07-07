@@ -161,7 +161,7 @@
     (unless (eof-object? expr)
       (let ((result (eval expr env)))
         (unless (void? result)
-          (write (eval expr env))
+          (write result)
           (newline)))
       (repl env))))
 
@@ -173,7 +173,7 @@
     (exit 0))
   (postprocess-cmdline args)
   (let ((port (open-input-file (cmdline-input-file args))))
-    (let ((program (create-program port)))
+    (let ((program (create-program port (make-empty-environment))))
       (if (cmdline-test args)
           (program-is-test-suite-set! program #t))
       (if (cmdline-debug args)

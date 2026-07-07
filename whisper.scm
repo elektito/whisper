@@ -278,8 +278,18 @@
   (debug program-debug program-debug-set!)
   (library-mode program-library-mode program-library-mode-set!))
 
-(define (create-program port)
-  (make-program (make-expand-env *root-identifiers* #f)
+(define (seed-root-identifiers! env)
+  (for-each (lambda (id)
+              (unless (environment-lookup env (identifier-name id))
+                (let ((binding (identifier-binding id)))
+                  (environment-bind! env (identifier-name id)
+                                     (binding-kind binding)
+                                     (binding-meaning binding)))))
+            *root-identifiers*))
+
+(define (create-program port env)
+  (seed-root-identifiers! env)
+  (make-program (new-expand-root-env env)
                 (list port)
                 '() ; funcs
                 0   ; funcnum (function counter)
@@ -1269,19 +1279,28 @@
                        (program-is-main-file program))
               (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
             (loop (read (program-port program))))))
-    (check-for-undefined-vars program)))
+    (check-for-undefined-vars program)
+    (commit-defines! (program-env program))))
+
+;; raises if any of the given identifiers are undefined; shared by
+;; batch and eval's undefined-variable checks.
+(define (raise-if-undefined undefined)
+  (unless (null? undefined)
+    (compile-error "undefined variable~a: ~a"
+                   (if (= 1 (length undefined)) "" "s")
+                   (string-join (map (lambda (id) (symbol->string (identifier-name id))) undefined) ", "))))
 
 (define (check-for-undefined-vars program)
   ;; we don't error out in .so mode, because shared objects are meant to
   ;; be loaded and runtime and might refer to varaibles in an
   ;; environment passed to them.
   (unless (eq? 'so (program-library-mode program))
-    (let* ((env (program-env program))
-           (undefined (expand-env-get-undefined-globals env)))
-      (unless (null? undefined)
-        (compile-error "undefined variable~a: ~a"
-                       (if (= 1 (length undefined)) "" "s")
-                       (string-join (map (lambda (id) (symbol->string (identifier-name id))) undefined) ", "))))))
+    (let ((root-env (program-env program)))
+      (raise-if-undefined
+       (compilation-unit-undefined-refs
+        (expand-root-env-compilation-unit root-env)
+        (expand-root-env-runtime-env root-env)
+        'strict)))))
 
 
 (define (all-archive-flags archives)
@@ -1312,22 +1331,21 @@
 (define (temp-filename)
   (format "/tmp/~a" (hex-encode (urandom 6))))
 
-(define (compile-expr-to-so expr)
-  ;; TODO note that we're creating a new expand env per compilation, so
-  ;; a macro defined in an earlier compilation won't be available. this
-  ;; should be fixed.
+(define (compile-expr-to-so expr env)
   (let* ((c-file (string-append (temp-filename) ".c"))
          (so-file (string-append (temp-filename) ".so"))
-         (program (create-program #f))
+         (program (create-program #f env))
          (func (add-function program #f))
-         (env (program-env program)))
+         (root-env (program-env program)))
     (program-init-func-set! program func)
     (program-library-mode-set! program 'so)
-    (let ((varnum (compile-top-level-form func env expr)))
+    (let ((varnum (compile-top-level-form func root-env expr)))
       (if (negative? varnum)
           (gen-code func 1 "return VOID;\n")
           (gen-code func 1 "return x~a;\n" varnum)))
-    (check-for-undefined-vars program)
+    (raise-if-undefined
+     (compilation-unit-undefined-refs
+      (expand-root-env-compilation-unit root-env) env 'eval))
     (output-program-code program c-file)
     (let ((cc (or (get-environment-variable "CC") "gcc"))
           (core-path (or (get-environment-variable "WHISPER_HOME") ".")))
@@ -1335,10 +1353,11 @@
         (delete-file c-file)
         (unless (zero? ret)
           (error (format "gcc returned non-zero exit code: ~a\n" ret)))))
+    (commit-defines! root-env)
     so-file))
 
 (define (eval expr env)
-  (let ((so (compile-expr-to-so expr)))
+  (let ((so (compile-expr-to-so expr env)))
     (let ((result (run-so so env)))
       (delete-file so)
       result)))
