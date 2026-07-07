@@ -1289,10 +1289,13 @@ void env_define(value e, value sym, value val, enum sym_kind kind) {
         GET_SYMBOL(sym)->kind = kind;
         return;
     }
-    struct binding *binding = malloc(sizeof(struct binding));
+    struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
+    if (binding == SENTINEL) {
+        binding = malloc(sizeof(struct binding));
+        hash_table_set(ht, 0, sym, binding);
+    }
     binding->value = val;
     binding->kind = kind;
-    hash_table_set(ht, 0, sym, binding);
 }
 
 value env_ref(value e, value sym) {
