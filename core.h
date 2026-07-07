@@ -141,10 +141,12 @@ struct string {
 };
 
 enum sym_kind {
-    sym_unbound, /* default (0 from calloc): no binding */
-    sym_special, /* built-in syntax; value = canonical special form symbol */
-    sym_value,   /* runtime value: primcall closure or user-defined variable */
-    sym_macro,   /* macro transformer (future) */
+    sym_unbound,  /* default (0 from calloc): no binding */
+    sym_special,  /* built-in syntax; value = canonical special form symbol */
+    sym_aux,      /* aux keyword, like else, =>, etc. */
+    sym_value,    /* runtime value: primcall closure or user-defined variable */
+    sym_macro,    /* macro transformer (future) */
+    sym_primcall, /* the same as sym_value at run-time, makes a difference at compile-time */
 };
 
 /* used as a key into the symbols hash table */

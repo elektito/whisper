@@ -1306,8 +1306,14 @@ value env_ref(value e, value sym) {
             RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
         case sym_special:
             RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+        case sym_aux:
+            RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
         case sym_value:
             return GET_SYMBOL(sym)->value;
+        case sym_primcall:
+            /* s->value is the canonical primcall name symbol. that
+             * symbol's own 'value is set to a real closure. */
+            return GET_SYMBOL(s->value)->value;
         default:
             RAISE("internal error: unhandled sym_kind case");
         }
@@ -1325,8 +1331,15 @@ value env_ref(value e, value sym) {
         RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
     case sym_special:
         RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+    case sym_aux:
+        RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
     case sym_value:
         return binding->value;
+    case sym_primcall:
+        /* same trick as the sentinel case above: binding->value is the
+         * canonical primcall name symbol, whose own ->value already holds
+         * a real closure from program init. */
+        return GET_SYMBOL(binding->value)->value;
     default:
         RAISE("internal error: unhandled sym_kind case");
     }
