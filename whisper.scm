@@ -1070,11 +1070,11 @@
        (intern (func-program func) (identifier-name form))
        (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n"
                  varnum (mangle-name form)))
-      ((special) (compile-error "invalid use of special: ~a" form))
+      ((special) (compile-error "invalid use of special: ~a" (identifier-name form)))
 
-      ((macro) (compile-error "invalid use of macro name: ~a" form))
+      ((macro) (compile-error "invalid use of macro name: ~a" (identifier-name form)))
 
-      ((aux) (compile-error "invalid use of aux keyword: ~a" form))
+      ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name form)))
 
       (else (error (format "unknown identifier kind: ~a" (binding-kind b)))))
     varnum))
