@@ -438,7 +438,7 @@
 ;; into a list of expanded forms.
 (define (expand-top-level-form form env)
   (if (atom? form)
-      (list form)
+      (list (expand-form form env))
       (let ((head (car form)))
         (if (symbol-or-identifier? head)
             (let ((binding (resolve-head head env)))
