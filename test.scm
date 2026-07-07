@@ -896,24 +896,47 @@
          (= 200 (hash-table-ref ht2 'bar)))))
 
 ;; environments
+;;
+;; environment-lookup returns the raw stored value for every kind,
+;; including 'primcall, whose value is the canonical name symbol rather
+;; than a closure. actually calling a bound primcall requires a read
+;; through env_ref, which has no way to achieve in scheme atm.
 
 (environment? (make-environment))
 (not (environment? 42))
 (not (environment? '()))
 
 (let ((e (make-environment)))
-  (environment-define e 'x 42)
-  (= 42 (environment-ref e 'x)))
+  (environment-bind! e 'x 'value 42)
+  (= 42 (cdr (environment-lookup e 'x))))
 
 (let ((e (make-environment)))
-  (environment-define e 'x 1)
-  (environment-define e 'x 2)
-  (= 2 (environment-ref e 'x)))
+  (environment-bind! e 'x 'value 1)
+  (environment-bind! e 'x 'value 2)
+  (= 2 (cdr (environment-lookup e 'x))))
 
 (let ((e (make-environment)))
-  (environment-define e 'a 10)
-  (environment-define e 'b 20)
-  (= 30 (+ (environment-ref e 'a) (environment-ref e 'b))))
+  (environment-bind! e 'a 'value 10)
+  (environment-bind! e 'b 'value 20)
+  (= 30 (+ (cdr (environment-lookup e 'a)) (cdr (environment-lookup e 'b)))))
+
+(not (environment-lookup (make-environment) 'this-name-is-unbound))
+
+(let ((e (make-empty-environment)))
+  (environment-bind! e 'l 'special 'lambda)
+  (environment-bind! e 'x 'aux 'else)
+  (environment-bind! e 'c 'primcall 'car)
+  (environment-bind! e 'm 'macro '(a transformer))
+  (and (equal? (environment-lookup e 'l) '(special . lambda))
+       (equal? (environment-lookup e 'x) '(aux . else))
+       (equal? (environment-lookup e 'c) '(primcall . car))
+       (equal? (environment-lookup e 'm) '(macro a transformer))))
+
+;; redefining a name as a different kind fully replaces the old entry
+(let ((e (make-empty-environment)))
+  (environment-bind! e 'x 'macro '(a transformer))
+  (environment-bind! e 'x 'value 42)
+  (equal? (environment-lookup e 'x) '(value . 42)))
 
 ;; quoted data containing binding-form-shaped lists must not be
 ;; interpreted as code by the preprocessor

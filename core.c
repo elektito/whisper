@@ -3026,27 +3026,78 @@ value primcall_make_environment(environment env, enum call_flags flags, int narg
     return e;
 }
 
-value primcall_environment_ref(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("environment-ref needs 2 arguments"); }
-    init_args();
-    value e = next_arg();
-    value sym = next_arg();
-    free_args();
-    if (!IS_ENVIRONMENT(e)) { RAISE("environment-ref first argument is not an environment"); }
-    if (!IS_SYMBOL(sym)) { RAISE("environment-ref second argument is not a symbol"); }
-    return env_ref(e, sym);
+value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { RAISE("make-empty-environment takes no arguments"); }
+    struct object *obj = alloc_object();
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = malloc(sizeof(struct hash_table));
+    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
+    return OBJECT(obj);
 }
 
-value primcall_environment_define(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("environment-define needs 3 arguments"); }
+/* maps a sym_kind to the Scheme symbol that represents it in the
+ * environment-lookup / environment-bind! contract. sym_unbound has no
+ * symbol: absence is #f from environment-lookup, and environment-bind!
+ * never writes it. */
+static value sym_kind_to_symbol(enum sym_kind kind) {
+    /* extend_global_env with sym_unbound is just interning here */
+    switch (kind) {
+    case sym_value:    return extend_global_env("value", 5, sym_unbound);
+    case sym_macro:    return extend_global_env("macro", 5, sym_unbound);
+    case sym_special:  return extend_global_env("special", 7, sym_unbound);
+    case sym_aux:      return extend_global_env("aux", 3, sym_unbound);
+    case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
+    default:
+        RAISE("internal error: unhandled sym_kind case");
+    }
+}
+
+/* the reverse of sym_kind_to_symbol */
+static enum sym_kind symbol_to_sym_kind(value sym) {
+    if (sym == extend_global_env("value", 5, sym_unbound))    return sym_value;
+    if (sym == extend_global_env("macro", 5, sym_unbound))    return sym_macro;
+    if (sym == extend_global_env("special", 7, sym_unbound))  return sym_special;
+    if (sym == extend_global_env("aux", 3, sym_unbound))      return sym_aux;
+    if (sym == extend_global_env("primcall", 8, sym_unbound)) return sym_primcall;
+    struct symbol *s = GET_SYMBOL(sym);
+    RAISE("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
+}
+
+value primcall_environment_lookup(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { RAISE("environment-lookup needs 2 arguments"); }
     init_args();
     value e = next_arg();
     value sym = next_arg();
+    free_args();
+
+    if (!IS_ENVIRONMENT(e)) { RAISE("environment-lookup first argument is not an environment"); }
+    if (!IS_SYMBOL(sym)) { RAISE("environment-lookup second argument is not a symbol"); }
+
+    struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == NULL) { RAISE("environment-lookup does not support the global environment"); }
+
+    struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
+    if (binding == SENTINEL || binding->kind == sym_unbound) { return FALSE; }
+
+    return make_pair(sym_kind_to_symbol(binding->kind), binding->value);
+}
+
+value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 4) { RAISE("environment-bind! needs 4 arguments"); }
+    init_args();
+    value e = next_arg();
+    value sym = next_arg();
+    value kind = next_arg();
     value val = next_arg();
     free_args();
-    if (!IS_ENVIRONMENT(e)) { RAISE("environment-define first argument is not an environment"); }
-    if (!IS_SYMBOL(sym)) { RAISE("environment-define second argument is not a symbol"); }
-    env_define(e, sym, val, sym_value);
+    if (!IS_ENVIRONMENT(e)) { RAISE("environment-bind! first argument is not an environment"); }
+    if (!IS_SYMBOL(sym)) { RAISE("environment-bind! second argument is not a symbol"); }
+    if (!IS_SYMBOL(kind)) { RAISE("environment-bind! third argument is not a symbol"); }
+
+    struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
+    if (ht == NULL) { RAISE("environment-bind! does not support the sentinel environment"); }
+
+    env_define(e, sym, val, symbol_to_sym_kind(kind));
     return VOID;
 }
 
