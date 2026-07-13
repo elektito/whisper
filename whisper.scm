@@ -287,9 +287,30 @@
                                      (binding-meaning binding)))))
             *root-identifiers*))
 
-(define (create-program port env)
+(define (find-library lib-name)
+  (if (equal? lib-name '(whisper core))
+      (make-library '()
+                    (map (lambda (id)
+                           ;; we know root identifiers all have
+                           ;; bindings, so we won't check for #f.
+                           (let* ((b (identifier-binding id))
+                                  (kind (binding-kind b))
+                                  (meaning (binding-meaning b)))
+                             (case kind
+                               ((special aux primcall)
+                                (list (identifier-name id) kind meaning))
+                               (else
+                                (compile-error "internal error: unhandled root identifier kind: ~a" kind)))))
+                         *root-identifiers*)
+                    '())
+      #f))
+
+(define (init-find-library)
+  (set! *find-library* find-library))
+
+(define (create-program port env program-mode?)
   (seed-root-identifiers! env)
-  (make-program (new-expand-root-env env)
+  (make-program (new-expand-root-env env program-mode?)
                 (list port)
                 '() ; funcs
                 0   ; funcnum (function counter)
@@ -1334,7 +1355,7 @@
 (define (compile-expr-to-so expr env)
   (let* ((c-file (string-append (temp-filename) ".c"))
          (so-file (string-append (temp-filename) ".so"))
-         (program (create-program #f env))
+         (program (create-program #f env #f))
          (func (add-function program #f))
          (root-env (program-env program)))
     (program-init-func-set! program func)

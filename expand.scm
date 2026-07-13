@@ -54,16 +54,13 @@
 ;;
 ;; How to use the expander
 ;; =======================
-;;
-;; 1. The compiler creates (or, for the repl, reuses) a runtime
-;;    environment object and seeds it with all known top-level names
-;;    (specials, auxiliary names, primcalls), skipping names already
-;;    bound so a repl session's redefinitions are never overwritten.
-;;    See seed-root-identifiers! in whisper.scm.
-;; 2. It wraps that environment object in a fresh <expand-root-env>,
-;;    pairing it with a fresh <compilation-unit> that buffers this
-;;    compilation's top-level defines and references until the
-;;    compilation either succeeds or fails.
+;; 1. The compiler sets the global *find-library* to a function that can
+;;    lookup and return library descriptions.
+;; 2. It then creates an empty runtime environment object, and wraps
+;;    it in a fresh <expand-root-env>, pairing it with a fresh
+;;    <compilation-unit> that buffers this compilation's top-level
+;;    defines and references until the compilation either succeeds or
+;;    fails.
 ;; 3. The compiler reads top-level forms one-by-one. "include"
 ;;    directives are to be handled directly by the compiler. Everything
 ;;    else is passed to the expand-top-level-form function, along with
@@ -164,6 +161,17 @@
 ;; (let ()
 ;;   42)
 ;;
+
+;;;;;; globals to be injected ;;;;;;
+
+;; this must be set to a function that receives a library name and
+;; returns a <library> record.
+(define *find-library*)
+
+;;;;;; private globals ;;;;;;
+
+(define *import-cache* '())
+(define *libs-being-imported* '())
 
 ;;;;;; identifier ;;;;;;
 
@@ -313,7 +321,7 @@
 ;; runs after a successful compilation, so a failed unit leaves no trace
 ;; behind.
 (define-record-type <compilation-unit>
-  (make-compilation-unit defines refs)
+  (make-compilation-unit defines refs program-mode? past-imports? seen-import?)
   compilation-unit?
 
   ;; mapping name (binder key) to binding record, for defines/declares/
@@ -322,10 +330,24 @@
 
   ;; mapping name to ref-info, recorded during expansion for the
   ;; undefined variable check
-  (refs compilation-unit-refs))
+  (refs compilation-unit-refs)
 
-(define (new-compilation-unit)
-  (make-compilation-unit (make-hash-table) (make-hash-table)))
+  ;; whether this compilation unit belongs to a program or not. in a
+  ;; program, at least one import is required at the beginning. this is
+  ;; set to #f for repl compilation units as well as inside libraries
+  ;; where imports are separte from library source.
+  (program-mode? compilation-unit-program-mode?)
+
+  ;; flag to indicate whether we've encountered the first non-import
+  ;; form in this compilation unit or not.
+  (past-imports? compilation-unit-past-imports? compilation-unit-past-imports?-set!)
+
+  ;; flag to indicate whether at least one import form has been
+  ;; processed in this compilation unit.
+  (seen-import? compilation-unit-seen-import? compilation-unit-seen-import?-set!))
+
+(define (new-compilation-unit program-mode?)
+  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f))
 
 ;;;;;; expand root env ;;;;;;
 
@@ -352,8 +374,8 @@
   ;; this compilation's <compilation-unit>
   (compilation-unit expand-root-env-compilation-unit))
 
-(define (new-expand-root-env env)
-  (make-expand-root-env env (new-compilation-unit)))
+(define (new-expand-root-env env program-mode?)
+  (make-expand-root-env env (new-compilation-unit program-mode?)))
 
 ;; write this compilation's macro defines into the runtime environment,
 ;; making them persist across evals. call only after a successful
@@ -519,14 +541,64 @@
          (prior (hash-table-ref/default refs name #f)))
     (hash-table-set! refs name (cons id (or immediate? (and prior (cdr prior)))))))
 
+;;;;;; libraries ;;;;;;
+
+(define-record-type <library>
+  (make-library imports exports macros)
+  library?
+
+  ;; a list of import forms this library depends on
+  (imports library-imports)
+
+  ;; a list of export descriptors that look like this:
+  ;;     (spam value)
+  ;;     (xcar primcall car)
+  ;;     (mac macro)
+  ;;     (kw aux kw)
+  (exports library-exports)
+
+  ;; a list of (macro-name . transformer-source) pairs, for all macros
+  ;; (public or private) in this library
+  (macros library-macros))
+
+(define (library-mangle-name lib-name name)
+  (define (mangle-part part)
+    (cond ((integer? part) (format "i~a" part))
+          ((symbol? part) (let* ((s (symbol->string part))
+                                 (len (string-length s)))
+                            (if (< len 10)
+                                (format "~a~a" len s)
+                                (format "[~a]~a" len s))))
+          (else (compile-error "internal error: invalid library name part: ~s" part))))
+  (string-append (format "##~a-" (length lib-name))
+                 (string-join (map mangle-part lib-name) "-")
+                 "-"
+                 (symbol->string name)))
+
 ;;;;;; expander ;;;;;;
 
 ;; expand a top-level into a _list_ of core forms. The return value is a
 ;; list of forms because a splicing begin is eliminated and is turned
 ;; into a list of expanded forms.
 (define (expand-top-level-form form env)
-  (if (atom? form)
-      (list (expand-form form env))
+  (let* ((cu (expand-root-env-compilation-unit env))
+         (program-mode? (compilation-unit-program-mode? cu))
+         (past-imports? (compilation-unit-past-imports? cu)))
+    (cond
+     ((and (not past-imports?)
+           (pair? form)
+           (eq? (car form) 'import))
+      (process-import form env)
+      (compilation-unit-seen-import?-set! cu #t)
+      '())
+     ((not past-imports?)
+      #;(when (and program-mode? (not (compilation-unit-seen-import? cu)))
+        (compile-error "a program must begin with at least one import"))
+      (compilation-unit-past-imports?-set! cu #t)
+      (expand-top-level-form form env))
+     ((atom? form)
+      (list (expand-form form env)))
+     (else
       (let ((head (car form)))
         (if (symbol-or-identifier? head)
             (let ((binding (resolve-head head env)))
@@ -547,7 +619,171 @@
                      (process-declare form env)
                      '())
                     (else (list (expand-form form env)))))
-            (list (expand-form form env))))))
+            (list (expand-form form env))))))))
+
+(define (process-import form env)
+  (let loop ((import-sets (cdr form)))
+    (unless (null? import-sets)
+      (let loop-alist ((alist (process-import-set (car import-sets))))
+        (unless (null? alist)
+          (let ((name (caar alist))
+                (kind (cadar alist))
+                (value (cddar alist)))
+            (environment-bind! (expand-root-env-runtime-env env)
+                               name
+                               (if (eq? kind 'value) 'alias kind)
+                               value)
+            (loop-alist (cdr alist)))))
+      (loop (cdr import-sets)))))
+
+(define (process-import-set form)
+  (unless (list? form)
+    (compile-error "invalid import-set: ~a" form))
+  (case (car form)
+    ((only) (process-import-set-only form))
+    ((except) (process-import-set-except form))
+    ((prefix) (process-import-set-prefix form))
+    ((rename) (process-import-set-rename form))
+    (else (process-import-set-library form))))
+
+(define (process-import-set-library lib-name)
+  (let loop ((rest lib-name))
+    (if (atom? rest)
+        (unless (null? rest)
+          (compile-error "invalid library name: ~a" lib-name))
+        (if (or (symbol? (car rest)) (integer? (car rest)))
+            (loop (cdr rest))
+            (compile-error "invalid library name: ~a" lib-name))))
+  (import-library lib-name))
+
+(define (process-import-set-only/except form clause-name keep?)
+  (let* ((base-import-set (cadr form))
+         (base-bindings (process-import-set base-import-set))
+         (names (cddr form)))
+    (unless (all? (map symbol? names))
+      (compile-error "not all imported names are symbols: ~a" form))
+    (unless (all? (map (lambda (x)
+                         (assq x base-bindings))
+                       names))
+      (compile-error "not all import-~a names are in the base import-set" clause-name))
+    (filter (lambda (x)
+              (let* ((name (car x))
+                     (kind (cadr x))
+                     (value (cddr x)))
+                (if keep?
+                    (memq name names)
+                    (not (memq name names)))))
+            base-bindings)))
+
+(define (process-import-set-only form)
+  (process-import-set-only/except form "only" #t))
+
+(define (process-import-set-except form)
+  (process-import-set-only/except form "except" #f))
+
+(define (process-import-set-rename form)
+  (unless (>= (length form) 2)
+    (compile-error "invalid 'import rename' clause: ~a" form))
+  (let* ((base-import-set (cadr form))
+         (base-bindings (process-import-set base-import-set))
+         (renames (cddr form))
+         (renames (map (lambda (x)
+                         (unless (and (list? x) (= 2 (length x)))
+                           (compile-error "invalid import rename clause: ~a" x))
+                         (cons (car x) (cadr x)))
+                       renames)))
+    (for-each (lambda (x)
+                (unless (and (symbol? (car x)) (symbol? (cdr x)))
+                  (compile-error "invalid import rename: ~a" (list (car x) (cdr x))))
+                (unless (assq (car x) base-bindings)
+                  (compile-error "rename-from not in base import-set: ~a" (car x))))
+              renames)
+    (map (lambda (x)
+           (let ((rename-entry (assq (car x) renames)))
+             (if rename-entry
+                 (let* ((name (car x))
+                        (kind (cadr x))
+                        (value (cddr x)))
+                   (cons (cdr rename-entry)
+                         (cons kind value)))
+                 x)))
+         base-bindings)))
+
+(define (process-import-set-prefix form)
+  (when (null? (cddr form))
+    (compile-error "no prefix specified for 'import prefix' clause: ~a" form))
+  (let* ((base-import-set (cadr form))
+         (base-bindings (process-import-set base-import-set))
+         (prefix (caddr form)))
+    (unless (symbol? prefix)
+      (compile-error "import prefix is not a symbol: ~a" form))
+    (let ((prefix-str (symbol->string prefix)))
+      (map (lambda (x)
+             (let* ((name (car x))
+                    (kind (cadr x))
+                    (value (cddr x)))
+               (cons (string->symbol (string-append prefix-str (symbol->string name)))
+                     (cons kind value))))
+           base-bindings))))
+
+;; for a given library name:
+;;  - find the library description using the injected *find-library*
+;;  - if the library has already been loaded, return its cached alist.
+;;  - recursively load the dependencies first, making sure that there
+;;    are no circular dependencies.
+;;  - create an expand-root-env for the library
+;;  - compile all library macros in the env
+;;  - finally return an alist in which is item is in the form
+;;    (exported-name . (kind . value)) where value is a transformer for
+;;    macros, library mangled name for normal values and the canonical
+;;    form for specials, aux keywords, and primcalls.
+(define (import-library lib-name)
+  (define (object->string obj)
+    (let ((port (open-output-string)))
+      (write obj port)
+      (get-output-string port)))
+  (let ((desc (assoc lib-name *import-cache*)))
+    (if desc
+        (cdr desc)
+        (begin
+          (when (member lib-name *libs-being-imported*)
+            (compile-error "circular dependencies: ~a -> ~a"
+                           (string-join (map object->string (reverse *libs-being-imported*)) " -> ")
+                           lib-name))
+          (set! *libs-being-imported* (cons lib-name *libs-being-imported*))
+          (let ((lib (*find-library* lib-name))
+                (lib-env (new-expand-root-env (make-empty-environment) #f)))
+            (unless lib
+              (compile-error "could not find library: ~a" lib-name))
+            (let loop ((imports (library-imports lib)))
+              (unless (null? imports)
+                (process-import (car imports) lib-env)
+                (loop (cdr imports))))
+            (let* ((macs (compile-lib-macros lib lib-env))
+                   (results (map (lambda (x)
+                                   (let* ((name (car x))
+                                          (kind (cadr x))
+                                          (value (case kind
+                                                   ((primcall special aux) (caddr x))
+                                                   ((macro) (cdr (assq name macs)))
+                                                   ((value) (library-mangle-name lib-name name))
+                                                   (else (compile-error "unknown library export type: ~a" kind)))))
+                                     (cons name (cons kind value))))
+                                 (library-exports lib))))
+              (set! *libs-being-imported* (cdr *libs-being-imported*))
+              (set! *import-cache* (cons (cons lib-name results) *import-cache*))
+              results))))))
+
+;; receives a library description as returned by *find-library*, and
+;; returns an alist with elements in the form (<macro-name> . <transformer>).
+(define (compile-lib-macros lib env)
+  (let loop ((macs (library-macros lib))
+             (results '()))
+    (if (null? macs)
+        results
+        (let ((name (cadar macs))
+              (transformer (process-define-syntax (car macs) env)))
+          (loop (cdr macs) (cons (cons name transformer) results))))))
 
 (define (process-declare form env)
   (let* ((name-sym (if (symbol? (cadr form))
@@ -638,7 +874,8 @@
          (binding (new-binding 'macro transformer)))
     (if (expand-root-env? env)
         (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) key binding)
-        (expand-env-add-identifier! env (make-identifier key binding)))))
+        (expand-env-add-identifier! env (make-identifier key binding)))
+    transformer))
 
 (define (compile-transformer form env)
   (let ((b (resolve-head (car form) env)))

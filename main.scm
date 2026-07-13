@@ -1,3 +1,5 @@
+#;(import (whisper core))
+
 (include "whisper.scm")
 
 (define (build-compile-cmd-from-args cc own-cflags args)
@@ -168,12 +170,13 @@
 ;;;;;; main ;;;;;;
 
 (let ((args (parse-command-line-args)))
+  (init-find-library)
   (when (not (cmdline-input-file args))
     (repl (make-environment))
     (exit 0))
   (postprocess-cmdline args)
   (let ((port (open-input-file (cmdline-input-file args))))
-    (let ((program (create-program port (make-empty-environment))))
+    (let ((program (create-program port (make-empty-environment) #t)))
       (if (cmdline-test args)
           (program-is-test-suite-set! program #t))
       (if (cmdline-debug args)

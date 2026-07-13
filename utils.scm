@@ -305,6 +305,12 @@
         (apply proc (mapcar car arg-lists))
         (loop (mapcar cdr arg-lists))))))
 
+(define (filter pred ls)
+  (let loop ((ls ls) (acc '()))
+    (cond ((null? ls) (reverse acc))
+          ((pred (car ls)) (loop (cdr ls) (cons (car ls) acc)))
+          (else (loop (cdr ls) acc)))))
+
 (define (%member obj list compare)
   (if (null? list)
       #f
@@ -399,6 +405,10 @@
 (define (char-lower-case? ch)
   (and (char>=? ch #\a)
        (char<=? ch #\z)))
+
+(define (integer? n)
+  ;; TODO we need to change this if/when we have other kinds of numbers
+  (number? n))
 
 (define (positive? n)
   (> n 0))
