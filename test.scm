@@ -1,3 +1,5 @@
+(import (whisper core))
+
 (include "utils.scm")
 (include "format.scm")
 

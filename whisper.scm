@@ -278,15 +278,6 @@
   (debug program-debug program-debug-set!)
   (library-mode program-library-mode program-library-mode-set!))
 
-(define (seed-root-identifiers! env)
-  (for-each (lambda (id)
-              (unless (environment-lookup env (identifier-name id))
-                (let ((binding (identifier-binding id)))
-                  (environment-bind! env (identifier-name id)
-                                     (binding-kind binding)
-                                     (binding-meaning binding)))))
-            *root-identifiers*))
-
 (define (find-library lib-name)
   (if (equal? lib-name '(whisper core))
       (make-library '()
@@ -309,7 +300,6 @@
   (set! *find-library* find-library))
 
 (define (create-program port env program-mode?)
-  (seed-root-identifiers! env)
   (make-program (new-expand-root-env env program-mode?)
                 (list port)
                 '() ; funcs

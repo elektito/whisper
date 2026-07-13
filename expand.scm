@@ -592,7 +592,7 @@
       (compilation-unit-seen-import?-set! cu #t)
       '())
      ((not past-imports?)
-      #;(when (and program-mode? (not (compilation-unit-seen-import? cu)))
+      (when (and program-mode? (not (compilation-unit-seen-import? cu)))
         (compile-error "a program must begin with at least one import"))
       (compilation-unit-past-imports?-set! cu #t)
       (expand-top-level-form form env))
