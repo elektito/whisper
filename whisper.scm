@@ -265,7 +265,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program env ports funcs funcnum interned-symbols init-func is-test-suite test-counter debug library-mode)
+  (make-program env ports funcs funcnum interned-symbols init-func is-test-suite test-counter debug library-mode libraries)
   program?
   (env program-env program-env-set!)
   (ports program-ports program-ports-set!)
@@ -276,11 +276,16 @@
   (is-test-suite program-is-test-suite program-is-test-suite-set!)
   (test-counter program-test-counter program-test-counter-set!)
   (debug program-debug program-debug-set!)
-  (library-mode program-library-mode program-library-mode-set!))
+  (library-mode program-library-mode program-library-mode-set!)
+
+  ;; in library mode (-l), one <library> record per define-library form
+  ;; compiled so far, in reverse source order.
+  (libraries program-libraries program-libraries-set!))
 
 (define (find-library lib-name)
   (if (equal? lib-name '(whisper core))
-      (make-library '()
+      (make-library lib-name
+                    '()
                     (map (lambda (id)
                            ;; we know root identifiers all have
                            ;; bindings, so we won't check for #f.
@@ -310,6 +315,7 @@
                 0   ; test counter
                 #f  ; debug instrumentation
                 #f  ; library mode
+                '() ; libraries
                 ))
 
 (define (program-port program)
@@ -400,39 +406,40 @@
     (gen-register-globals program port)
     (newline port)
     (gen-func-bodies program port)
-    (let ((lib-mode (program-library-mode program)))
-      (cond
-        ((eq? lib-mode 'so)
-         (display "value whisper_main(value env) {\n" port)
-         (display "    global_env = env;\n" port)
-         (display "    register_globals();\n" port)
-         (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
-         (display "}\n" port))
-        ((eq? lib-mode 'static)
-         (display "static value _lib_init(value env) {\n" port)
-         (display "    global_env = env;\n" port)
-         (display "    register_globals();\n" port)
-         (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
-         (display "}\n\n" port)
-         (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
-         (display "STATIC_LIB_CONSTRUCTOR(_lib_ctor) {\n" port)
-         (display "    register_static_lib(&_lib_node);\n" port)
-         (display "}\n" port))
-        (else
-         (display "__attribute__((no_sanitize(\"address\")))\n" port)
-         (display "int main(int argc, const char *argv[]) {\n" port)
-         (display "    uint64_t ss;\n" port)
-         (display "    stack_start = &ss;\n" port)
-         (display "    init_memory();\n" port)
-         (display "    init_symbols();\n" port)
-         (display "    global_env = make_global_env();\n" port)
-         (display "    register_globals();\n" port)
-         (display "    init_ports();\n" port)
-         (display "    run_static_libs(global_env);\n" port)
-         (display "    cmdline_argc = argc;\n" port)
-         (display "    cmdline_argv = argv;\n" port)
-         (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
-         (display "}\n" port))))
+    (if (program-library-mode program)
+        (begin
+          (display "#ifdef SO_MODE\n" port)
+          (display "value whisper_main(value env) {\n" port)
+          (display "    global_env = env;\n" port)
+          (display "    register_globals();\n" port)
+          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+          (display "}\n" port)
+          (display "#else\n" port)
+          (display "static value _lib_init(value env) {\n" port)
+          (display "    global_env = env;\n" port)
+          (display "    register_globals();\n" port)
+          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+          (display "}\n\n" port)
+          (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
+          (display "STATIC_LIB_CONSTRUCTOR(_lib_ctor) {\n" port)
+          (display "    register_static_lib(&_lib_node);\n" port)
+          (display "}\n" port)
+          (display "#endif\n" port))
+        (begin
+          (display "__attribute__((no_sanitize(\"address\")))\n" port)
+          (display "int main(int argc, const char *argv[]) {\n" port)
+          (display "    uint64_t ss;\n" port)
+          (display "    stack_start = &ss;\n" port)
+          (display "    init_memory();\n" port)
+          (display "    init_symbols();\n" port)
+          (display "    global_env = make_global_env();\n" port)
+          (display "    register_globals();\n" port)
+          (display "    init_ports();\n" port)
+          (display "    run_static_libs(global_env);\n" port)
+          (display "    cmdline_argc = argc;\n" port)
+          (display "    cmdline_argv = argv;\n" port)
+          (format port "    ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+          (display "}\n" port)))
     (close-port port)))
 
 (define-record-type <function>
@@ -1271,9 +1278,17 @@
           (loop (cdr forms) (compile-form func 1 (car forms)))))))
 
 (define (compile-program program)
-  (let ((func (add-function program #f))
-        (env (program-env program)))
+  (let ((func (add-function program #f)))
     (program-init-func-set! program func)
+    (if (eq? 'library (program-library-mode program))
+        (compile-library program)
+        (compile-executable program))
+    (check-for-undefined-vars program)
+    (commit-defines! (program-env program))))
+
+(define (compile-executable program)
+  (let ((func (program-init-func program))
+        (env (program-env program)))
     (let loop ((form (read (program-port program))))
       (if (eof-object? form)
           (if (= (length (program-ports program)) 1)
@@ -1289,9 +1304,154 @@
                        (program-is-test-suite program)
                        (program-is-main-file program))
               (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
-            (loop (read (program-port program))))))
-    (check-for-undefined-vars program)
-    (commit-defines! (program-env program))))
+            (loop (read (program-port program))))))))
+
+(define (compile-library program)
+  (let loop ((form (read (program-port program))))
+    (unless (eof-object? form)
+      (unless (and (pair? form) (eq? (car form) 'define-library))
+        (compile-error "a library file must contain only define-library forms"))
+      (compile-library-definition form program)
+      (loop (read (program-port program))))))
+
+(define (read-all-forms path)
+  (let ((port (open-input-file path)))
+    (let loop ((form (read port)) (forms '()))
+      (if (eof-object? form)
+          (begin (close-port port) (reverse forms))
+          (loop (read port) (cons form forms))))))
+
+;; compiles each top-level form in lib-env; returns macros with any
+;; define-syntax form's raw source appended, since the manifest needs
+;; it.
+(define (compile-forms-and-gather-macros func lib-env forms)
+  (let loop ((macros '()) (forms forms))
+    (if (null? forms)
+        macros
+        (let* ((form (car forms))
+               (head (and (pair? form) (resolve-head (car form) lib-env))))
+          (compile-top-level-form func lib-env form)
+          (loop (if (and head (binding-is-special head 'define-syntax))
+                    (cons form macros)
+                    macros)
+                (cdr forms))))))
+
+;; parses one export spec into (local-name . export-name); a bare symbol
+;; exports itself, (rename local export) exports under a different name.
+(define (parse-export-spec spec)
+  (cond ((symbol? spec) (cons spec spec))
+        ((and (pair? spec) (eq? (car spec) 'rename) (= (length spec) 3))
+         (cons (cadr spec) (caddr spec)))
+        (else (compile-error "invalid export spec: ~a" spec))))
+
+;; compiles one (define-library <name> <declaration> ...) form against
+;; its own fresh <expand-root-env>, then resolves its exports and
+;; appends a <library> record to the program.
+(define (compile-library-definition form program)
+  (let* ((lib-name (cadr form))
+         (func (program-init-func program))
+         (lib-env (new-expand-root-env (make-empty-environment) #f))
+         (cu (expand-root-env-compilation-unit lib-env)))
+    (compilation-unit-library-name-set! cu lib-name)
+    (let loop ((decls (cddr form))
+               (imports '())
+               (export-names '())
+               (macros '()))
+      (if (null? decls)
+          (begin
+            (raise-if-undefined
+             (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
+            (let ((exports (map (lambda (spec)
+                                  (resolve-library-export lib-env (car spec) (cdr spec)))
+                                export-names)))
+              (program-libraries-set!
+               program
+               (cons (make-library lib-name (reverse imports) exports (reverse macros))
+                     (program-libraries program)))))
+          (let ((decl (car decls)))
+            (unless (and (pair? decl) (symbol? (car decl)))
+              (compile-error "invalid define-library declaration: ~a" decl))
+            (case (car decl)
+              ((import)
+               (process-import decl lib-env)
+               (loop (cdr decls) (cons decl imports) export-names macros))
+              ((export)
+               (loop (cdr decls) imports
+                     (append export-names (map parse-export-spec (cdr decl))) macros))
+              ((begin)
+               (loop (cdr decls) imports export-names
+                     (append (compile-forms-and-gather-macros func lib-env (cdr decl))
+                             macros)))
+              ((include)
+               (loop (cdr decls) imports export-names
+                     (append (compile-forms-and-gather-macros
+                              func lib-env (apply append (map read-all-forms (cdr decl))))
+                             macros)))
+              ((include-library-declarations)
+               (loop (append (apply append (map read-all-forms (cdr decl)))
+                             (cdr decls))
+                     imports export-names macros))
+              ((include-ci)
+               (compile-error "include-ci is not yet supported in define-library"))
+              ((cond-expand)
+               (compile-error "cond-expand is not yet supported in define-library"))
+              (else
+               (compile-error "unknown define-library declaration: ~a" (car decl)))))))))
+
+;; classifies local-name as own (a defines-table hit) or inherited
+;; (falls through to the library's imports), and returns its export
+;; descriptor under export-name. own values/macros need no meaning
+;; recorded: a value's is recomputed by mangling, a macro's transformer
+;; is rebuilt from the manifest's macros list instead. inherited
+;; primcall/special/aux need no origin tag, since those kinds are
+;; global, not library-scoped.
+;;
+;; TODO: re-exporting an inherited value or macro needs an origin tag
+;; (from <lib> <name>), which needs sym_alias in core.c plus (for
+;; macros) tracking each import's origin through import-set resolution.
+;; Neither is reachable yet: the only importable library, (whisper
+;; core), exports neither kind. So deferred for now.
+(define (resolve-library-export lib-env local-name export-name)
+  (let* ((cu (expand-root-env-compilation-unit lib-env))
+         (own (hash-table-ref/default (compilation-unit-defines cu) local-name #f)))
+    (if own
+        (let ((kind (case (binding-kind own)
+                      ((global) 'value)
+                      ((macro) 'macro)
+                      (else (compile-error "internal error: unexpected own export kind: ~a" (binding-kind own))))))
+          ;; a rename needs the local name too: a consumer mangles by
+          ;; local name, and the manifest's macros list is keyed by it.
+          (if (eq? local-name export-name)
+              (list export-name kind)
+              (list export-name kind local-name)))
+        (let ((entry (environment-lookup (expand-root-env-runtime-env lib-env) local-name)))
+          (unless entry
+            (compile-error "exported name is neither defined nor imported: ~a" local-name))
+          (let ((kind (car entry))
+                (value (cdr entry)))
+            (case kind
+              ((primcall) (list export-name 'primcall value))
+              ((special) (list export-name 'special value))
+              ((aux) (list export-name 'aux value))
+              ((alias)
+               (compile-error "re-exporting an imported value is not supported yet: ~a" local-name))
+              ((macro)
+               (compile-error "re-exporting an imported macro is not supported yet: ~a" local-name))
+              (else (compile-error "internal error: unknown export kind: ~a" kind))))))))
+
+;; serialize this program's compiled libraries into one manifest.
+(define (write-manifest program filename)
+  (let ((port (open-output-file filename)))
+    (write `(manifest
+             ,@(map (lambda (lib)
+                      `(library ,(library-name lib)
+                         (imports ,@(library-imports lib))
+                         (exports ,@(library-exports lib))
+                         (macros ,@(library-macros lib))))
+                    (reverse (program-libraries program))))
+           port)
+    (newline port)
+    (close-port port)))
 
 ;; raises if any of the given identifiers are undefined; shared by
 ;; batch and eval's undefined-variable checks.
@@ -1302,17 +1462,16 @@
                    (string-join (map (lambda (id) (symbol->string (identifier-name id))) undefined) ", "))))
 
 (define (check-for-undefined-vars program)
-  ;; we don't error out in .so mode, because shared objects are meant to
-  ;; be loaded and runtime and might refer to varaibles in an
-  ;; environment passed to them.
-  (unless (eq? 'so (program-library-mode program))
+  ;; only checked for ordinary executables: .so mode may refer to
+  ;; variables in an environment passed to it, and library mode already
+  ;; checks each library's own body in compile-library-definition.
+  (unless (program-library-mode program)
     (let ((root-env (program-env program)))
       (raise-if-undefined
        (compilation-unit-undefined-refs
         (expand-root-env-compilation-unit root-env)
         (expand-root-env-runtime-env root-env)
         'strict)))))
-
 
 (define (all-archive-flags archives)
   (if (null? archives)
@@ -1323,10 +1482,13 @@
   (let ((archive-flags (all-archive-flags archives)))
     (case library-mode
       ((so)
-       (format "~a -I~a ~a -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
-      ((static)
-       (let ((obj (string-append (temp-filename) ".o")))
-         (format "~a -I~a ~a -fPIC -c -o ~a ~a && rm -f ~a && ar rcs ~a ~a" cc core-path cflags obj c-file out-file out-file obj)))
+       (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
+      ((library)
+       (let* ((obj (string-append (temp-filename) ".o"))
+              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a" cc core-path cflags out-file c-file))
+              (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
+              (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
+         (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
       (else
        (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c" cc core-path cflags out-file c-file archive-flags core-path)))))
 

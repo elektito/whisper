@@ -72,10 +72,7 @@
              (cmdline-debug-set! args #t)
              (loop (cdr cl)))
             ((string=? (car cl) "-l")
-             (cmdline-library-mode-set! args 'so)
-             (loop (cdr cl)))
-            ((string=? (car cl) "-L")
-             (cmdline-library-mode-set! args 'static)
+             (cmdline-library-mode-set! args 'library)
              (loop (cdr cl)))
             ((string=? (car cl) "-C")
              (if (null? (cdr cl))
@@ -108,10 +105,12 @@
                         (loop (cdr cl)))))))))
 
 (define (postprocess-cmdline args)
-  (if (and (cmdline-just-compile args) (cmdline-run args))
-      (command-line-error "-r and -c are mutually exclusive"))
-  (if (and (cmdline-library-mode args) (cmdline-run args))
-      (command-line-error "-l/-L and -r are mutually exclusive"))
+  (when (and (cmdline-just-compile args) (cmdline-run args))
+    (command-line-error "-r and -c are mutually exclusive"))
+  (when (and (cmdline-library-mode args) (cmdline-run args))
+    (command-line-error "-l and -r are mutually exclusive"))
+  (when (and (cmdline-library-mode args) (cmdline-test args))
+    (command-line-error "-l and -t are mutually exclusive"))
   (if (cmdline-output-file args)
       (if (cmdline-just-compile args)
           (cmdline-c-file-set! args (cmdline-output-file args))
@@ -126,10 +125,9 @@
                 (begin
                   (cmdline-output-file-set! args (temp-filename))
                   (cmdline-delete-executable-set! args #t))
-                (case (cmdline-library-mode args)
-                  ((so)     (cmdline-output-file-set! args "b.so"))
-                  ((static) (cmdline-output-file-set! args "b.a"))
-                  (else     (cmdline-output-file-set! args "b.out")))))))
+                (if (cmdline-library-mode args)
+                    (cmdline-output-file-set! args "b") ;; .so/.a suffixes added by the build step
+                    (cmdline-output-file-set! args "b.out"))))))
   (if (cmdline-just-compile args)
       (cmdline-c-file-set! args (cmdline-output-file args))
       (begin
@@ -137,15 +135,14 @@
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g]
+  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
- -l\tcompile as a shared library (.so)
- -L\tcompile as a static library (.a)
+ -l\tcompile as a library, producing both a .so and a .a
  -C\tpath to core files (core.h and core.c).
- -o\tthe name of the output file. defaults to b.c, b.out, b.so, or b.a
-\tdepending on -c, -l, -L, or neither.
+ -o\tthe name of the output file, or output stem for -l. defaults to
+\tb.c, b.out, or b (producing b.so and b.a), depending on -c, -l, or neither.
  -f\tuse the given options when invoking the C compiler
  -a\tlink a static archive (may be repeated)
  -t\tcompile the program as a test suite
@@ -182,7 +179,7 @@
       (if (cmdline-debug args)
           (program-debug-set! program #t))
       (when (cmdline-library-mode args)
-        (program-library-mode-set! program (cmdline-library-mode args)))
+        (program-library-mode-set! program 'library))
       (compile-program program)
       (output-program-code program (cmdline-c-file args))
       (if (not (cmdline-just-compile args))
@@ -195,7 +192,9 @@
                   (if (not (zero? ret))
                       (begin
                         (format (current-error-port) "program exited with error code: ~a\n" ret)
-                        (exit ret))))))))
+                        (exit ret))
+                      (when (cmdline-library-mode args)
+                        (write-manifest program (string-append (cmdline-executable-file args) ".manifest")))))))))
       (if (cmdline-run args)
           (let ((cmd (format "$(realpath ~a)" (cmdline-executable-file args))))
             (let ((ret (system cmd)))

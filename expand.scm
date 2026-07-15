@@ -321,7 +321,7 @@
 ;; runs after a successful compilation, so a failed unit leaves no trace
 ;; behind.
 (define-record-type <compilation-unit>
-  (make-compilation-unit defines refs program-mode? past-imports? seen-import?)
+  (make-compilation-unit defines refs program-mode? past-imports? seen-import? library-name)
   compilation-unit?
 
   ;; mapping name (binder key) to binding record, for defines/declares/
@@ -344,10 +344,14 @@
 
   ;; flag to indicate whether at least one import form has been
   ;; processed in this compilation unit.
-  (seen-import? compilation-unit-seen-import? compilation-unit-seen-import?-set!))
+  (seen-import? compilation-unit-seen-import? compilation-unit-seen-import?-set!)
+
+  ;; #f outside library compilation, otherwise the name of the library
+  ;; currently being compiled.
+  (library-name compilation-unit-library-name compilation-unit-library-name-set!))
 
 (define (new-compilation-unit program-mode?)
-  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f))
+  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f #f))
 
 ;;;;;; expand root env ;;;;;;
 
@@ -408,12 +412,14 @@
 ;; within the unit), then the environment object, fabricating a binding
 ;; from its (kind . value) pair. #f on a full miss.
 (define (expand-root-env-lookup root-env name)
-  (or (hash-table-ref/default
-       (compilation-unit-defines
-        (expand-root-env-compilation-unit root-env))
-       name #f)
-      (let ((entry (environment-lookup (expand-root-env-runtime-env root-env) name)))
-        (and entry (root-binding-from-entry (car entry) (cdr entry) name)))))
+  (let ((cu (expand-root-env-compilation-unit root-env)))
+    (or (hash-table-ref/default (compilation-unit-defines cu) name #f)
+        (let ((entry (environment-lookup (expand-root-env-runtime-env root-env) name)))
+          (if entry
+              (root-binding-from-entry (car entry) (cdr entry) name)
+              (let ((library-name (compilation-unit-library-name cu)))
+                (and library-name
+                     (new-binding 'global (library-mangle-name library-name name)))))))))
 
 ;; lookup name (which is a symbol) in the given expand environment and
 ;; return a binding object associated with it if found. #f otherwise.
@@ -544,8 +550,11 @@
 ;;;;;; libraries ;;;;;;
 
 (define-record-type <library>
-  (make-library imports exports macros)
+  (make-library name imports exports macros)
   library?
+
+  ;; the library name, e.g. (foo bar)
+  (name library-name)
 
   ;; a list of import forms this library depends on
   (imports library-imports)
@@ -557,8 +566,8 @@
   ;;     (kw aux kw)
   (exports library-exports)
 
-  ;; a list of (macro-name . transformer-source) pairs, for all macros
-  ;; (public or private) in this library
+  ;; a flat list of define-syntax forms, for all macros (public or
+  ;; private) in this library
   (macros library-macros))
 
 (define (library-mangle-name lib-name name)
@@ -570,10 +579,11 @@
                                 (format "~a~a" len s)
                                 (format "[~a]~a" len s))))
           (else (compile-error "internal error: invalid library name part: ~s" part))))
-  (string-append (format "##~a-" (length lib-name))
-                 (string-join (map mangle-part lib-name) "-")
-                 "-"
-                 (symbol->string name)))
+  (string->symbol
+   (string-append (format "##~a-" (length lib-name))
+                  (string-join (map mangle-part lib-name) "-")
+                  "-"
+                  (symbol->string name))))
 
 ;;;;;; expander ;;;;;;
 
@@ -822,9 +832,11 @@
            ;; a top-level define introduces a fresh global that shadows
            ;; it.
            (reuse? (and existing (eq? 'global (binding-kind existing))))
-           (binding (if reuse?
-                        existing
-                        (new-binding 'global key)))
+           (library-name (and (expand-root-env? env)
+                               (compilation-unit-library-name (expand-root-env-compilation-unit env))))
+           (binding (cond (reuse? existing)
+                          (library-name (new-binding 'global (library-mangle-name library-name key)))
+                          (else (new-binding 'global key))))
            (name (make-identifier key binding)))
       (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) key binding)
       (let ((define (if (identifier? (car form))
