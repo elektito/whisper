@@ -1473,24 +1473,18 @@
         (expand-root-env-runtime-env root-env)
         'strict)))))
 
-(define (all-archive-flags archives)
-  (if (null? archives)
-      ""
-      (string-append "-Wl,--whole-archive " (string-join archives " ") " -Wl,--no-whole-archive")))
-
-(define (build-compile-cmd cc library-mode cflags c-file out-file core-path archives)
-  (let ((archive-flags (all-archive-flags archives)))
-    (case library-mode
-      ((so)
-       (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
-      ((library)
-       (let* ((obj (string-append (temp-filename) ".o"))
-              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a" cc core-path cflags out-file c-file))
-              (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
-              (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
-         (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
-      (else
-       (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c" cc core-path cflags out-file c-file archive-flags core-path)))))
+(define (build-compile-cmd cc library-mode cflags c-file out-file core-path)
+  (case library-mode
+    ((so)
+     (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
+    ((library)
+     (let* ((obj (string-append (temp-filename) ".o"))
+            (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a" cc core-path cflags out-file c-file))
+            (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
+            (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
+       (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
+    (else
+     (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a/core.c" cc core-path cflags out-file c-file core-path))))
 
 (define (hex-encode s)
   (let loop ((i 0) (x ""))
@@ -1522,7 +1516,7 @@
     (output-program-code program c-file)
     (let ((cc (or (get-environment-variable "CC") "gcc"))
           (core-path (or (get-environment-variable "WHISPER_HOME") ".")))
-      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path '()))))
+      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path))))
         (delete-file c-file)
         (unless (zero? ret)
           (error (format "gcc returned non-zero exit code: ~a\n" ret)))))

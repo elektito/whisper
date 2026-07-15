@@ -8,13 +8,12 @@
                      (format "~a ~a" own-cflags (cmdline-cflags args))
                      (cmdline-c-file args)
                      (cmdline-executable-file args)
-                     (cmdline-core-path args)
-                     (cmdline-archives args)))
+                     (cmdline-core-path args)))
 
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path archives)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode core-path)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -27,8 +26,7 @@
   (debug cmdline-debug cmdline-debug-set!)
   (cflags cmdline-cflags cmdline-cflags-set!)
   (library-mode cmdline-library-mode cmdline-library-mode-set!)
-  (core-path cmdline-core-path cmdline-core-path-set!)
-  (archives cmdline-archives cmdline-archives-set!))
+  (core-path cmdline-core-path cmdline-core-path-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
@@ -43,7 +41,6 @@
                 ""  ; cflags
                 #f  ; library mode
                 "." ; core path
-                '() ; archives
                 ))
 
 (define (command-line-error fmt . args)
@@ -79,12 +76,6 @@
                  (command-line-error "missing argument to -C")
                  (begin
                    (cmdline-core-path-set! args (cadr cl))
-                   (loop (cddr cl)))))
-            ((string=? (car cl) "-a")
-             (if (null? (cdr cl))
-                 (command-line-error "missing argument to -a")
-                 (begin
-                   (cmdline-archives-set! args (cons (cadr cl) (cmdline-archives args)))
                    (loop (cddr cl)))))
             ((string=? (car cl) "-f")
              (if (null? (cdr cl))
@@ -135,7 +126,7 @@
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-C core-path] [-o output-file] [-f cflags] [-a archive] [-g]
+  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-C core-path] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
@@ -144,7 +135,6 @@
  -o\tthe name of the output file, or output stem for -l. defaults to
 \tb.c, b.out, or b (producing b.so and b.a), depending on -c, -l, or neither.
  -f\tuse the given options when invoking the C compiler
- -a\tlink a static archive (may be repeated)
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
  if no input file is given, a repl is started.
