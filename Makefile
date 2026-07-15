@@ -2,23 +2,23 @@ CFLAGS ?=
 
 SRC_FILES = whisper.scm utils.scm format.scm qq.scm expand.scm syntax-rules.scm main.scm
 
-all: whisper-v15
+all: whisper-v16
 
 stage0: $(SRC_FILES)
-	./whisper-v14 main.scm -o stage0 -C prev
+	./whisper-v15 main.scm -o stage0 -C prev
 
 stage1: stage0 core.h core.c $(SRC_FILES)
 	./stage0 main.scm -o stage1 -f "-Wl,-s $(CFLAGS)"
 
-whisper-v15: stage1 core.h core.c $(SRC_FILES)
-	./stage1 main.scm -o whisper-v15 -f "-Wl,-s $(CFLAGS)"
-	diff stage1 whisper-v15
+whisper-v16: stage1 core.h core.c $(SRC_FILES)
+	./stage1 main.scm -o whisper-v16 -f "-Wl,-s $(CFLAGS)"
+	diff stage1 whisper-v16
 
-test: whisper-v15
-	./whisper-v15 test.scm -t -r
+test: whisper-v16
+	./whisper-v16 test.scm -t -r
 
-matrix: whisper-v15
-	./whisper-v15 main.scm -c -o /tmp/b.c
+matrix: whisper-v16
+	./whisper-v16 main.scm -c -o /tmp/b.c
 	@for o in 0 1 2 3; do \
 		echo "--- O$$o ---"; \
 		gcc -O$$o -Wl,-s -I. -o /tmp/b.$$o /tmp/b.c core.c \
@@ -26,10 +26,10 @@ matrix: whisper-v15
 		&& /tmp/b.$$o test.scm -t -r || exit 1; \
 	done
 
-libwhisper.a: whisper-v15 $(SRC_FILES) core.h core.c
-	./whisper-v15 whisper.scm -L -o libwhisper.a
+libwhisper.a: whisper-v16 $(SRC_FILES) core.h core.c
+	./whisper-v16 whisper.scm -L -o libwhisper.a
 
 clean:
-	rm -f whisper-v15 stage0 stage1 libwhisper.a
+	rm -f whisper-v16 stage0 stage1 libwhisper.a
 
 .PHONY: all clean test matrix

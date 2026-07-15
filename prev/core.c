@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <setjmp.h>
 
@@ -3136,4 +3137,30 @@ value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
      * functionality inside it afterwards */
 
     return result;
+}
+
+value primcall_list_directory(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("list-directory needs a single argument"); }
+    init_args();
+    value path = next_arg();
+    free_args();
+
+    if (!IS_STRING(path)) { RAISE("list-directory argument is not a string"); }
+
+    char *pathz = strz(path);
+    DIR *dir = opendir(pathz);
+    free(pathz);
+    if (!dir) { return FALSE; }
+
+    value entries = NIL;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) { continue; }
+        value s = make_string(ent->d_name, strlen(ent->d_name));
+        entries = make_pair(s, entries);
+    }
+
+    closedir(dir);
+
+    return reverse_list(entries, NIL);
 }
