@@ -298,7 +298,8 @@
                                (else
                                 (compile-error "internal error: unhandled root identifier kind: ~a" kind)))))
                          *root-identifiers*)
-                    '())
+                    '()
+                    #f)
       #f))
 
 (define (init-find-library)
@@ -1368,7 +1369,7 @@
                                 export-names)))
               (program-libraries-set!
                program
-               (cons (make-library lib-name (reverse imports) exports (reverse macros))
+               (cons (make-library lib-name (reverse imports) exports (reverse macros) #f)
                      (program-libraries program)))))
           (let ((decl (car decls)))
             (unless (and (pair? decl) (symbol? (car decl)))

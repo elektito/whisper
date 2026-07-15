@@ -550,7 +550,7 @@
 ;;;;;; libraries ;;;;;;
 
 (define-record-type <library>
-  (make-library name imports exports macros)
+  (make-library name imports exports macros code-handle)
   library?
 
   ;; the library name, e.g. (foo bar)
@@ -568,7 +568,11 @@
 
   ;; a flat list of define-syntax forms, for all macros (public or
   ;; private) in this library
-  (macros library-macros))
+  (macros library-macros)
+
+  ;; opaque token the provider understands, or #f when there's no
+  ;; artifact to provide (a builtin library, or a code-free one).
+  (code-handle library-code-handle))
 
 (define (library-mangle-name lib-name name)
   (define (mangle-part part)
