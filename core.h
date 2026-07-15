@@ -147,6 +147,7 @@ enum sym_kind {
     sym_value,    /* runtime value: primcall closure or user-defined variable */
     sym_macro,    /* macro transformer (future) */
     sym_primcall, /* the same as sym_value at run-time, makes a difference at compile-time */
+    sym_alias,    /* for compile-time only; maps an unmangled name to a library mangled name */
 };
 
 /* used as a key into the symbols hash table */

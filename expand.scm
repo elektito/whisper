@@ -405,6 +405,7 @@
     ((primcall) (new-binding 'primcall value))
     ((macro) (new-binding 'macro value))
     ((value) (new-binding 'global name))
+    ((alias) (new-binding 'global value))
     (else (compile-error "internal error: unknown environment-lookup kind ~s" kind))))
 
 ;; resolves a name at the root: first the compilation unit's own defines

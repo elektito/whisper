@@ -1318,6 +1318,8 @@ value env_ref(value e, value sym) {
             /* s->value is the canonical primcall name symbol. that
              * symbol's own 'value is set to a real closure. */
             return GET_SYMBOL(s->value)->value;
+        case sym_alias:
+            return env_ref(e, s->value);
         default:
             RAISE("internal error: unhandled sym_kind case");
         }
@@ -1339,6 +1341,8 @@ value env_ref(value e, value sym) {
         RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
     case sym_value:
         return binding->value;
+    case sym_alias:
+        return env_ref(e, binding->value);
     case sym_primcall:
         /* same trick as the sentinel case above: binding->value is the
          * canonical primcall name symbol, whose own ->value already holds
@@ -3051,6 +3055,7 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
     case sym_special:  return extend_global_env("special", 7, sym_unbound);
     case sym_aux:      return extend_global_env("aux", 3, sym_unbound);
     case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
+    case sym_alias:    return extend_global_env("alias", 5, sym_unbound);
     default:
         RAISE("internal error: unhandled sym_kind case");
     }
@@ -3063,6 +3068,7 @@ static enum sym_kind symbol_to_sym_kind(value sym) {
     if (sym == extend_global_env("special", 7, sym_unbound))  return sym_special;
     if (sym == extend_global_env("aux", 3, sym_unbound))      return sym_aux;
     if (sym == extend_global_env("primcall", 8, sym_unbound)) return sym_primcall;
+    if (sym == extend_global_env("alias", 5, sym_unbound))    return sym_alias;
     struct symbol *s = GET_SYMBOL(sym);
     RAISE("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }
