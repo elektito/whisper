@@ -694,9 +694,7 @@
 (equal? ''(a . b)
         `',(cons 'a 'b))
 
-;; this fails at the moment, because we are inserting symbols like
-;; append, list, etc directly into the code!
-#;(let ((append 10)
+(let ((append 10)
       (list 20)
       (list* 30)
       (cons 40))
