@@ -932,6 +932,14 @@
        (equal? (environment-lookup e 'c) '(primcall . car))
        (equal? (environment-lookup e 'm) '(macro a transformer))))
 
+;; make sure each iteration of a named let gets a fresh variable of its
+;; own
+(equal? '(0 1 2)
+        (let loop ((i 0) (thunks '()))
+          (if (= i 3)
+              (map (lambda (t) (t)) (reverse thunks))
+              (loop (+ i 1) (cons (lambda () i) thunks)))))
+
 ;; redefining a name as a different kind fully replaces the old entry
 (let ((e (make-empty-environment)))
   (environment-bind! e 'x 'macro '(a transformer))
