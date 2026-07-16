@@ -102,23 +102,17 @@
     (command-line-error "-l and -r are mutually exclusive"))
   (when (and (cmdline-library-mode args) (cmdline-test args))
     (command-line-error "-l and -t are mutually exclusive"))
-  (if (cmdline-output-file args)
-      (if (cmdline-just-compile args)
-          (cmdline-c-file-set! args (cmdline-output-file args))
-          (begin
-            (cmdline-c-file-set! args (string-append (temp-filename) ".c"))
-            (cmdline-executable-file-set! args (cmdline-output-file args))))
-      (begin
-        (cmdline-delete-executable-set! args #t)
-        (if (cmdline-just-compile args)
-            (cmdline-output-file-set! args "b.c")
-            (if (cmdline-run args)
-                (begin
-                  (cmdline-output-file-set! args (temp-filename))
-                  (cmdline-delete-executable-set! args #t))
-                (if (cmdline-library-mode args)
-                    (cmdline-output-file-set! args "b") ;; .so/.a suffixes added by the build step
-                    (cmdline-output-file-set! args "b.out"))))))
+  (unless (cmdline-output-file args)
+    (cmdline-delete-executable-set! args #t)
+    (if (cmdline-just-compile args)
+        (cmdline-output-file-set! args "b.c")
+        (if (cmdline-run args)
+            (begin
+              (cmdline-output-file-set! args (temp-filename))
+              (cmdline-delete-executable-set! args #t))
+            (if (cmdline-library-mode args)
+                (cmdline-output-file-set! args "b") ;; .so/.a suffixes added by the build step
+                (cmdline-output-file-set! args "b.out")))))
   (if (cmdline-just-compile args)
       (cmdline-c-file-set! args (cmdline-output-file args))
       (begin
