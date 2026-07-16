@@ -778,10 +778,18 @@
                    (results (map (lambda (x)
                                    (let* ((name (car x))
                                           (kind (cadr x))
+                                          ;; a renamed own value/macro
+                                          ;; export carries its local
+                                          ;; name as a third element
+                                          ;; (see resolve-library-export);
+                                          ;; that local name, not the
+                                          ;; export name, is what it was
+                                          ;; mangled/keyed under.
+                                          (local-name (if (null? (cddr x)) name (caddr x)))
                                           (value (case kind
                                                    ((primcall special aux) (caddr x))
-                                                   ((macro) (cdr (assq name macs)))
-                                                   ((value) (library-mangle-name lib-name name))
+                                                   ((macro) (cdr (assq local-name macs)))
+                                                   ((value) (library-mangle-name lib-name local-name))
                                                    (else (compile-error "unknown library export type: ~a" kind)))))
                                      (cons name (cons kind value))))
                                  (library-exports lib))))
