@@ -220,7 +220,7 @@
   (make-binding kind meaning)
   binding?
 
-  ;; one of: special, aux, primcall, global, lexical, macro
+  ;; one of: special, aux, primcall, global, lexical, macro, alias
   (kind binding-kind binding-kind-set!)
 
   ;; depends on kind:
@@ -405,7 +405,9 @@
     ((primcall) (new-binding 'primcall value))
     ((macro) (new-binding 'macro value))
     ((value) (new-binding 'global name))
-    ((alias) (new-binding 'global value))
+    ;; kept distinct from global (not reused, not tracked as a possible
+    ;; forward reference), even though codegen treats them the same.
+    ((alias) (new-binding 'alias value))
     (else (compile-error "internal error: unknown environment-lookup kind ~s" kind))))
 
 ;; resolves a name at the root: first the compilation unit's own defines
