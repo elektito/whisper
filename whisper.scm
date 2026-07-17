@@ -282,7 +282,20 @@
   ;; compiled so far, in reverse source order.
   (libraries program-libraries program-libraries-set!))
 
-(define (find-library lib-name)
+;; resolves the library manifest search path from the -L flags
+;; (cmdline-dirs, already in given order) and WHISPER_LIBRARY_PATH. The
+;; default "." is included only when neither source supplied anything, so
+;; either one alone suppresses it.
+(define (resolve-library-search-path cmdline-dirs)
+  (let* ((env-value (get-environment-variable "WHISPER_LIBRARY_PATH"))
+         (env-dirs (if env-value (string-split env-value #\:) '())))
+    (if (and (null? cmdline-dirs) (not env-value))
+        '(".")
+        (append cmdline-dirs env-dirs))))
+
+;; return a library representing (whisper core) if lib-name is (whisper
+;; core), #f otherwise.
+(define (find-library-core lib-name)
   (if (equal? lib-name '(whisper core))
       (make-library lib-name
                     '()
@@ -302,8 +315,82 @@
                     #f)
       #f))
 
-(define (init-find-library)
-  (set! *find-library* find-library))
+(define (manifest-file? filename)
+  (string-suffix? ".manifest" filename))
+
+;; The stem a manifest's paired .so/.a share, e.g. "foo.manifest" -> "foo".
+(define (manifest-stem path)
+  (substring path 0 (- (string-length path) (string-length ".manifest"))))
+
+;; A manifest file holds exactly one (manifest (library ...) ...) form
+;; (see write-manifest); this is its list of (library ...) entries.
+(define (read-manifest-entries path)
+  (let* ((port (open-input-file path))
+         (form (read port)))
+    (close-port port)
+    (cdr form)))
+
+;; Looks up a (keyword ...) clause, e.g. 'imports, inside a
+;; (library name (imports ...) (exports ...) (macros ...)) entry.
+(define (manifest-clause entry keyword)
+  (let ((clause (assq keyword (cddr entry))))
+    (if clause (cdr clause) '())))
+
+(define (parse-library-entry manifest-path entry)
+  (make-library (cadr entry)
+                (manifest-clause entry 'imports)
+                (manifest-clause entry 'exports)
+                (manifest-clause entry 'macros)
+                (manifest-stem manifest-path)))
+
+;; The paths of every *.manifest file directly inside dir, or '() if dir
+;; doesn't exist / can't be opened.
+(define (manifest-paths-in-dir dir)
+  (let ((names (list-directory dir)))
+    (if names
+        (map (lambda (name) (string-append dir "/" name))
+             (filter manifest-file? names))
+        '())))
+
+;; The (library ...) entry named lib-name inside the manifest at path, or
+;; #f if it declares no such library.
+(define (find-entry-in-manifest path lib-name)
+  (let loop ((entries (read-manifest-entries path)))
+    (cond ((null? entries) #f)
+          ((equal? (cadar entries) lib-name) (list path (car entries)))
+          (else (loop (cdr entries))))))
+
+;; Searches the manifests directly inside dir, in listing order, stopping
+;; at the first one declaring lib-name.
+(define (find-library-in-dir dir lib-name)
+  (let loop ((paths (manifest-paths-in-dir dir)))
+    (if (null? paths)
+        #f
+        (or (find-entry-in-manifest (car paths) lib-name)
+            (loop (cdr paths))))))
+
+;; Searches search-dirs, in order, for a manifest declaring lib-name,
+;; stopping at the first hit. This is what makes the earliest directory
+;; (or, within a directory, the earliest manifest) win when more than one
+;; declares the same name: later matches are never even looked at.
+(define (find-library-on-disk search-dirs lib-name)
+  (let loop ((dirs search-dirs))
+    (if (null? dirs)
+        #f
+        (or (find-library-in-dir (car dirs) lib-name)
+            (loop (cdr dirs))))))
+
+;; Builds the find-library closure installed as the epander's
+;; *find-library*, closing over the resolved manifest search path (see
+;; resolve-library-search-path).
+(define (make-find-library search-dirs)
+  (lambda (lib-name)
+    (or (find-library-core lib-name)
+        (let ((hit (find-library-on-disk search-dirs lib-name)))
+          (and hit (parse-library-entry (car hit) (cadr hit)))))))
+
+(define (init-find-library search-dirs)
+  (set! *find-library* (make-find-library search-dirs)))
 
 (define (create-program port env program-mode?)
   (make-program (new-expand-root-env env program-mode?)

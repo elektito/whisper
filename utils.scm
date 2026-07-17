@@ -427,6 +427,18 @@
             (loop (car strs) (cdr strs))
             (loop (string-append result sep (car strs)) (cdr strs))))))
 
+(define (string-split str sep)
+  (if (string=? str "")
+      '()
+      (let ((len (string-length str)))
+        (let loop ((start 0) (i 0) (acc '()))
+          (cond ((= i len)
+                 (reverse (cons (substring str start i) acc)))
+                ((char=? (string-ref str i) sep)
+                 (loop (+ i 1) (+ i 1) (cons (substring str start i) acc)))
+                (else
+                 (loop start (+ i 1) acc)))))))
+
 (define (string-suffix? suffix str)
   (let ((suffix-len (string-length suffix))
         (str-len (string-length str)))
