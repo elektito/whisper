@@ -68,7 +68,13 @@
 ;; 4. expand-top-level-form returns a list of expanded forms per each
 ;;    form passed to it. This is necessary because the expander removes
 ;;    splicing begin forms.
-;; 5. Once compilation succeeds, commit-defines! writes the unit's
+;; 5. The expander never loads or links library code. It only records
+;;    each directly imported library on the compilation unit. After
+;;    expansion, the compiler reads compilation-unit-imports (see also
+;;    libraries-in-dependency-order) and makes the code available in
+;;    whatever way suits it. In whisper that means linking .a files
+;;    for a batch compile, and dlopening .so files for eval.
+;; 6. Once compilation succeeds, commit-defines! writes the unit's
 ;;    macro definitions into the environment object so they are visible
 ;;    to a later compilation (eval) against the same environment. A
 ;;    failed compilation leaves the environment untouched.
@@ -170,7 +176,12 @@
 
 ;;;;;; private globals ;;;;;;
 
+;; loaded libraries, as entries of the form (lib-name lib results) where
+;; lib is the <library> record and results the export alist returned by
+;; import-library. also used to resolve dependencies when a compilation
+;; unit's imports are walked (see libraries-in-dependency-order).
 (define *import-cache* '())
+
 (define *libs-being-imported* '())
 
 ;;;;;; identifier ;;;;;;
@@ -321,7 +332,7 @@
 ;; runs after a successful compilation, so a failed unit leaves no trace
 ;; behind.
 (define-record-type <compilation-unit>
-  (make-compilation-unit defines refs program-mode? past-imports? seen-import? library-name)
+  (make-compilation-unit defines refs program-mode? past-imports? seen-import? library-name imports)
   compilation-unit?
 
   ;; mapping name (binder key) to binding record, for defines/declares/
@@ -348,10 +359,16 @@
 
   ;; #f outside library compilation, otherwise the name of the library
   ;; currently being compiled.
-  (library-name compilation-unit-library-name compilation-unit-library-name-set!))
+  (library-name compilation-unit-library-name compilation-unit-library-name-set!)
+
+  ;; <library> records for the libraries directly imported in this
+  ;; unit, most recently imported first. the expander only records
+  ;; these. the host reads them after expansion to make library code
+  ;; available to its target (see libraries-in-dependency-order).
+  (imports compilation-unit-imports compilation-unit-imports-set!))
 
 (define (new-compilation-unit program-mode?)
-  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f #f))
+  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f #f '()))
 
 ;;;;;; expand root env ;;;;;;
 
@@ -651,7 +668,17 @@
                                (if (eq? kind 'value) 'alias kind)
                                value)
             (loop-alist (cdr alist)))))
+      (record-import! env (import-set-library-name (car import-sets)))
       (loop (cdr import-sets)))))
+
+;; record a directly imported library on env's compilation unit. the
+;; library is in the cache by now, since process-import-set just
+;; imported it.
+(define (record-import! env lib-name)
+  (let ((cu (expand-root-env-compilation-unit env))
+        (lib (import-cache-lookup lib-name)))
+    (unless (memq lib (compilation-unit-imports cu))
+      (compilation-unit-imports-set! cu (cons lib (compilation-unit-imports cu))))))
 
 (define (process-import-set form)
   (unless (list? form)
@@ -743,6 +770,40 @@
                      (cons kind value))))
            base-bindings))))
 
+;; strip only/except/prefix/rename wrappers off an import-set, leaving
+;; the library name.
+(define (import-set-library-name form)
+  (case (car form)
+    ((only except prefix rename) (import-set-library-name (cadr form)))
+    (else form)))
+
+;; return the <library> record cached for the given name, or #f if the
+;; library has not been imported yet.
+(define (import-cache-lookup lib-name)
+  (let ((desc (assoc lib-name *import-cache*)))
+    (and desc (cadr desc))))
+
+;; return the given <library> records plus all their transitive
+;; dependencies, with dependencies before dependents. hosts use this
+;; on a compilation unit's recorded imports to decide load or link
+;; order. dependencies are resolved through the import cache, which
+;; has an entry for every library imported so far.
+(define (libraries-in-dependency-order libs)
+  (let ((seen '())
+        (result '()))
+    (define (visit lib)
+      (unless (member (library-name lib) seen)
+        (set! seen (cons (library-name lib) seen))
+        (for-each (lambda (import-form)
+                    (for-each (lambda (import-set)
+                                (visit (import-cache-lookup
+                                        (import-set-library-name import-set))))
+                              (cdr import-form)))
+                  (library-imports lib))
+        (set! result (cons lib result))))
+    (for-each visit libs)
+    (reverse result)))
+
 ;; for a given library name:
 ;;  - find the library description using the injected *find-library*
 ;;  - if the library has already been loaded, return its cached alist.
@@ -761,7 +822,7 @@
       (get-output-string port)))
   (let ((desc (assoc lib-name *import-cache*)))
     (if desc
-        (cdr desc)
+        (caddr desc)
         (begin
           (when (member lib-name *libs-being-imported*)
             (compile-error "circular dependencies: ~a -> ~a"
@@ -796,7 +857,7 @@
                                      (cons name (cons kind value))))
                                  (library-exports lib))))
               (set! *libs-being-imported* (cdr *libs-being-imported*))
-              (set! *import-cache* (cons (cons lib-name results) *import-cache*))
+              (set! *import-cache* (cons (list lib-name lib results) *import-cache*))
               results))))))
 
 ;; receives a library description as returned by *find-library*, and

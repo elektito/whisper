@@ -1563,18 +1563,69 @@
         (expand-root-env-runtime-env root-env)
         'strict)))))
 
-(define (build-compile-cmd cc library-mode cflags c-file out-file core-path)
-  (case library-mode
-    ((so)
-     (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
-    ((library)
-     (let* ((obj (string-append (temp-filename) ".o"))
-            (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a" cc core-path cflags out-file c-file))
-            (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
-            (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
-       (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
-    (else
-     (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a/core.c" cc core-path cflags out-file c-file core-path))))
+(define (all-archive-flags archives)
+  (if (null? archives)
+      ""
+      (string-append "-Wl,--whole-archive " (string-join archives " ") " -Wl,--no-whole-archive")))
+
+;; maps a runtime environment to the list of library names whose code
+;; has been loaded into it, so re-importing a library into the same
+;; environment does not re-run its init and reset its state. Entries
+;; are never removed, so every environment that ever imports a
+;; library stays alive for the rest of the process. That is fine
+;; while environments are few and long-lived (the repl makes one per
+;; session), but becomes a leak if code ever churns through many
+;; short-lived environments with eval.
+(define *loaded-libraries* '())
+
+;; the libraries imported by root-env's compilation unit, plus their
+;; transitive dependencies, in dependency order.
+(define (imported-libraries root-env)
+  (let ((cu (expand-root-env-compilation-unit root-env)))
+    (libraries-in-dependency-order (reverse (compilation-unit-imports cu)))))
+
+;; dlopen the .so of every library imported by root-env's compilation
+;; unit that is not already live in env, dependencies first. called
+;; after an eval's compilation succeeds and before the compiled
+;; expression runs, so the expression finds the library globals in
+;; env.
+(define (load-imported-libraries! root-env env)
+  (for-each
+   (lambda (lib)
+     (let ((handle (library-code-handle lib)))
+       (when handle
+         (let* ((entry (assq env *loaded-libraries*))
+                (loaded (if entry (cdr entry) '())))
+           (unless (member (library-name lib) loaded)
+             (run-so (string-append handle ".so") env)
+             ;; record only after run-so succeeds, so a failed load is
+             ;; not remembered as loaded and can be retried.
+             (if entry
+                 (set-cdr! entry (cons (library-name lib) (cdr entry)))
+                 (set! *loaded-libraries*
+                       (cons (cons env (list (library-name lib)))
+                             *loaded-libraries*))))))))
+   (imported-libraries root-env)))
+
+;; the .a files to link into the program, one per imported library
+;; that has a code artifact, in dependency order.
+(define (program-import-archives program)
+  (map (lambda (lib) (string-append (library-code-handle lib) ".a"))
+       (filter library-code-handle (imported-libraries (program-env program)))))
+
+(define (build-compile-cmd cc library-mode cflags c-file out-file core-path archives)
+  (let ((archive-flags (all-archive-flags archives)))
+    (case library-mode
+      ((so)
+       (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
+      ((library)
+       (let* ((obj (string-append (temp-filename) ".o"))
+              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a" cc core-path cflags out-file c-file))
+              (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
+              (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
+         (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
+      (else
+       (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c" cc core-path cflags out-file c-file archive-flags core-path)))))
 
 (define (hex-encode s)
   (let loop ((i 0) (x ""))
@@ -1606,11 +1657,12 @@
     (output-program-code program c-file)
     (let ((cc (or (get-environment-variable "CC") "gcc"))
           (core-path (or (get-environment-variable "WHISPER_HOME") ".")))
-      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path))))
+      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path '()))))
         (delete-file c-file)
         (unless (zero? ret)
           (error (format "gcc returned non-zero exit code: ~a\n" ret)))))
     (commit-defines! root-env)
+    (load-imported-libraries! root-env env)
     so-file))
 
 (define (eval expr env)
