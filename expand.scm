@@ -437,16 +437,22 @@
 ;; resolves a name at the root: first the compilation unit's own defines
 ;; (same-compilation-unit visibility, including forward references
 ;; within the unit), then the environment object, fabricating a binding
-;; from its (kind . value) pair. #f on a full miss.
-(define (expand-root-env-lookup root-env name)
+;; from its (kind . value) pair.
+;;
+;; On a full miss, when compiling a library body and the caller allows
+;; it (fallback? is true), the name is assumed to be a forward reference
+;; to one of the library's own not-yet-seen top-level defines and gets a
+;; fabricated global binding with the mangled name. Otherwise #f.
+(define (expand-root-env-lookup root-env name fallback?)
   (let ((cu (expand-root-env-compilation-unit root-env)))
     (or (hash-table-ref/default (compilation-unit-defines cu) name #f)
         (let ((entry (environment-lookup (expand-root-env-runtime-env root-env) name)))
           (if entry
               (root-binding-from-entry (car entry) (cdr entry) name)
-              (let ((library-name (compilation-unit-library-name cu)))
-                (and library-name
-                     (new-binding 'global (library-mangle-name library-name name)))))))))
+              (and fallback?
+                   (let ((library-name (compilation-unit-library-name cu)))
+                     (and library-name
+                          (new-binding 'global (library-mangle-name library-name name))))))))))
 
 ;; lookup name (which is a symbol) in the given expand environment and
 ;; return a binding object associated with it if found. #f otherwise.
@@ -465,12 +471,28 @@
 ;; identifier list or change the prepend/first-match convention without
 ;; accounting for this.
 (define (expand-env-lookup env name)
+  (expand-env-lookup-walk env name #t))
+
+;; like expand-env-lookup, but for looking up an identifier's rename. A
+;; rename is a compiler-generated key that only a binder can put in the
+;; environment (via binder-key), never a source-written name, so it can
+;; never denote a forward reference to a library's own top-level
+;; defines. A full miss must therefore answer #f so callers fall back to
+;; the identifier's own attached binding. Letting the library
+;; forward-reference fallback fire here would mask that binding with a
+;; bogus fresh global, breaking every free template identifier (if,
+;; recursive macro self-references, value references) inside a library
+;; body.
+(define (expand-env-lookup-rename env name)
+  (expand-env-lookup-walk env name #f))
+
+(define (expand-env-lookup-walk env name fallback?)
   (cond ((not env) #f)
-        ((expand-root-env? env) (expand-root-env-lookup env name))
+        ((expand-root-env? env) (expand-root-env-lookup env name fallback?))
         (else
          (let loop ((ids (expand-env-identifiers env)))
            (cond ((null? ids)
-                  (expand-env-lookup (expand-env-parent env) name))
+                  (expand-env-lookup-walk (expand-env-parent env) name fallback?))
                  ((eq? (identifier-name (car ids)) name)
                   (identifier-binding (car ids)))
                  (else (loop (cdr ids))))))))
@@ -541,7 +563,7 @@
 (define (resolve-head head env)
   (cond ((identifier? head)
          (if (identifier-rename head)
-             (or (expand-env-lookup env (identifier-rename head))
+             (or (expand-env-lookup-rename env (identifier-rename head))
                  (identifier-binding head))
              (identifier-binding head)))
         ((symbol? head) (expand-env-lookup env head))
@@ -981,7 +1003,7 @@
          ;; first to see if it's beeing rebound by the same template
          ;; that introduced it.
          (if (identifier-rename form)
-             (let ((b (expand-env-lookup env (identifier-rename form))))
+             (let ((b (expand-env-lookup-rename env (identifier-rename form))))
                (if b
                    (make-identifier (identifier-name form) b)
                    ;; free template identifier: could denote a global
