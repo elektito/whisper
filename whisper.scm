@@ -1679,3 +1679,14 @@
     (let ((result (run-so so env)))
       (delete-file so)
       result)))
+
+;; build a fresh runtime environment populated by importing the given
+;; import-sets.
+(define (environment . import-sets)
+  (let* ((env (make-empty-environment))
+         (root-env (new-expand-root-env env #f)))
+    (for-each (lambda (import-set)
+                (process-import (list 'import import-set) root-env))
+              import-sets)
+    (load-imported-libraries! root-env env)
+    env))
