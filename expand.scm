@@ -191,7 +191,7 @@
   identifier?
 
   ;; the original name of the identifier, as in the source code
-  (name identifier-name identifier-name-set!)
+  (name identifier-name)
 
   ;; a unique alias for this identifier. used for template-introduced
   ;; identifiers. is set to #f otherwise.
@@ -227,7 +227,7 @@
   binding?
 
   ;; one of: special, aux, primcall, global, lexical, macro, alias
-  (kind binding-kind binding-kind-set!)
+  (kind binding-kind)
 
   ;; depends on kind:
   ;;  - for special: the canonical name (begin, lambda, etc.)
