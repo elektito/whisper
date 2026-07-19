@@ -458,7 +458,6 @@ extern value primcall_string_hash(environment env, enum call_flags flags, int na
 extern value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_equivalence_function(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_hash_function(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_lookup(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...);

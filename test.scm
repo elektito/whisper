@@ -902,25 +902,25 @@
 ;; than a closure. actually calling a bound primcall requires a read
 ;; through env_ref, which has no way to achieve in scheme atm.
 
-(environment? (make-environment))
+(environment? (make-empty-environment))
 (not (environment? 42))
 (not (environment? '()))
 
-(let ((e (make-environment)))
+(let ((e (make-empty-environment)))
   (environment-bind! e 'x 'value 42)
   (= 42 (cdr (environment-lookup e 'x))))
 
-(let ((e (make-environment)))
+(let ((e (make-empty-environment)))
   (environment-bind! e 'x 'value 1)
   (environment-bind! e 'x 'value 2)
   (= 2 (cdr (environment-lookup e 'x))))
 
-(let ((e (make-environment)))
+(let ((e (make-empty-environment)))
   (environment-bind! e 'a 'value 10)
   (environment-bind! e 'b 'value 20)
   (= 30 (+ (cdr (environment-lookup e 'a)) (cdr (environment-lookup e 'b)))))
 
-(not (environment-lookup (make-environment) 'this-name-is-unbound))
+(not (environment-lookup (make-empty-environment) 'this-name-is-unbound))
 
 (let ((e (make-empty-environment)))
   (environment-bind! e 'l 'special 'lambda)

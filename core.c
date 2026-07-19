@@ -3013,27 +3013,6 @@ value primcall_hash_table_hash_function(environment env, enum call_flags flags, 
     return GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
 }
 
-void make_env_ht_copy(value k, value v, void *ctx) {
-    value e = ctx;
-    if (GET_SYMBOL(v)->kind != sym_unbound) {
-        env_define(e, v, GET_SYMBOL(v)->value, GET_SYMBOL(v)->kind);
-    }
-}
-
-/* this is a primitive that returns an environment that's a copy of
- * current global environment. it's to make things easier until we have
- * proper (environment ...) in place.*/
-value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("make-environment takes no arguments"); }
-    struct object *obj = alloc_object();
-    obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = malloc(sizeof(struct hash_table));
-    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
-    value e = OBJECT(obj);
-    hash_table_each(&symbols, make_env_ht_copy, e);
-    return e;
-}
-
 value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("make-empty-environment takes no arguments"); }
     struct object *obj = alloc_object();
