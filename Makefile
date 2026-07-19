@@ -2,6 +2,14 @@ CFLAGS ?=
 
 SRC_FILES = whisper.scm utils.scm format.scm qq.scm expand.scm syntax-rules.scm main.scm
 
+LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
+                   lib/scheme-cxr-exports.scm \
+                   lib/scheme-char-exports.scm \
+                   lib/scheme-case-lambda-exports.scm \
+                   lib/scheme-file-exports.scm \
+                   lib/scheme-process-context-exports.scm \
+                   lib/scheme-write-exports.scm
+
 all: whisper-v16
 
 stage0: $(SRC_FILES)
@@ -29,7 +37,17 @@ matrix: whisper-v16
 libwhisper.a: whisper-v16 $(SRC_FILES) core.h core.c
 	./whisper-v16 whisper.scm -L -o libwhisper.a
 
+lib/whisper.manifest lib/whisper.so lib/whisper.a &: whisper-v16 lib/whisper.sld utils.scm format.scm $(LIB_EXPORT_FILES)
+	./whisper-v16 lib/whisper.sld -l -o lib/whisper
+
+lib/scheme.manifest lib/scheme.so lib/scheme.a &: whisper-v16 lib/scheme.sld lib/whisper.manifest $(LIB_EXPORT_FILES)
+	./whisper-v16 lib/scheme.sld -l -o lib/scheme -L lib
+
+libs: lib/whisper.manifest lib/scheme.manifest
+
 clean:
 	rm -f whisper-v16 stage0 stage1 libwhisper.a
+	rm -f lib/whisper.manifest lib/whisper.so lib/whisper.a
+	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
 
-.PHONY: all clean test matrix
+.PHONY: all clean test matrix libs
