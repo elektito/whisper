@@ -599,7 +599,7 @@
 ;;;;;; libraries ;;;;;;
 
 (define-record-type <library>
-  (make-library name imports exports macros code-handle)
+  (make-library name imports exports macros defines code-handle)
   library?
 
   ;; the library name, e.g. (foo bar)
@@ -618,6 +618,11 @@
   ;; a flat list of define-syntax forms, for all macros (public or
   ;; private) in this library
   (macros library-macros)
+
+  ;; a flat list of the library's own top-level value names (plain local
+  ;; names, unmangled). exported macro templates may reference any of
+  ;; these, so the importer must know they exist.
+  (defines library-defines)
 
   ;; opaque token the provider understands, or #f when there's no
   ;; artifact to provide (a builtin library, or a code-free one).
@@ -879,6 +884,12 @@
               (unless (null? imports)
                 (process-import (car imports) lib-env)
                 (loop (cdr imports))))
+            (for-each (lambda (name)
+                        (environment-bind! (expand-root-env-runtime-env lib-env)
+                                           name
+                                           'alias
+                                           (library-mangle-name lib-name name)))
+                      (library-defines lib))
             (let* ((macs (compile-lib-macros lib lib-env))
                    (results (map (lambda (x) (resolve-import-binding x lib-name macs))
                                  (library-exports lib))))

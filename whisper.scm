@@ -312,6 +312,7 @@
                                 (compile-error "internal error: unhandled root identifier kind: ~a" kind)))))
                          *root-identifiers*)
                     '()
+                    '()
                     #f)
       #f))
 
@@ -341,6 +342,7 @@
                 (manifest-clause entry 'imports)
                 (manifest-clause entry 'exports)
                 (manifest-clause entry 'macros)
+                (manifest-clause entry 'defines)
                 (manifest-stem manifest-path)))
 
 ;; The paths of every *.manifest file directly inside dir, or '() if dir
@@ -1453,10 +1455,17 @@
              (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
             (let ((exports (map (lambda (spec)
                                   (resolve-library-export lib-env (car spec) (cdr spec)))
-                                export-names)))
+                                export-names))
+                  (value-defines
+                   (hash-table-fold (compilation-unit-defines cu)
+                                    (lambda (name binding acc)
+                                      (if (eq? 'global (binding-kind binding))
+                                          (cons name acc)
+                                          acc))
+                                    '())))
               (program-libraries-set!
                program
-               (cons (make-library lib-name (reverse imports) exports (reverse macros) #f)
+               (cons (make-library lib-name (reverse imports) exports (reverse macros) value-defines #f)
                      (program-libraries program)))))
           (let ((decl (car decls)))
             (unless (and (pair? decl) (symbol? (car decl)))
@@ -1535,6 +1544,7 @@
                       `(library ,(library-name lib)
                          (imports ,@(library-imports lib))
                          (exports ,@(library-exports lib))
+                         (defines ,@(library-defines lib))
                          (macros ,@(library-macros lib))))
                     (reverse (program-libraries program))))
            port)
