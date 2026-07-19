@@ -554,6 +554,11 @@
 (define (binder-source-name name)
   (if (symbol? name) name (identifier-name name)))
 
+;; a fresh lexical identifier for a binder, gensym-ing a unique name
+(define (lexical-binder formal)
+  (make-identifier (binder-key formal)
+                   (new-binding 'lexical (gensym (symbol->string (binder-source-name formal))))))
+
 ;; helper for resolving the head of a list
 (define (resolve-head head env)
   (cond ((identifier? head)
@@ -1099,19 +1104,13 @@
                          (begin
                            (unless (symbol-or-identifier? (car formals))
                              (compile-error "bad formal: ~s" (car formals)))
-                           (let ((key (binder-key (car formals)))
-                                 (source-name (binder-source-name (car formals))))
-                             (cons (make-identifier key (new-binding 'lexical (gensym (symbol->string source-name))))
-                                   ids))))
+                           (cons (lexical-binder (car formals)) ids)))
                    (if (null? formals)
                        (reverse ids)
                        (begin
                          (unless (symbol-or-identifier? formals)
                            (compile-error "bad formal: ~s" formals))
-                         (let ((key (binder-key formals))
-                               (source-name (binder-source-name formals)))
-                           (reverse (cons (make-identifier key (new-binding 'lexical (gensym (symbol->string source-name))))
-                                          ids)))))))))
+                         (reverse (cons (lexical-binder formals) ids))))))))
     ;; then create a child environment with those ids
     (let ((new-env (make-expand-env ids env)))
       ;; and then expand the body in the new environment
@@ -1169,10 +1168,7 @@
              (expanded-inits (map (lambda (form)
                                     (expand-form form env))
                                   inits))
-             (vars (map (lambda (b)
-                          (make-identifier (binder-key (car b))
-                                           (new-binding 'lexical (gensym (symbol->string (binder-source-name (car b)))))))
-                        bindings))
+             (vars (map (lambda (b) (lexical-binder (car b))) bindings))
              (expanded-bindings (map list vars expanded-inits))
              (new-env (make-expand-env vars env))
              (body (cddr form)))
@@ -1194,10 +1190,7 @@
                          (cadr form))))
          (compile-error "bad ~a bindings" form-name)))
   (let* ((bindings (cadr form))
-         (vars (map (lambda (b)
-                      (make-identifier (binder-key (car b))
-                                       (new-binding 'lexical (gensym (symbol->string (binder-source-name (car b)))))))
-                    bindings))
+         (vars (map (lambda (b) (lexical-binder (car b))) bindings))
          (new-env (make-expand-env vars env))
          (inits (map cadr bindings))
          (expanded-inits (map (lambda (form)
@@ -1334,11 +1327,7 @@
             ((binding-is-special head-binding 'define)
              (let* ((define-form (validate-and-normalize-define form env))
                     (define-name (cadr define-form))
-                    (key (binder-key define-name))
-                    (source-name (binder-source-name define-name))
-                    (name-identifier (make-identifier key
-                                                      (new-binding 'lexical
-                                                                   (gensym (symbol->string source-name))))))
+                    (name-identifier (lexical-binder define-name)))
                (expand-env-add-identifier! env name-identifier)
                (loop (cdr forms) (cons (cons name-identifier (caddr define-form))
                                        defines))))
