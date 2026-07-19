@@ -1159,6 +1159,7 @@
           ((lexical global alias) (compile-call func indent form))
           ((primcall) (compile-primcall func indent form (lookup-primcall meaning)))
           ((special) (compile-special func indent form meaning))
+          ((aux) (error (format "invalid use of aux keyword: ~a" (identifier-name (car form)))))
           (else (error (format "unhandled identifier kind: ~a" meaning)))))))
 
 (define (var-is-modified? var)
