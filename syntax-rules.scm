@@ -51,7 +51,7 @@
 (define (store-add-value store var value)
   (let ((p (assq var (store-vars store))))
     (if p
-        (error "duplicate variable")
+        (compile-error "duplicate variable")
         (store-vars-set! store (cons `(,var . ,value) (store-vars store))))))
 
 (define (store-set-var store var value)
@@ -84,16 +84,16 @@
 
 (define (sublist ls start end)
   (when (negative? start)
-    (error "sublist: start is negative"))
+    (compile-error "internal error: sublist: start is negative"))
   (when (< end start)
-    (error "sublist: start is greater than end"))
+    (compile-error "internal error: sublist: start is greater than end"))
   (let loop ((result '()) (i 0) (ls ls))
     (cond ((null? ls) (if (= i end)
                           (reverse result)
-                          (error "sublist: list is too short")))
+                          (compile-error "internal error: sublist: list is too short")))
           ((atom? ls) (if (= i end)
                           (reverse result)
-                          (error "sublist indices can't span an improper tail")))
+                          (compile-error "internal error: sublist indices can't span an improper tail")))
           (else (if (= i end)
                     (reverse result)
                     (if (>= i start)
@@ -263,7 +263,7 @@
 
 (define (pp-compile-pattern pat literal-bindings is-ellipsis? is-wildcard?)
   (cond ((is-wildcard? pat) (lambda (x store use-env) #t))
-        ((is-ellipsis? pat) (error "ellipsis in invalid pattern position"))
+        ((is-ellipsis? pat) (compile-error "ellipsis in invalid pattern position"))
         ;; literal-bindings is a list of (symbol . binding) pairs
         ((symbol? pat) (let ((pair (assq pat literal-bindings)))
                          (if pair
@@ -307,10 +307,10 @@
   ;; zip the sequences: (1 [2 3] [a b]) => (1 2 a) (1 3 b)
   (let ((seqs (find-all-seqs item)))
     (when (null? seqs)
-      (error "no sequences in expanded element"))
+      (compile-error "no sequences in expanded element"))
     (unless (or (< (length seqs) 2)
                 (apply = (map sequence-length seqs)))
-      (error "sequences do not have the same sizes"))
+      (compile-error "sequences do not have the same sizes"))
     (let ((len (sequence-length (car seqs))))
       (let loop ((i 0) (result '()))
         (if (= i len)
@@ -342,10 +342,10 @@
 (define (expand-ellipsis template store is-ellipsis? rename)
   (let ((vars (template-seq-vars template store)))
     (when (null? vars)
-      (error "no sequences in expanded element"))
+      (compile-error "no sequences in expanded element"))
     (let ((lengths (map (lambda (v) (sequence-length (store-get-var store v))) vars)))
       (unless (apply = lengths)
-        (error "sequences do not have the same sizes"))
+        (compile-error "sequences do not have the same sizes"))
       (let ((len (car lengths)))
         (let loop ((i 0) (result '()))
           (if (= i len)
@@ -383,7 +383,7 @@
            (if (and (pair? (cdr item))
                     (is-ellipsis? (cadr item)))
                (loop (append result (list (rename (car item)))) (cddr item))
-               (error "lone ellipsis in template")))
+               (compile-error "lone ellipsis in template")))
           ((and (pair? (cdr item))
                 (is-ellipsis? (cadr item)))
            (let inner ((multiplied (expand-ellipsis (car item) store is-ellipsis? rename))
@@ -420,7 +420,7 @@
 
 (define (compile-syntax-rules form def-env)
   (when (< (length form) 3)
-    (error "invalid syntax-rules"))
+    (compile-error "invalid syntax-rules"))
 
   ;; a custom ellipsis is bound to a fresh aux binding in a private frame,
   ;; keyed by its resolution key: the symbol when written directly, or its
@@ -443,9 +443,9 @@
                                (expand-env-lookup def-env '...)))
          (wildcard-binding (expand-env-lookup def-env '_))
          (_ (unless ellipsis-binding
-              (error "no ellipsis (...) in definition environment")))
+              (compile-error "internal error: no ellipsis (...) in definition environment")))
          (_ (unless wildcard-binding
-              (error "no wildcard (_) in definition environment")))
+              (compile-error "internal error: no wildcard (_) in definition environment")))
          (is-ellipsis? (lambda (x)
                          (let ((b (resolve-head x def-env)))
                            (and b (binding-denotes-same? b ellipsis-binding)))))
@@ -469,9 +469,9 @@
                                             (cadar rest))
                                       result)
                                 (cdr rest))
-                          (error "invalid rule"))))))
+                          (compile-error "invalid rule"))))))
     (when (null? rules)
-      (error "syntax-rules has no rules"))
+      (compile-error "syntax-rules has no rules"))
     (make-transformer def-env
                       (lambda (input use-env)
                         (let* ((rename-map '())

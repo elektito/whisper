@@ -783,7 +783,7 @@
                                          (identifier-name name))))
                     ((symbol? name) (symbol->string name))
                     ((string? name) name)
-                    (else (error "mangle-name argument not a string or symbol")))))
+                    (else (compile-error "internal error: mangle-name argument not a string or symbol")))))
     (let loop ((i 0)
                (mangled "_"))
       (if (= i (string-length name))
@@ -1159,8 +1159,8 @@
           ((lexical global alias) (compile-call func indent form))
           ((primcall) (compile-primcall func indent form (lookup-primcall meaning)))
           ((special) (compile-special func indent form meaning))
-          ((aux) (error (format "invalid use of aux keyword: ~a" (identifier-name (car form)))))
-          (else (error (format "unhandled identifier kind: ~a" meaning)))))))
+          ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name (car form))))
+          (else (compile-error "internal error: unhandled identifier kind: ~a" meaning))))))
 
 (define (var-is-modified? var)
   (let ((b (identifier-binding var)))
@@ -1196,7 +1196,7 @@
 
       ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name form)))
 
-      (else (error (format "unknown identifier kind: ~a" (binding-kind b)))))
+      (else (compile-error "internal error: unknown identifier kind: ~a" (binding-kind b))))
     varnum))
 
 (define (compile-vector func indent form)
@@ -1669,7 +1669,7 @@
       (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path '()))))
         (delete-file c-file)
         (unless (zero? ret)
-          (error (format "gcc returned non-zero exit code: ~a\n" ret)))))
+          (compile-error "gcc returned non-zero exit code: ~a" ret))))
     (commit-defines! root-env)
     (load-imported-libraries! root-env env)
     so-file))
