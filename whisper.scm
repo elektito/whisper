@@ -1412,6 +1412,20 @@
           (begin (close-port port) (reverse forms))
           (loop (read port) (cons form forms))))))
 
+;; like read-all-forms, but splices any top-level (include ...) form in
+;; place by recursively reading the files it names, so a source file
+;; that itself includes others yields one correctly ordered form list.
+(define (read-source-forms path)
+  (let ((port (open-input-file path)))
+    (let loop ((form (read port)) (acc '()))
+      (if (eof-object? form)
+          (begin (close-port port) (reverse acc))
+          (loop (read port)
+                (if (and (pair? form) (eq? (car form) 'include))
+                    (append (reverse (apply append (map read-source-forms (cdr form))))
+                            acc)
+                    (cons form acc)))))))
+
 ;; compiles each top-level form in lib-env; returns macros with any
 ;; define-syntax form's raw source appended, since the manifest needs
 ;; it.
@@ -1483,7 +1497,7 @@
               ((include)
                (loop (cdr decls) imports export-names
                      (append (compile-forms-and-gather-macros
-                              func lib-env (apply append (map read-all-forms (cdr decl))))
+                              func lib-env (apply append (map read-source-forms (cdr decl))))
                              macros)))
               ((include-library-declarations)
                (loop (append (apply append (map read-all-forms (cdr decl)))
