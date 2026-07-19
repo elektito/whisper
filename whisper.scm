@@ -1494,13 +1494,10 @@
 ;; recorded: a value's is recomputed by mangling, a macro's transformer
 ;; is rebuilt from the manifest's macros list instead. inherited
 ;; primcall/special/aux need no origin tag, since those kinds are
-;; global, not library-scoped.
-;;
-;; TODO: re-exporting an inherited value or macro needs an origin tag
-;; (from <lib> <name>), which needs sym_alias in core.c plus (for
-;; macros) tracking each import's origin through import-set resolution.
-;; Neither is reachable yet: the only importable library, (whisper
-;; core), exports neither kind. So deferred for now.
+;; global, not library-scoped. inherited values/macros are re-exports:
+;; their origin (the library/name they were originally exported under)
+;; comes from the compilation unit's import-origins table, populated by
+;; process-import when local-name was first imported.
 (define (resolve-library-export lib-env local-name export-name)
   (let* ((cu (expand-root-env-compilation-unit lib-env))
          (own (hash-table-ref/default (compilation-unit-defines cu) local-name #f)))
@@ -1523,10 +1520,11 @@
               ((primcall) (list export-name 'primcall value))
               ((special) (list export-name 'special value))
               ((aux) (list export-name 'aux value))
-              ((alias)
-               (compile-error "re-exporting an imported value is not supported yet: ~a" local-name))
-              ((macro)
-               (compile-error "re-exporting an imported macro is not supported yet: ~a" local-name))
+              ((alias macro)
+               (let ((origin (hash-table-ref/default (compilation-unit-import-origins cu) local-name #f)))
+                 (unless origin
+                   (compile-error "internal error: no import origin recorded for: ~a" local-name))
+                 (list export-name (if (eq? kind 'alias) 'value 'macro) 'from (car origin) (cdr origin))))
               (else (compile-error "internal error: unknown export kind: ~a" kind))))))))
 
 ;; serialize this program's compiled libraries into one manifest.

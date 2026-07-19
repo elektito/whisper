@@ -332,7 +332,7 @@
 ;; runs after a successful compilation, so a failed unit leaves no trace
 ;; behind.
 (define-record-type <compilation-unit>
-  (make-compilation-unit defines refs program-mode? past-imports? seen-import? library-name imports)
+  (make-compilation-unit defines refs program-mode? past-imports? seen-import? library-name imports import-origins)
   compilation-unit?
 
   ;; mapping name (binder key) to binding record, for defines/declares/
@@ -365,10 +365,17 @@
   ;; unit, most recently imported first. the expander only records
   ;; these. the host reads them after expansion to make library code
   ;; available to its target (see libraries-in-dependency-order).
-  (imports compilation-unit-imports compilation-unit-imports-set!))
+  (imports compilation-unit-imports compilation-unit-imports-set!)
+
+  ;; mapping a locally-imported value/macro name to the (origin-lib .
+  ;; origin-name) pair it was originally exported under, for names
+  ;; imported as kind 'value or 'macro. populated by process-import.
+  ;; consulted by resolve-library-export when a library re-exports an
+  ;; imported name.
+  (import-origins compilation-unit-import-origins))
 
 (define (new-compilation-unit program-mode?)
-  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f #f '()))
+  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f #f '() (make-hash-table)))
 
 ;;;;;; expand root env ;;;;;;
 
@@ -660,13 +667,20 @@
     (unless (null? import-sets)
       (let loop-alist ((alist (process-import-set (car import-sets))))
         (unless (null? alist)
-          (let ((name (caar alist))
-                (kind (cadar alist))
-                (value (cddar alist)))
+          (let* ((entry (car alist))
+                 (name (car entry))
+                 (kind (cadr entry))
+                 (value (caddr entry))
+                 (origin (cadddr entry)))
             (environment-bind! (expand-root-env-runtime-env env)
                                name
                                (if (eq? kind 'value) 'alias kind)
                                value)
+            (when origin
+              (hash-table-set! (compilation-unit-import-origins
+                                 (expand-root-env-compilation-unit env))
+                                name
+                                origin))
             (loop-alist (cdr alist)))))
       (record-import! env (import-set-library-name (car import-sets)))
       (loop (cdr import-sets)))))
@@ -711,9 +725,7 @@
                        names))
       (compile-error "not all import-~a names are in the base import-set" clause-name))
     (filter (lambda (x)
-              (let* ((name (car x))
-                     (kind (cadr x))
-                     (value (cddr x)))
+              (let ((name (car x)))
                 (if keep?
                     (memq name names)
                     (not (memq name names)))))
@@ -745,11 +757,7 @@
     (map (lambda (x)
            (let ((rename-entry (assq (car x) renames)))
              (if rename-entry
-                 (let* ((name (car x))
-                        (kind (cadr x))
-                        (value (cddr x)))
-                   (cons (cdr rename-entry)
-                         (cons kind value)))
+                 (cons (cdr rename-entry) (cdr x))
                  x)))
          base-bindings)))
 
@@ -763,11 +771,8 @@
       (compile-error "import prefix is not a symbol: ~a" form))
     (let ((prefix-str (symbol->string prefix)))
       (map (lambda (x)
-             (let* ((name (car x))
-                    (kind (cadr x))
-                    (value (cddr x)))
-               (cons (string->symbol (string-append prefix-str (symbol->string name)))
-                     (cons kind value))))
+             (cons (string->symbol (string-append prefix-str (symbol->string (car x))))
+                   (cdr x)))
            base-bindings))))
 
 ;; strip only/except/prefix/rename wrappers off an import-set, leaving
@@ -804,17 +809,32 @@
     (for-each visit libs)
     (reverse result)))
 
-;; for a given library name:
-;;  - find the library description using the injected *find-library*
-;;  - if the library has already been loaded, return its cached alist.
-;;  - recursively load the dependencies first, making sure that there
-;;    are no circular dependencies.
-;;  - create an expand-root-env for the library
-;;  - compile all library macros in the env
-;;  - finally return an alist in which is item is in the form
-;;    (exported-name . (kind . value)) where value is a transformer for
-;;    macros, library mangled name for normal values and the canonical
-;;    form for specials, aux keywords, and primcalls.
+;; resolve one export descriptor from lib-name's manifest into an
+;; import-library entry (name kind value origin). a from-tagged
+;; descriptor is a re-export, resolved through origin-lib (already
+;; loaded); otherwise it's own to lib-name, keyed by local name.
+(define (resolve-import-binding x lib-name macs)
+  (let ((name (car x))
+        (kind (cadr x)))
+    (if (and (pair? (cddr x)) (eq? 'from (caddr x)))
+        (let* ((origin-lib (cadddr x))
+               (origin-name (car (cddddr x)))
+               (value (case kind
+                        ((value) (library-mangle-name origin-lib origin-name))
+                        ((macro) (caddr (assq origin-name (import-library origin-lib))))
+                        (else (compile-error "unexpected re-exported kind: ~a" kind)))))
+          (cons name (list kind value (cons origin-lib origin-name))))
+        (let* ((local-name (if (null? (cddr x)) name (caddr x)))
+               (value (case kind
+                        ((primcall special aux) (caddr x))
+                        ((macro) (cdr (assq local-name macs)))
+                        ((value) (library-mangle-name lib-name local-name))
+                        (else (compile-error "unknown library export type: ~a" kind))))
+               (origin (case kind
+                         ((value macro) (cons lib-name local-name))
+                         (else #f))))
+          (cons name (list kind value origin))))))
+
 (define (import-library lib-name)
   (define (object->string obj)
     (let ((port (open-output-string)))
@@ -838,23 +858,7 @@
                 (process-import (car imports) lib-env)
                 (loop (cdr imports))))
             (let* ((macs (compile-lib-macros lib lib-env))
-                   (results (map (lambda (x)
-                                   (let* ((name (car x))
-                                          (kind (cadr x))
-                                          ;; a renamed own value/macro
-                                          ;; export carries its local
-                                          ;; name as a third element
-                                          ;; (see resolve-library-export);
-                                          ;; that local name, not the
-                                          ;; export name, is what it was
-                                          ;; mangled/keyed under.
-                                          (local-name (if (null? (cddr x)) name (caddr x)))
-                                          (value (case kind
-                                                   ((primcall special aux) (caddr x))
-                                                   ((macro) (cdr (assq local-name macs)))
-                                                   ((value) (library-mangle-name lib-name local-name))
-                                                   (else (compile-error "unknown library export type: ~a" kind)))))
-                                     (cons name (cons kind value))))
+                   (results (map (lambda (x) (resolve-import-binding x lib-name macs))
                                  (library-exports lib))))
               (set! *libs-being-imported* (cdr *libs-being-imported*))
               (set! *import-cache* (cons (list lib-name lib results) *import-cache*))
