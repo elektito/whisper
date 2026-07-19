@@ -214,16 +214,11 @@
                                   (identifier-rename id))))))
 
 (define (make-identifier name binding)
-  (let ((id (%make-identifier name #f binding)))
-    (identifier-rename-set! id #f)
-    id))
+  (%make-identifier name #f binding))
 
 ;; create an identifier with a binding already attached
 (define (identifier kind name meaning)
-  (let* ((binding (new-binding kind meaning))
-         (id (make-identifier name binding)))
-    (identifier-binding-set! id binding)
-    id))
+  (make-identifier name (new-binding kind meaning)))
 
 ;;;;;; binding ;;;;;;
 
