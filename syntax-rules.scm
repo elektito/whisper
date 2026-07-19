@@ -51,7 +51,7 @@
 (define (store-add-value store var value)
   (let ((p (assq var (store-vars store))))
     (if p
-        (compile-error "duplicate variable")
+        (compile-error "internal error: duplicate variable")
         (store-vars-set! store (cons `(,var . ,value) (store-vars store))))))
 
 (define (store-set-var store var value)
@@ -167,6 +167,16 @@
                                  (loop (append results (get-all-pattern-vars (vector-ref pattern i) literal-bindings is-ellipsis? is-wildcard?))
                                        (+ i 1)))))
         (else '())))
+
+;; syntax-rules forbids a pattern variable from appearing more than once
+;; in one pattern. return the first variable that repeats, or #f if all
+;; are distinct.
+(define (repeated-pattern-var pattern literal-bindings is-ellipsis? is-wildcard?)
+  (let loop ((vars (get-all-pattern-vars pattern literal-bindings is-ellipsis? is-wildcard?))
+             (seen '()))
+    (cond ((null? vars) #f)
+          ((memq (car vars) seen) (car vars))
+          (else (loop (cdr vars) (cons (car vars) seen))))))
 
 (define (merge-stores main subs pattern literal-bindings is-ellipsis? is-wildcard?)
   (let* ((vars (get-all-pattern-vars pattern literal-bindings is-ellipsis? is-wildcard?)))
@@ -465,10 +475,15 @@
                       (if (and (pair? (car rest))
                                (= 2 (length (car rest)))
                                (pair? (caar rest)))
-                          (loop (cons (cons (pp-compile-pattern (cdaar rest) literal-bindings is-ellipsis? is-wildcard?)
-                                            (cadar rest))
-                                      result)
-                                (cdr rest))
+                          (let* ((pattern (cdaar rest))
+                                 (dup (repeated-pattern-var pattern literal-bindings is-ellipsis? is-wildcard?)))
+                            (when dup
+                              (compile-error "pattern variable ~a used more than once in syntax-rules pattern"
+                                             (if (identifier? dup) (identifier-name dup) dup)))
+                            (loop (cons (cons (pp-compile-pattern pattern literal-bindings is-ellipsis? is-wildcard?)
+                                              (cadar rest))
+                                        result)
+                                  (cdr rest)))
                           (compile-error "invalid rule"))))))
     (when (null? rules)
       (compile-error "syntax-rules has no rules"))
