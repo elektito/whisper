@@ -35,9 +35,6 @@ matrix: whisper-v17
 		&& /tmp/b.$$o test.scm -t -r || exit 1; \
 	done
 
-libwhisper.a: whisper-v17 $(SRC_FILES) core.h core.c
-	./whisper-v17 whisper.scm -L -o libwhisper.a
-
 lib/whisper.manifest lib/whisper.so lib/whisper.a &: whisper-v17 lib/whisper.sld utils.scm format.scm $(LIB_EXPORT_FILES)
 	./whisper-v17 lib/whisper.sld -l -o lib/whisper
 
