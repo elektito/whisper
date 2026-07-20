@@ -683,9 +683,6 @@
                                         (cdr form))))
                     ((eq? 'macro (binding-kind binding))
                      (expand-top-level-form (expand-macro binding form env) env))
-                    ((binding-is-special binding 'declare)
-                     (process-declare form env)
-                     '())
                     (else (list (expand-form form env)))))
             (list (expand-form form env))))))))
 
@@ -907,15 +904,6 @@
         (let ((name (cadar macs))
               (transformer (process-define-syntax (car macs) env)))
           (loop (cdr macs) (cons (cons name transformer) results))))))
-
-(define (process-declare form env)
-  (let* ((name-sym (if (symbol? (cadr form))
-                       (cadr form)
-                       (identifier-name (cadr form))))
-         (existing (expand-env-lookup env name-sym))
-         (binding (or existing
-                      (new-binding 'global name-sym))))
-    (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) name-sym binding)))
 
 ;; expand the given list form, the head of which is known to be a macro.
 ;; head-binding is the pre-resolved binding of the head of the list,

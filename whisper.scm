@@ -1229,7 +1229,6 @@
   (exit 1))
 
 (define *root-identifiers* (list (identifier 'special 'begin 'begin)
-                                 (identifier 'special 'declare 'declare)
                                  (identifier 'special 'define 'define)
                                  (identifier 'special 'define-syntax 'define-syntax)
                                  (identifier 'special 'if 'if)
