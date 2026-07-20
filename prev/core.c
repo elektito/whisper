@@ -1252,6 +1252,20 @@ static value symbol_to_string(value v) {
     return make_string(sym->name, sym->name_len);
 }
 
+/************ list/pair helper functions ***********/
+
+static int is_proper_list(value v) {
+    value cur = v;
+    for (;;) {
+        if (cur == NIL) { return 1; }
+        if (IS_PAIR(cur)) {
+            cur = GET_PAIR(cur)->cdr;
+        } else {
+            return 0;
+        }
+    }
+}
+
 /************ string helper functions ***********/
 
 static int string_cmp(struct string *s1, struct string *s2) {
@@ -1318,6 +1332,8 @@ value env_ref(value e, value sym) {
             /* s->value is the canonical primcall name symbol. that
              * symbol's own 'value is set to a real closure. */
             return GET_SYMBOL(s->value)->value;
+        case sym_alias:
+            return env_ref(e, s->value);
         default:
             RAISE("internal error: unhandled sym_kind case");
         }
@@ -1339,6 +1355,8 @@ value env_ref(value e, value sym) {
         RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
     case sym_value:
         return binding->value;
+    case sym_alias:
+        return env_ref(e, binding->value);
     case sym_primcall:
         /* same trick as the sentinel case above: binding->value is the
          * canonical primcall name symbol, whose own ->value already holds
@@ -1415,6 +1433,42 @@ void run_static_libs(value env) {
 }
 
 /************ primcall functions ***********/
+
+value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs == 0) { return NIL; }
+    init_args();
+
+    /* copy every argument but the last onto a single growing list via a
+       tail pointer; the last argument is shared as the tail (and may be
+       any object, giving an improper result). */
+    value head = NIL;
+    value tail = NIL;
+    for (int i = 0; i < nargs; ++i) {
+        value arg = next_arg();
+        if (i == nargs - 1) {
+            if (head == NIL) {
+                head = arg;
+            } else {
+                GET_PAIR(tail)->cdr = arg;
+            }
+        } else {
+            if (!is_proper_list(arg)) { RAISE("append: not a proper list"); }
+            for (value p = arg; p != NIL; p = GET_PAIR(p)->cdr) {
+                value cell = make_pair(GET_PAIR(p)->car, NIL);
+                if (head == NIL) {
+                    head = cell;
+                } else {
+                    GET_PAIR(tail)->cdr = cell;
+                }
+
+                tail = cell;
+            }
+        }
+    }
+
+    free_args();
+    return head;
+}
 
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 0) { RAISE("apply needs at least one argument"); }
@@ -1762,6 +1816,56 @@ value primcall_integer_to_char(environment env, enum call_flags flags, int nargs
     if (!IS_FIXNUM(n)) { RAISE("integer->char argument is not a number") }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { RAISE("integer->char argument is out of range") }
     return CHAR((char) GET_FIXNUM(n));
+}
+
+value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
+    init_args();
+    value result = NIL;
+    for (int i = 0; i < nargs; ++i) {
+        value v = next_arg();
+        result = make_pair(v, result);
+    }
+    free_args();
+
+    return reverse_list(result, NIL);
+}
+
+value primcall_list_star(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs == 0) { RAISE("list* needs at least one argument"); }
+    init_args();
+    value rev = NIL;
+    for (int i = 0; i < nargs; ++i) {
+        value v = next_arg();
+        rev = make_pair(v, rev);
+    }
+    free_args();
+
+    value result = GET_PAIR(rev)->car;
+    for (value p = GET_PAIR(rev)->cdr; p != NIL; p = GET_PAIR(p)->cdr) {
+        result = make_pair(GET_PAIR(p)->car, result);
+    }
+
+    return result;
+}
+
+value primcall_list_to_vector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("list->vector needs a single argument"); }
+    init_args();
+    value ls = next_arg();
+    free_args();
+
+    if (!is_proper_list(ls)) { RAISE("list->vector argument must be a list"); }
+
+    size_t len = 0;
+    for (value v = ls; v != NIL; v = GET_PAIR(v)->cdr) { ++len; }
+
+    value vec = make_vector(len, VOID);
+    size_t i = 0;
+    for (value v = ls; v != NIL; v = GET_PAIR(v)->cdr) {
+        GET_OBJECT(vec)->vector.data[i++] = GET_PAIR(v)->car;
+    }
+
+    return vec;
 }
 
 value primcall_make_string(environment env, enum call_flags flags, int nargs, ...) {
@@ -3009,27 +3113,6 @@ value primcall_hash_table_hash_function(environment env, enum call_flags flags, 
     return GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
 }
 
-void make_env_ht_copy(value k, value v, void *ctx) {
-    value e = ctx;
-    if (GET_SYMBOL(v)->kind != sym_unbound) {
-        env_define(e, v, GET_SYMBOL(v)->value, GET_SYMBOL(v)->kind);
-    }
-}
-
-/* this is a primitive that returns an environment that's a copy of
- * current global environment. it's to make things easier until we have
- * proper (environment ...) in place.*/
-value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("make-environment takes no arguments"); }
-    struct object *obj = alloc_object();
-    obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = malloc(sizeof(struct hash_table));
-    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
-    value e = OBJECT(obj);
-    hash_table_each(&symbols, make_env_ht_copy, e);
-    return e;
-}
-
 value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { RAISE("make-empty-environment takes no arguments"); }
     struct object *obj = alloc_object();
@@ -3051,6 +3134,7 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
     case sym_special:  return extend_global_env("special", 7, sym_unbound);
     case sym_aux:      return extend_global_env("aux", 3, sym_unbound);
     case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
+    case sym_alias:    return extend_global_env("alias", 5, sym_unbound);
     default:
         RAISE("internal error: unhandled sym_kind case");
     }
@@ -3063,6 +3147,7 @@ static enum sym_kind symbol_to_sym_kind(value sym) {
     if (sym == extend_global_env("special", 7, sym_unbound))  return sym_special;
     if (sym == extend_global_env("aux", 3, sym_unbound))      return sym_aux;
     if (sym == extend_global_env("primcall", 8, sym_unbound)) return sym_primcall;
+    if (sym == extend_global_env("alias", 5, sym_unbound))    return sym_alias;
     struct symbol *s = GET_SYMBOL(sym);
     RAISE("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }

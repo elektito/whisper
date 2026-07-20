@@ -147,6 +147,7 @@ enum sym_kind {
     sym_value,    /* runtime value: primcall closure or user-defined variable */
     sym_macro,    /* macro transformer (future) */
     sym_primcall, /* the same as sym_value at run-time, makes a difference at compile-time */
+    sym_alias,    /* for compile-time only; maps an unmangled name to a library mangled name */
 };
 
 /* used as a key into the symbols hash table */
@@ -348,6 +349,7 @@ extern value make_global_env(void);
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
 
+extern value primcall_append(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_apply(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box(environment env, enum call_flags flags, int nargs, ...);
@@ -377,7 +379,10 @@ extern value primcall_get_environment_variable(environment env, enum call_flags 
 extern value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_integer_to_char(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_list(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_directory(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_list_star(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_list_to_vector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_newline(environment env, enum call_flags flags, int nargs, ...);
@@ -457,7 +462,6 @@ extern value primcall_string_hash(environment env, enum call_flags flags, int na
 extern value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_equivalence_function(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_hash_function(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_make_environment(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_lookup(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...);
