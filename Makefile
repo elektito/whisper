@@ -1,6 +1,7 @@
 CFLAGS ?=
 
-SRC_FILES = whisper.scm utils.scm format.scm qq.scm expand.scm syntax-rules.scm main.scm
+COMPILER_SRC = whisper.scm utils.scm format.scm qq.scm expand.scm syntax-rules.scm
+SRC_FILES = $(COMPILER_SRC) main.scm
 
 LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
                    lib/scheme-cxr-exports.scm \
@@ -43,11 +44,15 @@ lib/whisper.manifest lib/whisper.so lib/whisper.a &: whisper-v17 lib/whisper.sld
 lib/scheme.manifest lib/scheme.so lib/scheme.a &: whisper-v17 lib/scheme.sld lib/whisper.manifest $(LIB_EXPORT_FILES)
 	./whisper-v17 lib/scheme.sld -l -o lib/scheme -L lib
 
-libs: lib/whisper.manifest lib/scheme.manifest
+lib/eval.manifest lib/eval.so lib/eval.a &: whisper-v17 lib/scheme-eval.sld $(COMPILER_SRC)
+	./whisper-v17 lib/scheme-eval.sld -l -o lib/eval -L lib
+
+libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest
 
 clean:
 	rm -f whisper-v17 stage0 stage1 libwhisper.a
 	rm -f lib/whisper.manifest lib/whisper.so lib/whisper.a
 	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
+	rm -f lib/eval.manifest lib/eval.so lib/eval.a
 
 .PHONY: all clean test matrix libs
