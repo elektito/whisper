@@ -192,15 +192,6 @@
           (list? (cdr v))
           #f)))
 
-(define (list . x) x)
-
-;; from srfi 1 (named cons* in there)
-(define (list* first . rest)
-  (let recur ((x first) (rest rest))
-    (if (pair? rest)
-        (cons x (recur (car rest) (cdr rest)))
-        x)))
-
 (define (list-tail ls k)
   (if (zero? k)
       ls
@@ -239,26 +230,6 @@
 
 (define (reverse ls)
   (%reverse ls '()))
-
-(define (%append ls1 ls2)
-  (if (not (list? ls1))
-      (error "append: not a proper list"))
-
-  (if (null? ls1)
-      ls2
-      (if (null? (cdr ls1))
-          (cons (car ls1) ls2)
-          (%append (cdr ls1) (cons (car ls1) ls2)))))
-
-(define (append . lists)
-  (if (null? lists)
-      '()
-      (if (null? (cdr lists))
-          (car lists)
-          (if (null? (cddr lists))
-              (%append (reverse (car lists)) (cadr lists))
-              (%append (reverse (car lists))
-                       (apply append (cdr lists)))))))
 
 (define make-list
   (case-lambda
@@ -513,16 +484,6 @@
       (if (< i (vector-length vec))
           (loop (+ i 1) (cons (vector-ref vec i) result))
           (reverse result)))))
-
-(define (list->vector ls)
-  (if (not (list? ls))
-      (error "list->vector needs a proper list"))
-  (let loop ((i 0) (ls ls) (vec (make-vector (length ls))))
-    (if (null? ls)
-        vec
-        (begin
-          (vector-set! vec i (car ls))
-          (loop (+ i 1) (cdr ls) vec)))))
 
 (define (%vector-append v1 v2)
   (let ((result (make-vector (+ (vector-length v1) (vector-length v2)))))
