@@ -1,7 +1,8 @@
-(import (whisper core))
+(import (whisper))
 
-(include "utils.scm")
-(include "format.scm")
+;; this is needed separately because we use some primcalls not exported
+;; in (whisper), like environment-bind!
+(import (whisper core))
 
 ;; defines
 

@@ -23,16 +23,16 @@ whisper-v17: stage1 core.h core.c $(SRC_FILES)
 	./stage1 main.scm -o whisper-v17 -f "-Wl,-s $(CFLAGS)"
 	diff stage1 whisper-v17
 
-test: whisper-v17
-	./whisper-v17 test.scm -t -r
+test: whisper-v17 lib/whisper.manifest
+	./whisper-v17 test.scm -t -r -L lib
 
-matrix: whisper-v17
+matrix: whisper-v17 lib/whisper.manifest
 	./whisper-v17 main.scm -c -o /tmp/b.c
 	@for o in 0 1 2 3; do \
 		echo "--- O$$o ---"; \
 		gcc -O$$o -Wl,-s -I. -o /tmp/b.$$o /tmp/b.c core.c \
 		&& /tmp/b.$$o main.scm -o /tmp/out.$$o \
-		&& /tmp/b.$$o test.scm -t -r || exit 1; \
+		&& /tmp/b.$$o test.scm -t -r -L lib || exit 1; \
 	done
 
 lib/whisper.manifest lib/whisper.so lib/whisper.a &: whisper-v17 lib/whisper.sld utils.scm format.scm $(LIB_EXPORT_FILES)
