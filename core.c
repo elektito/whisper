@@ -1252,6 +1252,20 @@ static value symbol_to_string(value v) {
     return make_string(sym->name, sym->name_len);
 }
 
+/************ list/pair helper functions ***********/
+
+static int is_proper_list(value v) {
+    value cur = v;
+    for (;;) {
+        if (cur == NIL) { return 1; }
+        if (IS_PAIR(cur)) {
+            cur = GET_PAIR(cur)->cdr;
+        } else {
+            return 0;
+        }
+    }
+}
+
 /************ string helper functions ***********/
 
 static int string_cmp(struct string *s1, struct string *s2) {
@@ -1419,6 +1433,42 @@ void run_static_libs(value env) {
 }
 
 /************ primcall functions ***********/
+
+value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs == 0) { return NIL; }
+    init_args();
+
+    /* copy every argument but the last onto a single growing list via a
+       tail pointer; the last argument is shared as the tail (and may be
+       any object, giving an improper result). */
+    value head = NIL;
+    value tail = NIL;
+    for (int i = 0; i < nargs; ++i) {
+        value arg = next_arg();
+        if (i == nargs - 1) {
+            if (head == NIL) {
+                head = arg;
+            } else {
+                GET_PAIR(tail)->cdr = arg;
+            }
+        } else {
+            if (!is_proper_list(arg)) { RAISE("append: not a proper list"); }
+            for (value p = arg; p != NIL; p = GET_PAIR(p)->cdr) {
+                value cell = make_pair(GET_PAIR(p)->car, NIL);
+                if (head == NIL) {
+                    head = cell;
+                } else {
+                    GET_PAIR(tail)->cdr = cell;
+                }
+
+                tail = cell;
+            }
+        }
+    }
+
+    free_args();
+    return head;
+}
 
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 0) { RAISE("apply needs at least one argument"); }
@@ -1766,6 +1816,56 @@ value primcall_integer_to_char(environment env, enum call_flags flags, int nargs
     if (!IS_FIXNUM(n)) { RAISE("integer->char argument is not a number") }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { RAISE("integer->char argument is out of range") }
     return CHAR((char) GET_FIXNUM(n));
+}
+
+value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
+    init_args();
+    value result = NIL;
+    for (int i = 0; i < nargs; ++i) {
+        value v = next_arg();
+        result = make_pair(v, result);
+    }
+    free_args();
+
+    return reverse_list(result, NIL);
+}
+
+value primcall_list_star(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs == 0) { RAISE("list* needs at least one argument"); }
+    init_args();
+    value rev = NIL;
+    for (int i = 0; i < nargs; ++i) {
+        value v = next_arg();
+        rev = make_pair(v, rev);
+    }
+    free_args();
+
+    value result = GET_PAIR(rev)->car;
+    for (value p = GET_PAIR(rev)->cdr; p != NIL; p = GET_PAIR(p)->cdr) {
+        result = make_pair(GET_PAIR(p)->car, result);
+    }
+
+    return result;
+}
+
+value primcall_list_to_vector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("list->vector needs a single argument"); }
+    init_args();
+    value ls = next_arg();
+    free_args();
+
+    if (!is_proper_list(ls)) { RAISE("list->vector argument must be a list"); }
+
+    size_t len = 0;
+    for (value v = ls; v != NIL; v = GET_PAIR(v)->cdr) { ++len; }
+
+    value vec = make_vector(len, VOID);
+    size_t i = 0;
+    for (value v = ls; v != NIL; v = GET_PAIR(v)->cdr) {
+        GET_OBJECT(vec)->vector.data[i++] = GET_PAIR(v)->car;
+    }
+
+    return vec;
 }
 
 value primcall_make_string(environment env, enum call_flags flags, int nargs, ...) {
