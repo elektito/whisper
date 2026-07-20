@@ -164,7 +164,7 @@
 (let ((args (parse-command-line-args)))
   (init-find-library (resolve-library-search-path (reverse (cmdline-library-paths args))))
   (when (not (cmdline-input-file args))
-    (repl (environment '(whisper)))
+    (repl (environment '(whisper) '(scheme eval)))
     (exit 0))
   (postprocess-cmdline args)
   (let ((port (open-input-file (cmdline-input-file args))))
