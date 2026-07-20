@@ -12,7 +12,7 @@
 
 enum call_flags {
     NO_CALL_FLAGS = 0,
-    CALL_HAS_ARG_ARRAY = 1,
+    CALL_HAS_ARG_ARRAY = 1, /* first vararg is a value* of all args; see primcall_apply */
 };
 
 typedef void *value;
@@ -269,17 +269,7 @@ struct object {
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
-#define free_args() va_end(argsx); free(arg_arr_base)
-
-/* primcall_apply malloc's an args array and passes it via
- * CALL_HAS_ARG_ARRAY. The callee's arg_arr_base is a raw malloc pointer
- * invisible to the conservative GC stack scan. This stack tracks active
- * arrays so the GC can scan their contents directly. */
-struct args_array_frame {
-    value *args;
-    int    n;
-    struct args_array_frame *prev;
-};
+#define free_args() va_end(argsx)
 
 struct kind_proc {
     value kind;

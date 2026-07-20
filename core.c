@@ -9,8 +9,6 @@
 
 /*************** static variables **************/
 
-static struct args_array_frame *args_array_stack = NULL;
-
 static uint64_t gensym_counter;
 
 static int n_wrapped_print_procs = 0;
@@ -678,11 +676,6 @@ static void gc(void) {
 
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
-
-    /* scan any malloc'd args arrays live on the call stack (see args_array_stack) */
-    for (struct args_array_frame *f = args_array_stack; f; f = f->prev)
-        for (int i = 0; i < f->n; i++)
-            gc_recurse(f->args[i]);
 
     struct pool *heaps[] = {
         symbols_heap,
@@ -1471,38 +1464,52 @@ value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 0) { RAISE("apply needs at least one argument"); }
+    if (nargs < 2) { RAISE("apply needs a procedure and a list argument"); }
     init_args();
 
     value func = next_arg();
     if (!IS_CLOSURE(func)) { RAISE("apply first argument is not a procedure"); }
 
-    /* allocate memory for all arguments except the last one (which should be a list) */
-    int n_pre_list_args = nargs - 2;
-    value *args = malloc(sizeof(value) * n_pre_list_args);
-    for (int i = 0; i < n_pre_list_args; ++i) {
-        args[i] = next_arg();
+    /* the arguments arrive through a va_list, so we must read the leading
+       fixed args before we can reach the trailing list and learn the total
+       count. hold them on the C stack (which the conservative scan covers)
+       until the vector below exists. */
+    int n_pre = nargs - 2;
+    value pre[n_pre > 0 ? n_pre : 1];
+    for (int i = 0; i < n_pre; ++i) {
+        pre[i] = next_arg();
     }
 
     value args_list = next_arg();
     if (!IS_PAIR(args_list) && args_list != NIL) { RAISE("apply last argument is not a list"); }
 
-    int args_list_len = 0;
-    value ptr = args_list;
-    while (ptr != NIL) { args_list_len++; ptr = GET_PAIR(ptr)->cdr; }
+    int list_len = 0;
+    for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) { ++list_len; }
+    int func_nargs = n_pre + list_len;
 
-    int func_nargs = n_pre_list_args + args_list_len;
-    args = realloc(args, sizeof(value) * func_nargs);
-    ptr = args_list;
-    for (int i = n_pre_list_args; i < func_nargs; ++i) {
-        args[i] = GET_PAIR(ptr)->car;
-        ptr = GET_PAIR(ptr)->cdr;
+    /* build the call's arguments in a GC vector. it is a normal heap object,
+       so nothing here mallocs or frees and a non-local exit leaks nothing. */
+    value argvec = make_vector(func_nargs, VOID);
+    value *args = GET_OBJECT(argvec)->vector.data;
+    for (int i = 0; i < n_pre; ++i) {
+        args[i] = pre[i];
+    }
+    int i = n_pre;
+    for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) {
+        args[i++] = GET_PAIR(p)->car;
     }
 
-    struct args_array_frame frame = { args, func_nargs, args_array_stack };
-    args_array_stack = &frame;
+    /* `args` is an interior pointer into argvec's buffer and is
+     * invisible to the conservative scan. the callee might allocate
+     * (and trigger GC), so argvec must stay findable on this frame for
+     * its whole duration: the keep_alive after the call stops the
+     * optimizer from dropping argvec once `args` has been derived,
+     * which would let the sweep free the buffer out from under the
+     * callee. nothing allocates between here and the call, so there is
+     * no earlier window to guard. */
     value ret = GET_CLOSURE(func)->func(GET_CLOSURE(func)->freevars, CALL_HAS_ARG_ARRAY, func_nargs, args);
-    args_array_stack = frame.prev;
+    volatile value keep_alive = argvec;
+    (void) keep_alive;
 
     free_args();
     return ret;
