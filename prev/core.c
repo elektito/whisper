@@ -9,8 +9,6 @@
 
 /*************** static variables **************/
 
-static struct args_array_frame *args_array_stack = NULL;
-
 static uint64_t gensym_counter;
 
 static int n_wrapped_print_procs = 0;
@@ -24,6 +22,10 @@ static struct object current_error_port;
 static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
 
+/* multiplier applied to the live count to pick the next gc_threshold.
+ * overridable via GC_THRESHOLD_MULTIPLIER for experimentation. */
+static int gc_threshold_multiplier = 0;
+
 /* we're gonna call a linked list of pools, a heap. */
 static struct pool *symbols_heap;
 static struct pool *pairs_heap;
@@ -34,6 +36,9 @@ static struct pool *closure1s_heap;
 static struct pool *closure2s_heap;
 static struct pool *closure3s_heap;
 static struct pool *closures_heap;
+
+static void *lbound_all_heaps = 0;
+static void *ubound_all_heaps = 0;
 
 /*************** non-static variables **************/
 
@@ -339,6 +344,13 @@ static struct pool *create_heap(int object_size, uint64_t tag) {
     pool->end = (void*) pool + total_size;
     pool->tag = tag;
 
+    if (lbound_all_heaps == 0 || lbound_all_heaps > pool->start) {
+        lbound_all_heaps = pool->start;
+    }
+    if (ubound_all_heaps == 0 || ubound_all_heaps < pool-> end) {
+        ubound_all_heaps = pool->end;
+    }
+
     return pool;
 }
 
@@ -357,6 +369,14 @@ static struct pool *add_pool(struct pool *pool) {
     new_pool->start = (void*) new_pool + header_size;
     new_pool->end = (void*) new_pool + total_size;
     new_pool->tag = pool->tag;
+
+    if (lbound_all_heaps == 0 || lbound_all_heaps > new_pool->start) {
+        lbound_all_heaps = new_pool->start;
+    }
+    if (ubound_all_heaps == 0 || ubound_all_heaps < new_pool-> end) {
+        ubound_all_heaps = new_pool->end;
+    }
+
     return new_pool;
 }
 
@@ -454,6 +474,9 @@ static int is_valid_value(void *ptr, struct pool *heap) {
     /* the pointer should have a valid address and a correct tag to be a
      * valid value */
 
+    if (ptr < lbound_all_heaps || ptr >= ubound_all_heaps)
+        return 0;
+
     struct pool *pool = heap;
     int found = 0;
     while (pool) {
@@ -519,9 +542,14 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
     struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
 
     for (void **p = cur_stack; p < (void**) stack_start; p++) {
+        uint64_t tag = (uint64_t) *p & TAG_MASK;
         for (int i = 0; i < n_heaps; ++i) {
+            if (heaps[i]->tag != tag) {
+                continue;
+            }
             if (is_valid_value(*p, heaps[i])) {
                 gc_recurse(*p);
+                break;
             }
         }
 
@@ -580,6 +608,11 @@ static void gc_free_empty_pools(struct pool **heaps, int n_heaps) {
                 pool->prev->next = next;
                 if (next)
                     next->prev = pool->prev;
+
+                /* we could update lbound_all_heaps and ubound_all_heaps
+                 * here too, but those are for quick checks anyways and
+                 * updating them here would be a bit messy. */
+
                 free(pool);
             }
 
@@ -679,11 +712,6 @@ static void gc(void) {
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
-    /* scan any malloc'd args arrays live on the call stack (see args_array_stack) */
-    for (struct args_array_frame *f = args_array_stack; f; f = f->prev)
-        for (int i = 0; i < f->n; i++)
-            gc_recurse(f->args[i]);
-
     struct pool *heaps[] = {
         symbols_heap,
         pairs_heap,
@@ -701,9 +729,16 @@ static void gc(void) {
     gc_sweep(heaps, n_heaps);
     gc_free_empty_pools(heaps, n_heaps);
 
-    /* set the next gc threshold to 2x the current live object count so
-     * that GC frequency adapts to the size of the live set (in
-     * allocations, not bytes) */
+    if (gc_threshold_multiplier == 0) {
+        char *env = getenv("GC_THRESHOLD_MULTIPLIER");
+        gc_threshold_multiplier = env ? atoi(env) : 0;
+        if (gc_threshold_multiplier <= 0)
+            gc_threshold_multiplier = 4;
+    }
+
+    /* set the next gc threshold to gc_threshold_multiplier times the
+     * current live object count so that GC frequency adapts to the size
+     * of the live set (in allocations, not bytes) */
     size_t live_count = 0;
     for (int i = 0; i < n_heaps; ++i) {
         for (struct pool *p = heaps[i]; p; p = p->next)
@@ -712,7 +747,8 @@ static void gc(void) {
 
     /* floor at POOL_SIZE so we don't GC on every allocation when the
      * live set is very small */
-    gc_threshold = live_count * 2 < POOL_SIZE ? POOL_SIZE : live_count * 2;
+    size_t scaled = live_count * gc_threshold_multiplier;
+    gc_threshold = scaled < POOL_SIZE ? POOL_SIZE : scaled;
     allocations_since_gc = 0;
 }
 
@@ -1317,26 +1353,7 @@ value env_ref(value e, value sym) {
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
     struct symbol *s = GET_SYMBOL(sym);
     if (ht == NULL) {
-        switch (s->kind) {
-        case sym_unbound:
-            RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
-        case sym_macro:
-            RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
-        case sym_special:
-            RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
-        case sym_aux:
-            RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
-        case sym_value:
-            return GET_SYMBOL(sym)->value;
-        case sym_primcall:
-            /* s->value is the canonical primcall name symbol. that
-             * symbol's own 'value is set to a real closure. */
-            return GET_SYMBOL(s->value)->value;
-        case sym_alias:
-            return env_ref(e, s->value);
-        default:
-            RAISE("internal error: unhandled sym_kind case");
-        }
+        return global_env_ref(sym);
     }
 
     struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
@@ -1471,38 +1488,52 @@ value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 0) { RAISE("apply needs at least one argument"); }
+    if (nargs < 2) { RAISE("apply needs a procedure and a list argument"); }
     init_args();
 
     value func = next_arg();
     if (!IS_CLOSURE(func)) { RAISE("apply first argument is not a procedure"); }
 
-    /* allocate memory for all arguments except the last one (which should be a list) */
-    int n_pre_list_args = nargs - 2;
-    value *args = malloc(sizeof(value) * n_pre_list_args);
-    for (int i = 0; i < n_pre_list_args; ++i) {
-        args[i] = next_arg();
+    /* the arguments arrive through a va_list, so we must read the leading
+       fixed args before we can reach the trailing list and learn the total
+       count. hold them on the C stack (which the conservative scan covers)
+       until the vector below exists. */
+    int n_pre = nargs - 2;
+    value pre[n_pre > 0 ? n_pre : 1];
+    for (int i = 0; i < n_pre; ++i) {
+        pre[i] = next_arg();
     }
 
     value args_list = next_arg();
     if (!IS_PAIR(args_list) && args_list != NIL) { RAISE("apply last argument is not a list"); }
 
-    int args_list_len = 0;
-    value ptr = args_list;
-    while (ptr != NIL) { args_list_len++; ptr = GET_PAIR(ptr)->cdr; }
+    int list_len = 0;
+    for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) { ++list_len; }
+    int func_nargs = n_pre + list_len;
 
-    int func_nargs = n_pre_list_args + args_list_len;
-    args = realloc(args, sizeof(value) * func_nargs);
-    ptr = args_list;
-    for (int i = n_pre_list_args; i < func_nargs; ++i) {
-        args[i] = GET_PAIR(ptr)->car;
-        ptr = GET_PAIR(ptr)->cdr;
+    /* build the call's arguments in a GC vector. it is a normal heap object,
+       so nothing here mallocs or frees and a non-local exit leaks nothing. */
+    value argvec = make_vector(func_nargs, VOID);
+    value *args = GET_OBJECT(argvec)->vector.data;
+    for (int i = 0; i < n_pre; ++i) {
+        args[i] = pre[i];
+    }
+    int i = n_pre;
+    for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) {
+        args[i++] = GET_PAIR(p)->car;
     }
 
-    struct args_array_frame frame = { args, func_nargs, args_array_stack };
-    args_array_stack = &frame;
+    /* `args` is an interior pointer into argvec's buffer and is
+     * invisible to the conservative scan. the callee might allocate
+     * (and trigger GC), so argvec must stay findable on this frame for
+     * its whole duration: the keep_alive after the call stops the
+     * optimizer from dropping argvec once `args` has been derived,
+     * which would let the sweep free the buffer out from under the
+     * callee. nothing allocates between here and the call, so there is
+     * no earlier window to guard. */
     value ret = GET_CLOSURE(func)->func(GET_CLOSURE(func)->freevars, CALL_HAS_ARG_ARRAY, func_nargs, args);
-    args_array_stack = frame.prev;
+    volatile value keep_alive = argvec;
+    (void) keep_alive;
 
     free_args();
     return ret;
@@ -1899,6 +1930,24 @@ value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("newline argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, CHAR('\n'));
     return VOID;
+}
+
+value primcall_not(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("not needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(v == FALSE);
+}
+
+value primcall_null_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("null? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(v == NIL);
 }
 
 value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) {

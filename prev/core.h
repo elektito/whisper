@@ -12,7 +12,7 @@
 
 enum call_flags {
     NO_CALL_FLAGS = 0,
-    CALL_HAS_ARG_ARRAY = 1,
+    CALL_HAS_ARG_ARRAY = 1, /* first vararg is a value* of all args; see primcall_apply */
 };
 
 typedef void *value;
@@ -269,17 +269,7 @@ struct object {
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
-#define free_args() va_end(argsx); free(arg_arr_base)
-
-/* primcall_apply malloc's an args array and passes it via
- * CALL_HAS_ARG_ARRAY. The callee's arg_arr_base is a raw malloc pointer
- * invisible to the conservative GC stack scan. This stack tracks active
- * arrays so the GC can scan their contents directly. */
-struct args_array_frame {
-    value *args;
-    int    n;
-    struct args_array_frame *prev;
-};
+#define free_args() va_end(argsx)
 
 struct kind_proc {
     value kind;
@@ -341,6 +331,41 @@ extern const char *find_func_name(funcptr func);
 extern void env_define(value e, value sym, value val, enum sym_kind kind);
 extern value env_ref(value e, value sym);
 
+/* env_ref's ht == NULL branch, factored out so generated executable
+ * code (which always has a NULL-hash-table global_env, see
+ * make_global_env) can call it directly instead of through env_ref. GCC
+ * does not inline this at its call sites (it's too big once RAISE is
+ * expanded), but being static still lets it be called directly instead
+ * of through the PLT indirection a plain extern core.c function needs
+ * in a PIE binary (which our binary seems to be by default, at least on
+ * a modern Linux system this was tested on), which is where the win
+ * actually comes from.
+ *
+ * Only valid when the environment is known to never have a hash table
+ * attached, which does not hold for a library's global_env, since that
+ * one can be handed an arbitrary environment via run-so. */
+static value global_env_ref(value sym) {
+    struct symbol *s = GET_SYMBOL(sym);
+    switch (s->kind) {
+    case sym_unbound:
+        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+    case sym_macro:
+        RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+    case sym_special:
+        RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+    case sym_aux:
+        RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
+    case sym_value:
+        return s->value;
+    case sym_primcall:
+        return GET_SYMBOL(s->value)->value;
+    case sym_alias:
+        return global_env_ref(s->value);
+    default:
+        RAISE("internal error: unhandled sym_kind case");
+    }
+}
+
 extern void init_symbols(void);
 extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
@@ -386,6 +411,8 @@ extern value primcall_list_to_vector(environment env, enum call_flags flags, int
 extern value primcall_make_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_newline(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_not(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_null_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_number_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_input_file(environment env, enum call_flags flags, int nargs, ...);
