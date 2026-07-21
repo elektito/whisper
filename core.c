@@ -538,9 +538,14 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
     struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
 
     for (void **p = cur_stack; p < (void**) stack_start; p++) {
+        uint64_t tag = (uint64_t) *p & TAG_MASK;
         for (int i = 0; i < n_heaps; ++i) {
+            if (heaps[i]->tag != tag) {
+                continue;
+            }
             if (is_valid_value(*p, heaps[i])) {
                 gc_recurse(*p);
+                break;
             }
         }
 
