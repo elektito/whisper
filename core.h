@@ -411,6 +411,8 @@ extern value primcall_list_to_vector(environment env, enum call_flags flags, int
 extern value primcall_make_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_newline(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_not(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_null_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_number_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_input_file(environment env, enum call_flags flags, int nargs, ...);

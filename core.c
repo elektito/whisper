@@ -1932,6 +1932,24 @@ value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
     return VOID;
 }
 
+value primcall_not(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("not needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(v == FALSE);
+}
+
+value primcall_null_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("null? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(v == NIL);
+}
+
 value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { RAISE("number? needs a single argument"); }
     init_args();
