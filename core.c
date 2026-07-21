@@ -1353,26 +1353,7 @@ value env_ref(value e, value sym) {
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
     struct symbol *s = GET_SYMBOL(sym);
     if (ht == NULL) {
-        switch (s->kind) {
-        case sym_unbound:
-            RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
-        case sym_macro:
-            RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
-        case sym_special:
-            RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
-        case sym_aux:
-            RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
-        case sym_value:
-            return GET_SYMBOL(sym)->value;
-        case sym_primcall:
-            /* s->value is the canonical primcall name symbol. that
-             * symbol's own 'value is set to a real closure. */
-            return GET_SYMBOL(s->value)->value;
-        case sym_alias:
-            return env_ref(e, s->value);
-        default:
-            RAISE("internal error: unhandled sym_kind case");
-        }
+        return global_env_ref(sym);
     }
 
     struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);

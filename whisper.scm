@@ -1265,7 +1265,13 @@
                  (gen-code func indent "value x~a = envget(env, ~a);\n" varnum idx)))))
       ((global alias)
        (intern (func-program func) (binding-meaning b))
-       (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form)))
+       ;; global_env is only ever a fresh, NULL-hash-table environment
+       ;; for a plain executable. a library can be handed an arbitrary
+       ;; environment via run-so, so it must keep going through the
+       ;; general env_ref.
+       (if (program-library-mode (func-program func))
+           (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form))
+           (gen-code func indent "value x~a = global_env_ref(symb~a);\n" varnum (mangle-name form))))
       ((primcall)
        (intern (func-program func) (identifier-name form))
        (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n"

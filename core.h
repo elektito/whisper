@@ -331,6 +331,41 @@ extern const char *find_func_name(funcptr func);
 extern void env_define(value e, value sym, value val, enum sym_kind kind);
 extern value env_ref(value e, value sym);
 
+/* env_ref's ht == NULL branch, factored out so generated executable
+ * code (which always has a NULL-hash-table global_env, see
+ * make_global_env) can call it directly instead of through env_ref. GCC
+ * does not inline this at its call sites (it's too big once RAISE is
+ * expanded), but being static still lets it be called directly instead
+ * of through the PLT indirection a plain extern core.c function needs
+ * in a PIE binary (which our binary seems to be by default, at least on
+ * a modern Linux system this was tested on), which is where the win
+ * actually comes from.
+ *
+ * Only valid when the environment is known to never have a hash table
+ * attached, which does not hold for a library's global_env, since that
+ * one can be handed an arbitrary environment via run-so. */
+static value global_env_ref(value sym) {
+    struct symbol *s = GET_SYMBOL(sym);
+    switch (s->kind) {
+    case sym_unbound:
+        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+    case sym_macro:
+        RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+    case sym_special:
+        RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+    case sym_aux:
+        RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
+    case sym_value:
+        return s->value;
+    case sym_primcall:
+        return GET_SYMBOL(s->value)->value;
+    case sym_alias:
+        return global_env_ref(s->value);
+    default:
+        RAISE("internal error: unhandled sym_kind case");
+    }
+}
+
 extern void init_symbols(void);
 extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
