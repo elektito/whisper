@@ -33,6 +33,9 @@ static struct pool *closure2s_heap;
 static struct pool *closure3s_heap;
 static struct pool *closures_heap;
 
+static void *lbound_all_heaps = 0;
+static void *ubound_all_heaps = 0;
+
 /*************** non-static variables **************/
 
 /* the stack address at the start of main function (used for gc) */
@@ -337,6 +340,13 @@ static struct pool *create_heap(int object_size, uint64_t tag) {
     pool->end = (void*) pool + total_size;
     pool->tag = tag;
 
+    if (lbound_all_heaps == 0 || lbound_all_heaps > pool->start) {
+        lbound_all_heaps = pool->start;
+    }
+    if (ubound_all_heaps == 0 || ubound_all_heaps < pool-> end) {
+        ubound_all_heaps = pool->end;
+    }
+
     return pool;
 }
 
@@ -355,6 +365,14 @@ static struct pool *add_pool(struct pool *pool) {
     new_pool->start = (void*) new_pool + header_size;
     new_pool->end = (void*) new_pool + total_size;
     new_pool->tag = pool->tag;
+
+    if (lbound_all_heaps == 0 || lbound_all_heaps > new_pool->start) {
+        lbound_all_heaps = new_pool->start;
+    }
+    if (ubound_all_heaps == 0 || ubound_all_heaps < new_pool-> end) {
+        ubound_all_heaps = new_pool->end;
+    }
+
     return new_pool;
 }
 
@@ -451,6 +469,9 @@ static void gc_recurse(value v) {
 static int is_valid_value(void *ptr, struct pool *heap) {
     /* the pointer should have a valid address and a correct tag to be a
      * valid value */
+
+    if (ptr < lbound_all_heaps || ptr >= ubound_all_heaps)
+        return 0;
 
     struct pool *pool = heap;
     int found = 0;
@@ -578,6 +599,11 @@ static void gc_free_empty_pools(struct pool **heaps, int n_heaps) {
                 pool->prev->next = next;
                 if (next)
                     next->prev = pool->prev;
+
+                /* we could update lbound_all_heaps and ubound_all_heaps
+                 * here too, but those are for quick checks anyways and
+                 * updating them here would be a bit messy. */
+
                 free(pool);
             }
 
