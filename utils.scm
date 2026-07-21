@@ -139,9 +139,6 @@
 (define (atom? x)
   (not (pair? x)))
 
-(define (not x)
-  (if (eq? x #f) #t #f))
-
 (define (zero? x)
   (eq? x 0))
 
@@ -181,9 +178,6 @@
 (define (cddadr x) (cdr (cdr (car (cdr x)))))
 (define (cdddar x) (cdr (cdr (cdr (car x)))))
 (define (cddddr x) (cdr (cdr (cdr (cdr x)))))
-
-(define (null? x)
-  (eq? '() x))
 
 (define (list? v)
   (if (null? v)
