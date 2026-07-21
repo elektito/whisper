@@ -22,6 +22,10 @@ static struct object current_error_port;
 static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
 
+/* multiplier applied to the live count to pick the next gc_threshold.
+ * overridable via GC_THRESHOLD_MULTIPLIER for experimentation. */
+static int gc_threshold_multiplier = 0;
+
 /* we're gonna call a linked list of pools, a heap. */
 static struct pool *symbols_heap;
 static struct pool *pairs_heap;
@@ -725,9 +729,16 @@ static void gc(void) {
     gc_sweep(heaps, n_heaps);
     gc_free_empty_pools(heaps, n_heaps);
 
-    /* set the next gc threshold to 2x the current live object count so
-     * that GC frequency adapts to the size of the live set (in
-     * allocations, not bytes) */
+    if (gc_threshold_multiplier == 0) {
+        char *env = getenv("GC_THRESHOLD_MULTIPLIER");
+        gc_threshold_multiplier = env ? atoi(env) : 0;
+        if (gc_threshold_multiplier <= 0)
+            gc_threshold_multiplier = 2;
+    }
+
+    /* set the next gc threshold to gc_threshold_multiplier times the
+     * current live object count so that GC frequency adapts to the size
+     * of the live set (in allocations, not bytes) */
     size_t live_count = 0;
     for (int i = 0; i < n_heaps; ++i) {
         for (struct pool *p = heaps[i]; p; p = p->next)
@@ -736,7 +747,8 @@ static void gc(void) {
 
     /* floor at POOL_SIZE so we don't GC on every allocation when the
      * live set is very small */
-    gc_threshold = live_count * 2 < POOL_SIZE ? POOL_SIZE : live_count * 2;
+    size_t scaled = live_count * gc_threshold_multiplier;
+    gc_threshold = scaled < POOL_SIZE ? POOL_SIZE : scaled;
     allocations_since_gc = 0;
 }
 
