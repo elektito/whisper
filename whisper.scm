@@ -1433,21 +1433,6 @@
                             acc)
                     (cons form acc)))))))
 
-;; compiles each top-level form in lib-env; returns macros with any
-;; define-syntax form's raw source appended, since the manifest needs
-;; it.
-(define (compile-forms-and-gather-macros func lib-env forms)
-  (let loop ((macros '()) (forms forms))
-    (if (null? forms)
-        macros
-        (let* ((form (car forms))
-               (head (and (pair? form) (resolve-head (car form) lib-env))))
-          (compile-top-level-form func lib-env form)
-          (loop (if (and head (binding-is-special head 'define-syntax))
-                    (cons form macros)
-                    macros)
-                (cdr forms))))))
-
 ;; parses one export spec into (local-name . export-name); a bare symbol
 ;; exports itself, (rename local export) exports under a different name.
 (define (parse-export-spec spec)
@@ -1467,8 +1452,7 @@
     (compilation-unit-library-name-set! cu lib-name)
     (let loop ((decls (cddr form))
                (imports '())
-               (export-names '())
-               (macros '()))
+               (export-names '()))
       (if (null? decls)
           (begin
             (raise-if-undefined
@@ -1485,7 +1469,9 @@
                                     '())))
               (program-libraries-set!
                program
-               (cons (make-library lib-name (reverse imports) exports (reverse macros) value-defines #f)
+               (cons (make-library lib-name (reverse imports) exports
+                                   (reverse (compilation-unit-syntax-defs cu))
+                                   value-defines #f)
                      (program-libraries program)))))
           (let ((decl (car decls)))
             (unless (and (pair? decl) (symbol? (car decl)))
@@ -1493,23 +1479,21 @@
             (case (car decl)
               ((import)
                (process-import decl lib-env)
-               (loop (cdr decls) (cons decl imports) export-names macros))
+               (loop (cdr decls) (cons decl imports) export-names))
               ((export)
                (loop (cdr decls) imports
-                     (append export-names (map parse-export-spec (cdr decl))) macros))
+                     (append export-names (map parse-export-spec (cdr decl)))))
               ((begin)
-               (loop (cdr decls) imports export-names
-                     (append (compile-forms-and-gather-macros func lib-env (cdr decl))
-                             macros)))
+               (for-each (lambda (f) (compile-top-level-form func lib-env f)) (cdr decl))
+               (loop (cdr decls) imports export-names))
               ((include)
-               (loop (cdr decls) imports export-names
-                     (append (compile-forms-and-gather-macros
-                              func lib-env (apply append (map read-source-forms (cdr decl))))
-                             macros)))
+               (for-each (lambda (f) (compile-top-level-form func lib-env f))
+                         (apply append (map read-source-forms (cdr decl))))
+               (loop (cdr decls) imports export-names))
               ((include-library-declarations)
                (loop (append (apply append (map read-all-forms (cdr decl)))
                              (cdr decls))
-                     imports export-names macros))
+                     imports export-names))
               ((include-ci)
                (compile-error "include-ci is not yet supported in define-library"))
               ((cond-expand)

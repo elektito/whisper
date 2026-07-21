@@ -327,12 +327,16 @@
 ;; runs after a successful compilation, so a failed unit leaves no trace
 ;; behind.
 (define-record-type <compilation-unit>
-  (make-compilation-unit defines refs program-mode? past-imports? seen-import? library-name imports import-origins)
+  (make-compilation-unit defines syntax-defs refs program-mode? past-imports? seen-import? library-name imports import-origins)
   compilation-unit?
 
   ;; mapping name (binder key) to binding record, for defines/declares/
   ;; define-syntax seen textually earlier in this unit
   (defines compilation-unit-defines)
+
+  ;; flat list of raw define-syntax forms processed at this unit's
+  ;; top-level, most recently processed first
+  (syntax-defs compilation-unit-syntax-defs compilation-unit-syntax-defs-set!)
 
   ;; mapping name to ref-info, recorded during expansion for the
   ;; undefined variable check
@@ -370,7 +374,7 @@
   (import-origins compilation-unit-import-origins))
 
 (define (new-compilation-unit program-mode?)
-  (make-compilation-unit (make-hash-table) (make-hash-table) program-mode? #f #f #f '() (make-hash-table)))
+  (make-compilation-unit (make-hash-table) '() (make-hash-table) program-mode? #f #f #f '() (make-hash-table)))
 
 ;;;;;; expand root env ;;;;;;
 
@@ -981,12 +985,30 @@
           form
           (append form (list (list (identifier 'primcall 'void 'void)))))))
 
+;; strips every <identifier> in form down to its bare name, recursively.
+;; used to make a macro-expansion-produced define-syntax form writable
+;; to the manifest as plain text. safe because process-define-syntax
+;; never reuses the result as already-resolved code - it rebuilds the
+;; transformer from scratch via compile-transformer /
+;; compile-syntax-rules, exactly as for hand-written source, so whatever
+;; the identifiers resolved to during expansion is discarded before it
+;; can matter.
+(define (unexpand-form form)
+  (cond ((identifier? form) (identifier-name form))
+        ((pair? form) (cons (unexpand-form (car form)) (unexpand-form (cdr form))))
+        ((vector? form) (list->vector (map unexpand-form (vector->list form))))
+        (else form)))
+
 (define (process-define-syntax form env)
   (let* ((transformer (compile-transformer (caddr form) env))
          (key (binder-key (cadr form)))
          (binding (new-binding 'macro transformer)))
     (if (expand-root-env? env)
-        (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) key binding)
+        (let ((cu (expand-root-env-compilation-unit env)))
+          (hash-table-set! (compilation-unit-defines cu) key binding)
+          ;; a library reads this back to build its manifest's macros
+          ;; list
+          (compilation-unit-syntax-defs-set! cu (cons (unexpand-form form) (compilation-unit-syntax-defs cu))))
         (expand-env-add-identifier! env (make-identifier key binding)))
     transformer))
 
