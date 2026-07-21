@@ -733,7 +733,7 @@ static void gc(void) {
         char *env = getenv("GC_THRESHOLD_MULTIPLIER");
         gc_threshold_multiplier = env ? atoi(env) : 0;
         if (gc_threshold_multiplier <= 0)
-            gc_threshold_multiplier = 2;
+            gc_threshold_multiplier = 4;
     }
 
     /* set the next gc threshold to gc_threshold_multiplier times the
