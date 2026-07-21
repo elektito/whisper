@@ -1361,3 +1361,39 @@
   (define x 42)
   (getx))
 (= 42 (mixf))
+
+;; tco: self tail calls compile to a goto. capture of an unmutated loop
+;; var must see that iteration's own value, not the final one.
+(equal? '(0 1 2)
+        (let loop ((i 0) (thunks '()))
+          (if (= i 3)
+              (map (lambda (t) (t)) (reverse thunks))
+              (loop (+ i 1) (cons (lambda () i) thunks)))))
+
+;; tco: a captured AND set!-mutated loop var must get a fresh box each
+;; iteration, so earlier closures don't alias the final value.
+(equal? '(1 2 3)
+        (let loop ((i 0) (thunks '()))
+          (if (= i 3)
+              (map (lambda (t) (t)) (reverse thunks))
+              (let ((c (lambda () i)))
+                (set! i (+ i 1))
+                (loop i (cons c thunks))))))
+
+;; tco: a non-tail self call must still go through the normal call path
+;; and compute correctly.
+(= 15 (let loop ((n 5))
+        (if (= n 0) 0 (+ n (loop (- n 1))))))
+
+;; tco: a loop closure that escapes and is called again later from a
+;; different function must go through the real closure call, not a goto.
+(let ((escaped-loop #f))
+  (let ((result (let loop ((i 0) (acc 0))
+                  (set! escaped-loop loop)
+                  (if (= i 5) acc (loop (+ i 1) (+ acc i))))))
+    (and (= 10 result)
+         (= 110 (escaped-loop 0 100)))))
+
+;; tco: a deep iteration count that would previously overflow the C
+;; stack must run in constant stack space.
+(= 10000000 (let loop ((i 0)) (if (= i 10000000) i (loop (+ i 1)))))

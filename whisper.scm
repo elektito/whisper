@@ -746,12 +746,13 @@
         (loop (cdr lst))))
     ht))
 
-;;; compiles a list of forms and returns their varnums as a list
+;; compiles a list of forms and returns their varnums as a list.
+;; arguments are never in tail position
 (define (compile-list-of-forms func indent forms)
   (let loop ((varnums '()) (forms forms))
     (if (null? forms)
         (reverse varnums)
-        (loop (cons (compile-form func indent (car forms)) varnums)
+        (loop (cons (compile-form func indent (car forms) #f) varnums)
               (cdr forms)))))
 
 ;;; like compile-list-of-forms, but calls compile-quoted-item instead of
@@ -813,11 +814,11 @@
             (loop (+ i 1) (cdr symbols))))))
 
 (define (compile-quoted-item func indent form)
-  (cond ((boolean? form) (compile-form func indent form))
-        ((number? form) (compile-form func indent form))
-        ((char? form) (compile-form func indent form))
-        ((string? form) (compile-form func indent form))
-        ((vector? form) (compile-form func indent form))
+  (cond ((boolean? form) (compile-form func indent form #f))
+        ((number? form) (compile-form func indent form #f))
+        ((char? form) (compile-form func indent form #f))
+        ((string? form) (compile-form func indent form #f))
+        ((vector? form) (compile-form func indent form #f))
         ((identifier? form) (let ((varnum (func-next-varnum func)))
                               (intern (func-program func) (identifier-name form))
                               (gen-code func indent "value x~a = symb~a;\n" varnum (mangle-name (identifier-name form)))
@@ -868,11 +869,12 @@
                 ((atom? params) (list (reverse proper-params) params))
                 (else (loop (cons (car params) proper-params) (cdr params))))))))
 
-(define (compile-lambda func indent form)
+(define (compile-lambda func indent form eligible-binding)
   (let ((params-and-rest (parse-lambda-params form)))
     (let ((params (car params-and-rest))
           (rest-param (cadr params-and-rest)))
-      (let ((new-func (add-function (func-program func) func)))
+      (let ((new-func (add-function (func-program func) func))
+            (self-tail-callable? (and eligible-binding (not rest-param))))
         ;; add binding owners
         (let loop ((params params))
           (unless (null? params)
@@ -881,9 +883,9 @@
         (when rest-param
           (binding-owner-set! (identifier-binding rest-param) new-func))
 
-        (if (eq? rest-param #f)
-            (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
-            (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function: %s\", find_func_name(~a));\n" (length params) (func-name new-func)))
+        (if rest-param
+            (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
+            (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func)))
 
         ;; generate code for reading arguments
         (gen-code new-func 1 "init_args();\n")
@@ -894,10 +896,17 @@
               (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-unique-name (car params)) (mangle-unique-name (car params))))
             (loop (cdr params))))
 
-        (unless (eq? rest-param #f)
+        (when rest-param
           (gen-code new-func 1 "value ~a = NIL;\n" (mangle-unique-name rest-param))
           (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))
           (gen-code new-func 1 "~a = reverse_list(~a, NIL);\n" (mangle-name rest-param) (mangle-name rest-param)))
+
+        ;; this lambda is the sole, never-set! init of a letrec binding
+        ;; with no rest param: record it so a self tail call inside the
+        ;; body can be compiled to a goto here instead of a real call
+        (when self-tail-callable?
+          (binding-self-func-set! eligible-binding (cons new-func params))
+          (gen-code new-func 1 "~a_entry:;\n" (func-name new-func)))
 
         (gen-code new-func 1 "\n")
 
@@ -910,7 +919,7 @@
                   (gen-code new-func 1 "leave_proc();\n"))
                 (gen-code new-func 1 "return x~a;\n" varnum))
               (let ((form (car body)))
-                (loop (cdr body) (compile-form new-func 1 form)))))
+                (loop (cdr body) (compile-form new-func 1 form (null? (cdr body)))))))
 
         ;; generate the code for referencing the function
         (let ((varnum (func-next-varnum func)))
@@ -934,14 +943,14 @@
           ;; return function varnum
           varnum)))))
 
-(define (compile-let func indent form)
+(define (compile-let func indent form tail?)
   (let ((let-varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = VOID;\n" let-varnum)
     (gen-code func indent "{\n")
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
         (binding-owner-set! (identifier-binding (caar bindings)) func)
-        (let ((varnum (compile-form func (+ 1 indent) (cadar bindings))))
+        (let ((varnum (compile-form func (+ 1 indent) (cadar bindings) #f)))
           (if (var-is-modified? (caar bindings))
               (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-unique-name (caar bindings)) varnum)
               (gen-code func (+ 1 indent) "value ~a = x~a;\n" (mangle-unique-name (caar bindings)) varnum))
@@ -951,12 +960,39 @@
       (if (null? body)
           (gen-code func (+ 1 indent) "x~a = x~a;\n" let-varnum last-varnum)
           (loop (cdr body)
-                (compile-form func (+ 1 indent) (car body)))))
+                (compile-form func (+ 1 indent) (car body) (and tail? (null? (cdr body)))))))
     (gen-code func indent "}\n")
     let-varnum))
 
-(define (compile-letrec func indent form)
-  (let ((letrec-varnum (func-next-varnum func)))
+;; true if form is syntactically (lambda ...), i.e. its head is bound
+;; to the lambda special form. used to spot letrec bindings eligible
+;; for the self-tail-call goto shortcut (see compile-lambda).
+(define (lambda-form? form)
+  (and (pair? form) (identifier-is-special (car form) 'lambda #f)))
+
+;; bindings of the given letrec/letrec* form whose init is a lambda
+;; never set! by user code. must be computed before force-marking all
+;; letrec/letrec* bindings.
+(define (eligible-letrec-bindings form)
+  (let loop ((bindings (cadr form)) (acc '()))
+    (if (null? bindings)
+        acc
+        (loop (cdr bindings)
+              (let ((b (identifier-binding (caar bindings))))
+                (if (and (not (binding-mutated? b)) (lambda-form? (cadar bindings)))
+                    (cons b acc)
+                    acc))))))
+
+;; compile a letrec/letrec* binding's init form, calling compile-lambda
+;; directly when its binding was found eligible
+(define (compile-letrec-init func indent binding init-form eligible-bindings)
+  (if (memq binding eligible-bindings)
+      (compile-lambda func indent init-form binding)
+      (compile-form func indent init-form #f)))
+
+(define (compile-letrec func indent form tail?)
+  (let ((letrec-varnum (func-next-varnum func))
+        (eligible-bindings (eligible-letrec-bindings form)))
     (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
     (gen-code func indent "{\n")
 
@@ -985,7 +1021,9 @@
              (if (null? bindings)
                  (reverse acc)
                  (loop (cdr bindings)
-                       (cons (compile-form func (+ 1 indent) (cadar bindings)) acc))))))
+                       (cons (compile-letrec-init func (+ 1 indent) (identifier-binding (caar bindings))
+                                                  (cadar bindings) eligible-bindings)
+                             acc))))))
       ;; assign results
       (let loop ((bindings (cadr form)) (varnums init-varnums))
         (unless (null? bindings)
@@ -998,13 +1036,14 @@
         (if (null? body)
             (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum)
             (loop (cdr body)
-                  (compile-form func (+ 1 indent) (car body)))))
+                  (compile-form func (+ 1 indent) (car body) (and tail? (null? (cdr body)))))))
 
       (gen-code func indent "}\n")
       letrec-varnum)))
 
-(define (compile-letrec* func indent form)
-  (let ((letrec-varnum (func-next-varnum func)))
+(define (compile-letrec* func indent form tail?)
+  (let ((letrec-varnum (func-next-varnum func))
+        (eligible-bindings (eligible-letrec-bindings form)))
     (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
     (gen-code func indent "{\n")
 
@@ -1030,7 +1069,8 @@
     ;; the next
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (let ((varnum (compile-form func (+ 1 indent) (cadar bindings))))
+        (let ((varnum (compile-letrec-init func (+ 1 indent) (identifier-binding (caar bindings))
+                                            (cadar bindings) eligible-bindings)))
           (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-unique-name (caar bindings)) varnum))
         (loop (cdr bindings))))
 
@@ -1039,7 +1079,7 @@
       (if (null? body)
           (gen-code func (+ 1 indent) "x~a = x~a;\n" letrec-varnum last-varnum)
           (loop (cdr body)
-                (compile-form func (+ 1 indent) (car body)))))
+                (compile-form func (+ 1 indent) (car body) (and tail? (null? (cdr body)))))))
 
     (gen-code func indent "}\n")
     letrec-varnum))
@@ -1057,25 +1097,25 @@
 
     ;; compile init form and either set it as a global variable (if in
     ;; the top-level), or declare it as a variable.
-    (let ((init-varnum (compile-form func indent init-form)))
+    (let ((init-varnum (compile-form func indent init-form #f)))
       (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name name) init-varnum)
 
       ;; define returns no meaningful value (unspecified in Scheme)
       -1)))
 
-(define (compile-if func indent form)
-  (let ((cond-varnum (compile-form func indent (cadr form)))
+(define (compile-if func indent form tail?)
+  (let ((cond-varnum (compile-form func indent (cadr form) #f))
         (one-legged (= (length form) 3)))
     (let ((ret-varnum (func-next-varnum func)))
       (gen-code func indent "value x~a = VOID;\n" ret-varnum)
       (gen-code func indent "if (x~a != FALSE) {\n" cond-varnum)
-      (let ((then-varnum (compile-form func (+ indent 1) (caddr form))))
+      (let ((then-varnum (compile-form func (+ indent 1) (caddr form) tail?)))
         (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum then-varnum)
         (if one-legged
             (gen-code func indent "}\n")
             (begin
               (gen-code func indent "} else {\n")
-              (let ((else-varnum (compile-form func (+ indent 1) (cadddr form))))
+              (let ((else-varnum (compile-form func (+ indent 1) (cadddr form) tail?)))
                 (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum else-varnum)
                 (gen-code func indent "}\n")))))
       ret-varnum)))
@@ -1088,7 +1128,7 @@
     (program-push-port (func-program func) port))
   -1)
 
-(define (compile-begin func indent form)
+(define (compile-begin func indent form tail?)
   (when (= 1 (length form))
     (compile-error "empty begin expression is not allowed"))
   (let ((ret-varnum (func-next-varnum func)))
@@ -1097,14 +1137,14 @@
             (gen-code func indent "value x~a = VOID;\n" ret-varnum)
             (compile-error "empty begin expression is not allowed"))
         (let loop ((exprs (cdr form)))
-          (let ((expr-varnum (compile-form func indent (car exprs))))
+          (let ((expr-varnum (compile-form func indent (car exprs) (and tail? (null? (cdr exprs))))))
             (if (null? (cdr exprs))
                 (gen-code func indent "value x~a = x~a;\n" ret-varnum expr-varnum)
                 (loop (cdr exprs))))))
     ret-varnum))
 
 (define (compile-set! func indent form)
-  (let ((value-varnum (compile-form func indent (caddr form)))
+  (let ((value-varnum (compile-form func indent (caddr form) #f))
         (b (identifier-binding (cadr form))))
     (case (binding-kind b)
       ((global alias)
@@ -1122,46 +1162,83 @@
     (gen-code func indent "value x~a = VOID;\n" varnum)
     varnum))
 
-(define (compile-special func indent form kind)
+(define (compile-special func indent form kind tail?)
   (case kind
-    ((begin) (compile-begin func indent form))
+    ((begin) (compile-begin func indent form tail?))
     ((define) (compile-define func indent form))
     ((include) (compile-include func indent form))
-    ((if) (compile-if func indent form))
-    ((let) (compile-let func indent form))
-    ((letrec) (compile-letrec func indent form))
-    ((letrec*) (compile-letrec* func indent form))
-    ((lambda) (compile-lambda func indent form))
+    ((if) (compile-if func indent form tail?))
+    ((let) (compile-let func indent form tail?))
+    ((letrec) (compile-letrec func indent form tail?))
+    ((letrec*) (compile-letrec* func indent form tail?))
+    ((lambda) (compile-lambda func indent form #f))
     ((quote) (compile-quote func indent form))
     ((set!) (compile-set! func indent form))
     (else -1)))
 
-(define (compile-call func indent form)
-  (let ((func-varnum (compile-form func indent (car form))))
-    (gen-code func indent "if (!IS_CLOSURE(x~a)) { RAISE(\"called object not a procedure\"); }\n" func-varnum)
-    (let ((arg-varnums (compile-list-of-forms func indent (cdr form))))
-      (let ((ret-varnum (func-next-varnum func)))
-        (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
-                  ret-varnum
-                  func-varnum
-                  func-varnum
-                  (length arg-varnums)
-                  (if (eq? '() arg-varnums) "" ", ")
-                  (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
-        ret-varnum))))
+;; returns the (new-func . params) recorded on a lexical binding's
+;; self-func when this call is a genuine self tail call to it: tail
+;; position, called through the same function currently being compiled,
+;; right arg count. #f if any of that doesn't hold.
+(define (self-tail-call-target func form tail?)
+  (and tail?
+       (identifier? (car form))
+       (eq? 'lexical (binding-kind (identifier-binding (car form))))
+       (let ((self-func (binding-self-func (identifier-binding (car form)))))
+         (and self-func
+              (eq? (car self-func) func)
+              (= (length (cdr form)) (length (cdr self-func)))
+              self-func))))
+
+;; emit a goto back to func's own entry label instead of a real call.
+;; args are evaluated to temps first (via compile-list-of-forms), giving
+;; simultaneous-assignment semantics, before any param is overwritten. a
+;; mutated param gets a fresh box per iteration so each iteration's
+;; closures keep their own box.
+(define (compile-self-tail-call func indent form params)
+  (let ((arg-varnums (compile-list-of-forms func indent (cdr form))))
+    (let loop ((params params) (varnums arg-varnums))
+      (unless (null? params)
+        (if (var-is-modified? (car params))
+            (gen-code func indent "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-unique-name (car params)) (car varnums))
+            (gen-code func indent "~a = x~a;\n" (mangle-unique-name (car params)) (car varnums)))
+        (loop (cdr params) (cdr varnums))))
+    (gen-code func indent "goto ~a_entry;\n" (func-name func))
+    (let ((varnum (func-next-varnum func)))
+      ;; a bit ugly to add something right under the goto, but we need
+      ;; to return something!
+      (gen-code func indent "value x~a = VOID;\n" varnum)
+      varnum)))
+
+(define (compile-call func indent form tail?)
+  (let ((self-tail-target (self-tail-call-target func form tail?)))
+    (if self-tail-target
+        (compile-self-tail-call func indent form (cdr self-tail-target))
+        (let ((func-varnum (compile-form func indent (car form) #f)))
+          (gen-code func indent "if (!IS_CLOSURE(x~a)) { RAISE(\"called object not a procedure\"); }\n" func-varnum)
+          (let ((arg-varnums (compile-list-of-forms func indent (cdr form))))
+            (let ((ret-varnum (func-next-varnum func)))
+              (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
+                        ret-varnum
+                        func-varnum
+                        func-varnum
+                        (length arg-varnums)
+                        (if (eq? '() arg-varnums) "" ", ")
+                        (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
+              ret-varnum))))))
 
 (define (lookup-primcall meaning)
   (hash-table-ref/default *primcalls-table* meaning #f))
 
-(define (compile-list func indent form)
+(define (compile-list func indent form tail?)
   (if (not (identifier? (car form)))
-      (compile-call func indent form)
+      (compile-call func indent form tail?)
       (let* ((binding (identifier-binding (car form)))
              (meaning (binding-meaning binding)))
         (case (binding-kind binding)
-          ((lexical global alias) (compile-call func indent form))
+          ((lexical global alias) (compile-call func indent form tail?))
           ((primcall) (compile-primcall func indent form (lookup-primcall meaning)))
-          ((special) (compile-special func indent form meaning))
+          ((special) (compile-special func indent form meaning tail?))
           ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name (car form))))
           (else (compile-error "internal error: unhandled identifier kind: ~a" meaning))))))
 
@@ -1212,13 +1289,13 @@
           (loop (+ i 1)))))
     varnum))
 
-(define (compile-form func indent form)
+(define (compile-form func indent form tail?)
   (cond ((identifier? form) (compile-identifier func indent form))
         ((number? form) (compile-number func indent form))
         ((string? form) (compile-string func indent form))
         ((boolean? form) (compile-bool func indent form))
         ((char? form) (compile-char func indent form))
-        ((pair? form) (compile-list func indent form))
+        ((pair? form) (compile-list func indent form tail?))
         ((vector? form) (compile-vector func indent form))
         ((eq? form *dot*) (compile-error "unexpected dot (.)"))
         (else (compile-error "don't know how to compile form: ~s" form))))
@@ -1373,7 +1450,7 @@
     (let loop ((forms expanded) (varnum -1))
       (if (null? forms)
           varnum
-          (loop (cdr forms) (compile-form func 1 (car forms)))))))
+          (loop (cdr forms) (compile-form func 1 (car forms) #f))))))
 
 (define (compile-program program)
   (let ((func (add-function program #f)))

@@ -246,7 +246,13 @@
 
   ;; not used by the expander but the codegen can store the lambda
   ;; associated with the identifier for its own purposes here
-  (owner binding-owner binding-owner-set!))
+  (owner binding-owner binding-owner-set!)
+
+  ;; not used by the expander. codegen stores (new-func . params) here
+  ;; when this binding is a letrec var whose init is a never-set!
+  ;; lambda, so a self tail call can be compiled to a goto instead of a
+  ;; real call. #f otherwise.
+  (self-func binding-self-func binding-self-func-set!))
 
 (record-set-print <binding>
                   (lambda (b port)
@@ -256,6 +262,7 @@
   (let ((b (make-binding kind meaning)))
     (binding-mutated?-set! b #f)
     (binding-owner-set! b #f)
+    (binding-self-func-set! b #f)
     b))
 
 (define (binding-denotes-same? bx by)
