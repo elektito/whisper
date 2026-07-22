@@ -721,3 +721,12 @@
           (hash-table-set! ht (caar alist) (cdar alist))
           (loop (cdr alist))))
       ht))))
+
+(define (gc-stats)
+  (let ((stats (%gc-stats)))
+    (list (cons 'marks (vector-ref stats 0))
+          (cons 'full-sweeps (vector-ref stats 1))
+          (cons 'lazy-reclaims (vector-ref stats 2))
+          (cons 'live-objects (vector-ref stats 3))
+          (cons 'manual-mode (vector-ref stats 4))
+          (cons 'pools (vector-ref stats 5)))))

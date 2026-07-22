@@ -79,4 +79,5 @@
           urandom
 
           gc
-          gc-manual-mode!))
+          gc-manual-mode!
+          gc-stats))
