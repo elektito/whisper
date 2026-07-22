@@ -619,6 +619,7 @@
     varnum))
 
 (define *primcalls* '((%make-hash-table "percent_make_hash_table" 2 2)
+                      (%gc-stats "percent_gc_stats" 0 0)
                       (append "append" 0 -1)
                       (apply "apply" 1 -1)
                       (boolean? "boolean_q" 1 1)
@@ -1336,6 +1337,7 @@
                                  (identifier 'aux '_ '_)
                                  (identifier 'aux 'unquote 'unquote)
                                  (identifier 'aux 'unquote-splicing 'unquote-splicing)
+                                 (identifier 'primcall '%gc-stats '%gc-stats)
                                  (identifier 'primcall '%make-hash-table '%make-hash-table)
                                  (identifier 'primcall 'append 'append)
                                  (identifier 'primcall 'apply 'apply)

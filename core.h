@@ -301,6 +301,10 @@ struct pool {
     void *start;
     void *end;
     uint64_t tag; /* value tag expected for all objects in this pool */
+
+    /* the pool from which we'll start scanning for a free block in this
+     * heap */
+    struct pool *alloc_cursor;
 };
 
 /************ small/inline static functions ***********/
@@ -501,6 +505,7 @@ extern value primcall_environment_q(environment env, enum call_flags flags, int 
 extern value primcall_run_so(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gc(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_percent_gc_stats(environment env, enum call_flags flags, int nargs, ...);
 
 /************ static library registration ***********/
 
