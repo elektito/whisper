@@ -626,6 +626,43 @@ static void gc_sweep_env_ht_each(value k, value v, void *ctx) {
     free(binding);
 }
 
+static void gc_free_block(void *p, struct pool *heap) {
+    void *v = p + ALIGN16(sizeof(struct block));
+    if (heap == symbols_heap) {
+        free(((struct symbol *) v)->name);
+    } else if (heap == strings_heap) {
+        free(((struct string *) v)->s);
+    } else if (heap == closures_heap) {
+        free(((struct closure *) v)->freevars);
+    } else if (heap == objects_heap) {
+        struct object *obj = (struct object *) v;
+        switch (obj->type) {
+        case OBJ_PORT:
+            free(obj->port.filename);
+            free(obj->port.string);
+            break;
+        case OBJ_VECTOR:
+            free(obj->vector.data);
+            break;
+        case OBJ_ENVIRONMENT:
+            if (obj->environment.hash_table != NULL) {
+                hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
+                hash_table_cleanup(obj->environment.hash_table);
+                free(obj->environment.hash_table);
+            }
+            break;
+        default:
+            /* do nothing */
+            break;
+        }
+    }
+
+    /* zero the data so stale pointers don't cause double-frees if the
+     * block is reallocated before being fully initialized and GC runs
+     * again */
+    memset(v, 0, heap->block_size - ALIGN16(sizeof(struct block)));
+}
+
 static void gc_sweep(struct pool **heaps, int n_heaps) {
     /* free unmarked objects and reset marks */
     for (int i = 0; i < n_heaps; ++i) {
@@ -635,43 +672,10 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
                 struct block *block = p;
 
                 if (block->in_use && !block->mark) {
-                    void *v = p + ALIGN16(sizeof(struct block));
-                    if (heaps[i] == symbols_heap) {
-                        free(((struct symbol *) v)->name);
-                    } else if (heaps[i] == strings_heap) {
-                        free(((struct string *) v)->s);
-                    } else if (heaps[i] == closures_heap) {
-                        free(((struct closure *) v)->freevars);
-                    } else if (heaps[i] == objects_heap) {
-                        struct object *obj = (struct object *) v;
-                        switch (obj->type) {
-                        case OBJ_PORT:
-                            free(obj->port.filename);
-                            free(obj->port.string);
-                            break;
-                        case OBJ_VECTOR:
-                            free(obj->vector.data);
-                            break;
-                        case OBJ_ENVIRONMENT:
-                            if (obj->environment.hash_table != NULL) {
-                                hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
-                                hash_table_cleanup(obj->environment.hash_table);
-                                free(obj->environment.hash_table);
-                            }
-                            break;
-                        default:
-                            /* do nothing */
-                            break;
-                        }
-                    }
+                    gc_free_block(p, heaps[i]);
 
                     block->in_use = 0;
                     pool->in_use_count--;
-
-                    /* zero the data so stale pointers don't cause
-                     * double-frees if the block is reallocated before
-                     * being fully initialized and GC runs again */
-                    memset(v, 0, pool->block_size - ALIGN16(sizeof(struct block)));
                 }
 
                 block->mark = 0;
