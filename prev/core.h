@@ -279,12 +279,17 @@ struct kind_proc {
 /************ memory management ***********/
 
 #define POOL_SIZE 16384
-#define ALIGN16(n) (((n) + 15) & ~15)
+#define ALIGN8(n) (((n) + 7) & ~7)
 
 /* this is used as a header for all objects we allocate in a pool */
 struct block {
     uint8_t in_use;
-    uint8_t mark; /* for gc */
+
+    /* this acts as the gc "mark" (in mark-and-sweep). each gc increases
+     * a global "epoch" counter and when it wants to mark a block, it
+     * writes that epoch into this field. this way, we won't need to
+     * clear the mark at the end. */
+    uint32_t gc_epoch;
 };
 
 struct pool {
@@ -296,6 +301,10 @@ struct pool {
     void *start;
     void *end;
     uint64_t tag; /* value tag expected for all objects in this pool */
+
+    /* the pool from which we'll start scanning for a free block in this
+     * heap */
+    struct pool *alloc_cursor;
 };
 
 /************ small/inline static functions ***********/
@@ -494,6 +503,9 @@ extern value primcall_environment_lookup(environment env, enum call_flags flags,
 extern value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_run_so(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_gc(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_percent_gc_stats(environment env, enum call_flags flags, int nargs, ...);
 
 /************ static library registration ***********/
 

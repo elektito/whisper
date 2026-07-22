@@ -123,10 +123,17 @@ cd v17
 cp ../v16/whisper-v16 .
 make
 
+echo "==== v18 ===="
+cd ..
+git clone .. --branch=v18 v18 >/dev/null 2>&1
+cd v18
+cp ../v17/whisper-v17 .
+make
+
 echo "==== current ===="
 cd ..
 git clone .. --branch=master current >/dev/null 2>&1
 cd current
-cp ../v17/whisper-v17 .
+cp ../v18/whisper-v18 .
 make
-cp whisper-v18 ../whisper
+cp whisper-v19 ../whisper

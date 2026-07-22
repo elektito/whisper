@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <setjmp.h>
+#include <stdint.h>
 
 /*************** static variables **************/
 
@@ -26,6 +27,11 @@ static size_t gc_threshold = POOL_SIZE;
  * overridable via GC_THRESHOLD_MULTIPLIER for experimentation. */
 static int gc_threshold_multiplier = 0;
 
+/* how much floating garbage we tolerate before promoting a gc mark to a
+ * full mark-and-sweep. a multiplier of the number of floating garbage.
+ * Can be overriden via GC_FULL_SWEEP_RATIO environment variable. */
+static int gc_full_sweep_ratio = 0;
+
 /* we're gonna call a linked list of pools, a heap. */
 static struct pool *symbols_heap;
 static struct pool *pairs_heap;
@@ -39,6 +45,16 @@ static struct pool *closures_heap;
 
 static void *lbound_all_heaps = 0;
 static void *ubound_all_heaps = 0;
+
+static uint64_t gc_epoch = 0;
+static int gc_manual_mode = 0;
+static size_t gc_marked_count = 0;
+
+static size_t gc_full_sweeps = 0;
+static size_t gc_lazy_reclaims = 0;
+
+static struct pool **heaps;
+static int n_heaps = 0;
 
 /*************** non-static variables **************/
 
@@ -332,7 +348,7 @@ int symbol_name_eq(struct hash_table *ht, value k1, value k2) {
 /************ gc/memory helper functions ***********/
 
 static struct pool *create_heap(int object_size, uint64_t tag) {
-    int block_size = ALIGN16(sizeof(struct block)) + ALIGN16(object_size);
+    int block_size = ALIGN8(sizeof(struct block)) + ALIGN8(object_size);
 
     int total_size = sizeof(struct pool) + block_size * POOL_SIZE;
     struct pool *pool = calloc(1, total_size);
@@ -351,13 +367,15 @@ static struct pool *create_heap(int object_size, uint64_t tag) {
         ubound_all_heaps = pool->end;
     }
 
+    pool->alloc_cursor = pool;
+
     return pool;
 }
 
 static struct pool *add_pool(struct pool *pool) {
     while (pool->next) pool = pool->next;
 
-    int header_size = ALIGN16(sizeof(struct pool));
+    int header_size = ALIGN8(sizeof(struct pool));
     int total_size = header_size + pool->block_size * POOL_SIZE;
     struct pool *new_pool = calloc(1, total_size);
     pool->next = new_pool;
@@ -391,8 +409,17 @@ void init_memory(void) {
     closure3s_heap = create_heap(sizeof(struct closure3), CLOSURE_TAG);
     closures_heap = create_heap(sizeof(struct closure), CLOSURE_TAG);
 
-    /* if you add more heaps, remember to update the list of heaps in
-     * gc() function too */
+    n_heaps = 9;
+    heaps = malloc(n_heaps * sizeof(struct pool *));
+    heaps[0] = symbols_heap;
+    heaps[1] = pairs_heap;
+    heaps[2] = objects_heap;
+    heaps[3] = strings_heap;
+    heaps[4] = closure0s_heap;
+    heaps[5] = closure1s_heap;
+    heaps[6] = closure2s_heap;
+    heaps[7] = closure3s_heap;
+    heaps[8] = closures_heap;
 }
 
 static void gc_recurse(value v);
@@ -407,13 +434,14 @@ static void gc_recurse(value v) {
         return;
     }
 
-    struct block *block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
-    if (!block->in_use || block->mark) {
+    struct block *block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN8(sizeof(struct block)));
+    if (!block->in_use || block->gc_epoch == gc_epoch) {
         return;
     }
 
     if (IS_SYMBOL(v)) {
-        block->mark = 1;
+        gc_marked_count++;
+        block->gc_epoch = gc_epoch;
         if (GET_SYMBOL(v)->kind == sym_value) {
             gc_recurse(GET_SYMBOL(v)->value);
         }
@@ -423,20 +451,22 @@ static void gc_recurse(value v) {
          * car, but that is bounded by tree depth rather than list
          * length. */
         while (IS_PAIR(v)) {
-            block->mark = 1;
+            gc_marked_count++;
+            block->gc_epoch = gc_epoch;
             gc_recurse(GET_PAIR(v)->car);
             v = GET_PAIR(v)->cdr;
             if (!IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v))
                 return;
-            block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
-            if (!block->in_use || block->mark)
+            block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN8(sizeof(struct block)));
+            if (!block->in_use || block->gc_epoch == gc_epoch)
                 return;
         }
 
         /* handle the tail of an improper list (e.g. (a b . c)) */
         gc_recurse(v);
     } else if (IS_OBJECT(v)) {
-        block->mark = 1;
+        gc_marked_count++;
+        block->gc_epoch = gc_epoch;
         if (GET_OBJECT(v)->type == OBJ_VECTOR) {
             for (int i = 0; i < GET_OBJECT(v)->vector.len; ++i) {
                 gc_recurse(GET_OBJECT(v)->vector.data[i]);
@@ -461,9 +491,11 @@ static void gc_recurse(value v) {
                 hash_table_each(GET_OBJECT(v)->environment.hash_table, gc_recurse_env_ht_each, NULL);
         }
     } else if (IS_STRING(v)) {
-        block->mark = 1;
+        gc_marked_count++;
+        block->gc_epoch = gc_epoch;
     } else if (IS_CLOSURE(v)) {
-        block->mark = 1;
+        gc_marked_count++;
+        block->gc_epoch = gc_epoch;
         for (int i = 0; i < GET_CLOSURE(v)->n_freevars; ++i) {
             gc_recurse(GET_CLOSURE(v)->freevars[i]);
         }
@@ -481,7 +513,7 @@ static int is_valid_value(void *ptr, struct pool *heap) {
     int found = 0;
     while (pool) {
         if (ptr >= pool->start && ptr < pool->end) {
-            void *block_start = (void*)((uint64_t)ptr & VALUE_MASK) - ALIGN16(sizeof(struct block));
+            void *block_start = (void*)((uint64_t)ptr & VALUE_MASK) - ALIGN8(sizeof(struct block));
             if ((block_start - pool->start) % pool->block_size == 0) {
                 found = 1;
                 break;
@@ -522,7 +554,7 @@ static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
             for (void *b = pool->start; b < pool->end; b += pool->block_size) {
                 struct block *blk = b;
                 if (blk->in_use) {
-                    struct closure *cl = b + ALIGN16(sizeof(struct block));
+                    struct closure *cl = b + ALIGN8(sizeof(struct block));
                     map[idx].freevars = (uint64_t)cl->freevars;
                     map[idx].closure  = CLOSURE(cl);
                     idx++;
@@ -535,7 +567,7 @@ static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
     return map;
 }
 
-/* see gc() function's comment to see why no_sanitize */
+/* see gc_mark() function's comment to see why no_sanitize */
 __attribute__((no_sanitize("address")))
 static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
     int freevars_map_len;
@@ -578,7 +610,7 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
                                             + (offset / pool->block_size) * pool->block_size;
                         struct block *blk = (struct block *)block_start;
                         if (blk->in_use) {
-                            void *obj = block_start + ALIGN16(sizeof(struct block));
+                            void *obj = block_start + ALIGN8(sizeof(struct block));
                             gc_recurse((value)((uint64_t)obj | pool->tag));
                         }
                         break;
@@ -626,6 +658,43 @@ static void gc_sweep_env_ht_each(value k, value v, void *ctx) {
     free(binding);
 }
 
+static void gc_free_block(void *p, struct pool *heap) {
+    void *v = p + ALIGN8(sizeof(struct block));
+    if (heap == symbols_heap) {
+        free(((struct symbol *) v)->name);
+    } else if (heap == strings_heap) {
+        free(((struct string *) v)->s);
+    } else if (heap == closures_heap) {
+        free(((struct closure *) v)->freevars);
+    } else if (heap == objects_heap) {
+        struct object *obj = (struct object *) v;
+        switch (obj->type) {
+        case OBJ_PORT:
+            free(obj->port.filename);
+            free(obj->port.string);
+            break;
+        case OBJ_VECTOR:
+            free(obj->vector.data);
+            break;
+        case OBJ_ENVIRONMENT:
+            if (obj->environment.hash_table != NULL) {
+                hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
+                hash_table_cleanup(obj->environment.hash_table);
+                free(obj->environment.hash_table);
+            }
+            break;
+        default:
+            /* do nothing */
+            break;
+        }
+    }
+
+    /* zero the data so stale pointers don't cause double-frees if the
+     * block is reallocated before being fully initialized and GC runs
+     * again */
+    memset(v, 0, heap->block_size - ALIGN8(sizeof(struct block)));
+}
+
 static void gc_sweep(struct pool **heaps, int n_heaps) {
     /* free unmarked objects and reset marks */
     for (int i = 0; i < n_heaps; ++i) {
@@ -634,47 +703,12 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
             for (void *p = pool->start; p < pool->end; p += pool->block_size) {
                 struct block *block = p;
 
-                if (block->in_use && !block->mark) {
-                    void *v = p + ALIGN16(sizeof(struct block));
-                    if (heaps[i] == symbols_heap) {
-                        free(((struct symbol *) v)->name);
-                    } else if (heaps[i] == strings_heap) {
-                        free(((struct string *) v)->s);
-                    } else if (heaps[i] == closures_heap) {
-                        free(((struct closure *) v)->freevars);
-                    } else if (heaps[i] == objects_heap) {
-                        struct object *obj = (struct object *) v;
-                        switch (obj->type) {
-                        case OBJ_PORT:
-                            free(obj->port.filename);
-                            free(obj->port.string);
-                            break;
-                        case OBJ_VECTOR:
-                            free(obj->vector.data);
-                            break;
-                        case OBJ_ENVIRONMENT:
-                            if (obj->environment.hash_table != NULL) {
-                                hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
-                                hash_table_cleanup(obj->environment.hash_table);
-                                free(obj->environment.hash_table);
-                            }
-                            break;
-                        default:
-                            /* do nothing */
-                            break;
-                        }
-                    }
+                if (block->in_use && block->gc_epoch != gc_epoch) {
+                    gc_free_block(p, heaps[i]);
 
                     block->in_use = 0;
                     pool->in_use_count--;
-
-                    /* zero the data so stale pointers don't cause
-                     * double-frees if the block is reallocated before
-                     * being fully initialized and GC runs again */
-                    memset(v, 0, pool->block_size - ALIGN16(sizeof(struct block)));
                 }
-
-                block->mark = 0;
             }
 
             pool = pool->next;
@@ -697,7 +731,7 @@ static void gc_symbol_each(value k, value v, void *ctx) {
  * since we are indeed doing some sort of custom stack unwinding, this
  * seems to fall exactly into this category. */
 __attribute__((no_sanitize("address")))
-static void gc(void) {
+static void gc_mark(void) {
     /* Spill callee-saved registers (rbx, r12-r15 on x86_64) onto the
      * stack before we scan it. The C compiler is free to keep live
      * Scheme values in those registers across calls; without this they
@@ -709,25 +743,13 @@ static void gc(void) {
     (void) setjmp(env);
     void *cur_stack = &env;
 
+    gc_marked_count = 0;
+    gc_epoch++;
+
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
-    struct pool *heaps[] = {
-        symbols_heap,
-        pairs_heap,
-        objects_heap,
-        strings_heap,
-        closure0s_heap,
-        closure1s_heap,
-        closure2s_heap,
-        closure3s_heap,
-        closures_heap,
-    };
-    int n_heaps = sizeof(heaps) / sizeof(heaps[0]);
-
     gc_scan_stack(cur_stack, heaps, n_heaps);
-    gc_sweep(heaps, n_heaps);
-    gc_free_empty_pools(heaps, n_heaps);
 
     if (gc_threshold_multiplier == 0) {
         char *env = getenv("GC_THRESHOLD_MULTIPLIER");
@@ -736,53 +758,105 @@ static void gc(void) {
             gc_threshold_multiplier = 4;
     }
 
-    /* set the next gc threshold to gc_threshold_multiplier times the
-     * current live object count so that GC frequency adapts to the size
-     * of the live set (in allocations, not bytes) */
-    size_t live_count = 0;
-    for (int i = 0; i < n_heaps; ++i) {
-        for (struct pool *p = heaps[i]; p; p = p->next)
-            live_count += p->in_use_count;
-    }
-
-    /* floor at POOL_SIZE so we don't GC on every allocation when the
-     * live set is very small */
-    size_t scaled = live_count * gc_threshold_multiplier;
+    /* set next "full" (including sweep) gc threshold. floor at
+     * POOL_SIZE so we don't GC on every allocation when the live set is
+     * very small */
+    size_t scaled = gc_marked_count * gc_threshold_multiplier;
     gc_threshold = scaled < POOL_SIZE ? POOL_SIZE : scaled;
     allocations_since_gc = 0;
+
+    /* reset alloc_cursor for all heaps to the head */
+    for (int i = 0; i < n_heaps; ++i) {
+        heaps[i]->alloc_cursor = heaps[i];
+    }
+}
+
+static void gc(void) {
+    gc_mark();
+    gc_sweep(heaps, n_heaps);
+    gc_free_empty_pools(heaps, n_heaps);
+
+    ++gc_full_sweeps;
+}
+
+static void gc_auto(void) {
+    gc_mark();
+
+    size_t in_use_total = 0;
+    for (int i = 0; i < n_heaps; ++i) {
+        for (struct pool *p = heaps[i]; p; p = p->next) {
+            in_use_total += p->in_use_count;
+        }
+    }
+
+    /* dead, but not yet reclaimed */
+    size_t floating = in_use_total - gc_marked_count;
+
+    if (gc_full_sweep_ratio == 0) {
+        char *env = getenv("GC_FULL_SWEEP_RATIO");
+        gc_full_sweep_ratio = env ? atoi(env) : 0;
+        if (gc_full_sweep_ratio <= 0) {
+            gc_full_sweep_ratio = 1;
+        }
+    }
+
+    if (floating > gc_full_sweep_ratio * gc_marked_count) {
+        gc_sweep(heaps, n_heaps);
+        gc_free_empty_pools(heaps, n_heaps);
+        ++gc_full_sweeps;
+    }
 }
 
 static void *alloc_from_heap(struct pool *head) {
-    if (allocations_since_gc >= gc_threshold) {
-        gc();
+    if (allocations_since_gc >= gc_threshold && !gc_manual_mode) {
+        gc_auto();
     }
 
-    struct pool *pool = head;
-    while (pool->next && pool->in_use_count == POOL_SIZE) pool = pool->next;
-
-    if (pool->in_use_count == POOL_SIZE) { /* reached the last pool */
-        pool = add_pool(pool);
-    }
-
+    struct pool *start_cursor = head->alloc_cursor;
+    struct pool *pool = start_cursor;
     for (;;) { /* in case the pool is actually full but the flag not set */
         for (int i = 0; i < POOL_SIZE; ++i) {
             int j = (i + pool->next_index) % POOL_SIZE;
             struct block *block = pool->start + pool->block_size * j;
-            if (!block->in_use) {
+
+            /* if unused, or not-yet-reclaimed */
+            int reclaim = !gc_manual_mode && \
+                block->in_use && \
+                block->gc_epoch != gc_epoch;
+            if (!block->in_use || reclaim) {
+                if (reclaim) {
+                    gc_free_block(block, head);
+                    ++gc_lazy_reclaims;
+                } else {
+                    pool->in_use_count++;
+                }
+
                 block->in_use = 1;
-                pool->in_use_count++;
                 allocations_since_gc++;
 
                 pool->next_index = (j + 1) % POOL_SIZE;
 
+                /* mark this block as live now */
+                block->gc_epoch = gc_epoch;
+
+                /* advance alloc_cursor to current pool so we start
+                 * scanning from this pool next time */
+                head->alloc_cursor = pool;
+
                 /* actual object starts after the block header (i.e. one
                  * struct block ahead) */
-                return ((void*) block) + ALIGN16(sizeof(struct block));
+                return ((void*) block) + ALIGN8(sizeof(struct block));
             }
         }
 
-        /* last pool is actually full */
-        pool = add_pool(pool);
+        pool = pool->next;
+        if (!pool) {
+            pool = head;
+        }
+
+        if (pool == start_cursor) {
+            pool = add_pool(pool);
+        }
     }
 }
 
@@ -3297,4 +3371,47 @@ value primcall_list_directory(environment env, enum call_flags flags, int nargs,
     closedir(dir);
 
     return reverse_list(entries, NIL);
+}
+
+value primcall_gc(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { RAISE("gc takes no arguments"); }
+    gc();
+    return VOID;
+}
+
+value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("gc-manual-mode! needs a single argument"); }
+    init_args();
+    value enabled = next_arg();
+    free_args();
+    gc_manual_mode = (enabled != FALSE);
+    return VOID;
+}
+
+value primcall_percent_gc_stats(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { RAISE("%%gc-stats takes no arguments"); }
+
+    /* snapshot counters before allocating */
+    size_t full_sweeps = gc_full_sweeps;
+    size_t lazy_reclaims = gc_lazy_reclaims;
+    size_t live = gc_marked_count;
+    uint64_t epoch = gc_epoch;
+    int manual = gc_manual_mode;
+
+    size_t pools = 0;
+    for (int i = 0; i < n_heaps; ++i) {
+        for (struct pool *p = heaps[i]; p; p = p->next) {
+            ++pools;
+        }
+    }
+
+    value result = make_vector(6, VOID);
+    GET_OBJECT(result)->vector.data[0] = FIXNUM(epoch);
+    GET_OBJECT(result)->vector.data[1] = FIXNUM(full_sweeps);
+    GET_OBJECT(result)->vector.data[2] = FIXNUM(lazy_reclaims);
+    GET_OBJECT(result)->vector.data[3] = FIXNUM(live);
+    GET_OBJECT(result)->vector.data[4] = FIXNUM(gc_manual_mode);
+    GET_OBJECT(result)->vector.data[5] = FIXNUM(pools);
+
+    return result;
 }
