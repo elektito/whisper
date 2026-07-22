@@ -796,7 +796,7 @@ static void gc_auto(void) {
         char *env = getenv("GC_FULL_SWEEP_RATIO");
         gc_full_sweep_ratio = env ? atoi(env) : 0;
         if (gc_full_sweep_ratio <= 0) {
-            gc_full_sweep_ratio = 1;
+            gc_full_sweep_ratio = 8;
         }
     }
 
