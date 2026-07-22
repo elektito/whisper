@@ -3410,7 +3410,7 @@ value primcall_percent_gc_stats(environment env, enum call_flags flags, int narg
     GET_OBJECT(result)->vector.data[1] = FIXNUM(full_sweeps);
     GET_OBJECT(result)->vector.data[2] = FIXNUM(lazy_reclaims);
     GET_OBJECT(result)->vector.data[3] = FIXNUM(live);
-    GET_OBJECT(result)->vector.data[4] = FIXNUM(gc_manual_mode);
+    GET_OBJECT(result)->vector.data[4] = BOOL(gc_manual_mode);
     GET_OBJECT(result)->vector.data[5] = FIXNUM(pools);
 
     return result;
