@@ -279,7 +279,7 @@ struct kind_proc {
 /************ memory management ***********/
 
 #define POOL_SIZE 16384
-#define ALIGN16(n) (((n) + 15) & ~15)
+#define ALIGN8(n) (((n) + 7) & ~7)
 
 /* this is used as a header for all objects we allocate in a pool */
 struct block {

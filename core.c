@@ -335,7 +335,7 @@ int symbol_name_eq(struct hash_table *ht, value k1, value k2) {
 /************ gc/memory helper functions ***********/
 
 static struct pool *create_heap(int object_size, uint64_t tag) {
-    int block_size = ALIGN16(sizeof(struct block)) + ALIGN16(object_size);
+    int block_size = ALIGN8(sizeof(struct block)) + ALIGN8(object_size);
 
     int total_size = sizeof(struct pool) + block_size * POOL_SIZE;
     struct pool *pool = calloc(1, total_size);
@@ -360,7 +360,7 @@ static struct pool *create_heap(int object_size, uint64_t tag) {
 static struct pool *add_pool(struct pool *pool) {
     while (pool->next) pool = pool->next;
 
-    int header_size = ALIGN16(sizeof(struct pool));
+    int header_size = ALIGN8(sizeof(struct pool));
     int total_size = header_size + pool->block_size * POOL_SIZE;
     struct pool *new_pool = calloc(1, total_size);
     pool->next = new_pool;
@@ -410,7 +410,7 @@ static void gc_recurse(value v) {
         return;
     }
 
-    struct block *block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
+    struct block *block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN8(sizeof(struct block)));
     if (!block->in_use || block->gc_epoch == gc_epoch) {
         return;
     }
@@ -431,7 +431,7 @@ static void gc_recurse(value v) {
             v = GET_PAIR(v)->cdr;
             if (!IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v))
                 return;
-            block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
+            block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN8(sizeof(struct block)));
             if (!block->in_use || block->gc_epoch == gc_epoch)
                 return;
         }
@@ -484,7 +484,7 @@ static int is_valid_value(void *ptr, struct pool *heap) {
     int found = 0;
     while (pool) {
         if (ptr >= pool->start && ptr < pool->end) {
-            void *block_start = (void*)((uint64_t)ptr & VALUE_MASK) - ALIGN16(sizeof(struct block));
+            void *block_start = (void*)((uint64_t)ptr & VALUE_MASK) - ALIGN8(sizeof(struct block));
             if ((block_start - pool->start) % pool->block_size == 0) {
                 found = 1;
                 break;
@@ -525,7 +525,7 @@ static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
             for (void *b = pool->start; b < pool->end; b += pool->block_size) {
                 struct block *blk = b;
                 if (blk->in_use) {
-                    struct closure *cl = b + ALIGN16(sizeof(struct block));
+                    struct closure *cl = b + ALIGN8(sizeof(struct block));
                     map[idx].freevars = (uint64_t)cl->freevars;
                     map[idx].closure  = CLOSURE(cl);
                     idx++;
@@ -581,7 +581,7 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
                                             + (offset / pool->block_size) * pool->block_size;
                         struct block *blk = (struct block *)block_start;
                         if (blk->in_use) {
-                            void *obj = block_start + ALIGN16(sizeof(struct block));
+                            void *obj = block_start + ALIGN8(sizeof(struct block));
                             gc_recurse((value)((uint64_t)obj | pool->tag));
                         }
                         break;
@@ -630,7 +630,7 @@ static void gc_sweep_env_ht_each(value k, value v, void *ctx) {
 }
 
 static void gc_free_block(void *p, struct pool *heap) {
-    void *v = p + ALIGN16(sizeof(struct block));
+    void *v = p + ALIGN8(sizeof(struct block));
     if (heap == symbols_heap) {
         free(((struct symbol *) v)->name);
     } else if (heap == strings_heap) {
@@ -663,7 +663,7 @@ static void gc_free_block(void *p, struct pool *heap) {
     /* zero the data so stale pointers don't cause double-frees if the
      * block is reallocated before being fully initialized and GC runs
      * again */
-    memset(v, 0, heap->block_size - ALIGN16(sizeof(struct block)));
+    memset(v, 0, heap->block_size - ALIGN8(sizeof(struct block)));
 }
 
 static void gc_sweep(struct pool **heaps, int n_heaps) {
@@ -784,7 +784,7 @@ static void *alloc_from_heap(struct pool *head) {
 
                 /* actual object starts after the block header (i.e. one
                  * struct block ahead) */
-                return ((void*) block) + ALIGN16(sizeof(struct block));
+                return ((void*) block) + ALIGN8(sizeof(struct block));
             }
         }
 
