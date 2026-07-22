@@ -76,4 +76,7 @@
           void?
           system
           unread-char
-          urandom))
+          urandom
+
+          gc
+          gc-manual-mode!))

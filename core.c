@@ -42,6 +42,7 @@ static void *lbound_all_heaps = 0;
 static void *ubound_all_heaps = 0;
 
 static uint64_t gc_epoch = 0;
+static int gc_manual_mode = 0;
 
 /*************** non-static variables **************/
 
@@ -760,7 +761,7 @@ static void gc(void) {
 }
 
 static void *alloc_from_heap(struct pool *head) {
-    if (allocations_since_gc >= gc_threshold) {
+    if (allocations_since_gc >= gc_threshold && !gc_manual_mode) {
         gc();
     }
 
@@ -3304,4 +3305,19 @@ value primcall_list_directory(environment env, enum call_flags flags, int nargs,
     closedir(dir);
 
     return reverse_list(entries, NIL);
+}
+
+value primcall_gc(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { RAISE("gc takes no arguments"); }
+    gc();
+    return VOID;
+}
+
+value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { RAISE("gc-manual-mode! needs a single argument"); }
+    init_args();
+    value enabled = next_arg();
+    free_args();
+    gc_manual_mode = (enabled != FALSE);
+    return VOID;
 }
