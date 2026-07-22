@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <setjmp.h>
+#include <stdint.h>
 
 /*************** static variables **************/
 
@@ -39,6 +40,8 @@ static struct pool *closures_heap;
 
 static void *lbound_all_heaps = 0;
 static void *ubound_all_heaps = 0;
+
+static uint64_t gc_epoch = 0;
 
 /*************** non-static variables **************/
 
@@ -408,12 +411,12 @@ static void gc_recurse(value v) {
     }
 
     struct block *block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
-    if (!block->in_use || block->mark) {
+    if (!block->in_use || block->gc_epoch == gc_epoch) {
         return;
     }
 
     if (IS_SYMBOL(v)) {
-        block->mark = 1;
+        block->gc_epoch = gc_epoch;
         if (GET_SYMBOL(v)->kind == sym_value) {
             gc_recurse(GET_SYMBOL(v)->value);
         }
@@ -423,20 +426,20 @@ static void gc_recurse(value v) {
          * car, but that is bounded by tree depth rather than list
          * length. */
         while (IS_PAIR(v)) {
-            block->mark = 1;
+            block->gc_epoch = gc_epoch;
             gc_recurse(GET_PAIR(v)->car);
             v = GET_PAIR(v)->cdr;
             if (!IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v))
                 return;
             block = (struct block*)(((uint64_t) v & VALUE_MASK) - ALIGN16(sizeof(struct block)));
-            if (!block->in_use || block->mark)
+            if (!block->in_use || block->gc_epoch == gc_epoch)
                 return;
         }
 
         /* handle the tail of an improper list (e.g. (a b . c)) */
         gc_recurse(v);
     } else if (IS_OBJECT(v)) {
-        block->mark = 1;
+        block->gc_epoch = gc_epoch;
         if (GET_OBJECT(v)->type == OBJ_VECTOR) {
             for (int i = 0; i < GET_OBJECT(v)->vector.len; ++i) {
                 gc_recurse(GET_OBJECT(v)->vector.data[i]);
@@ -461,9 +464,9 @@ static void gc_recurse(value v) {
                 hash_table_each(GET_OBJECT(v)->environment.hash_table, gc_recurse_env_ht_each, NULL);
         }
     } else if (IS_STRING(v)) {
-        block->mark = 1;
+        block->gc_epoch = gc_epoch;
     } else if (IS_CLOSURE(v)) {
-        block->mark = 1;
+        block->gc_epoch = gc_epoch;
         for (int i = 0; i < GET_CLOSURE(v)->n_freevars; ++i) {
             gc_recurse(GET_CLOSURE(v)->freevars[i]);
         }
@@ -671,14 +674,12 @@ static void gc_sweep(struct pool **heaps, int n_heaps) {
             for (void *p = pool->start; p < pool->end; p += pool->block_size) {
                 struct block *block = p;
 
-                if (block->in_use && !block->mark) {
+                if (block->in_use && block->gc_epoch != gc_epoch) {
                     gc_free_block(p, heaps[i]);
 
                     block->in_use = 0;
                     pool->in_use_count--;
                 }
-
-                block->mark = 0;
             }
 
             pool = pool->next;
@@ -712,6 +713,8 @@ static void gc(void) {
     jmp_buf env;
     (void) setjmp(env);
     void *cur_stack = &env;
+
+    gc_epoch++;
 
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);

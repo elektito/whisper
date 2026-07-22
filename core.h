@@ -284,7 +284,12 @@ struct kind_proc {
 /* this is used as a header for all objects we allocate in a pool */
 struct block {
     uint8_t in_use;
-    uint8_t mark; /* for gc */
+
+    /* this acts as the gc "mark" (in mark-and-sweep). each gc increases
+     * a global "epoch" counter and when it wants to mark a block, it
+     * writes that epoch into this field. this way, we won't need to
+     * clear the mark at the end. */
+    uint32_t gc_epoch;
 };
 
 struct pool {
