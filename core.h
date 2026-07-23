@@ -265,16 +265,14 @@ struct object {
 /************ globals and helpers ***********/
 
 /* raise_error signals a Scheme-level error. It is the single choke
- * point every RAISE flows through, so that once exceptions exist it can
- * unwind to an installed handler instead of exiting. The RAISE macro
+ * point every raise_error flows through, so that once exceptions exist it can
+ * unwind to an installed handler instead of exiting. The raise_error macro
  * stays as the spelling the code generator emits into generated C.
  * panic is for unrecoverable internal invariants that must never be
  * caught (e.g. reached-impossible-case, out of memory). Both never
  * return, so callers that end in one need no trailing return. */
 __attribute__((noreturn, cold)) void raise_error(const char *fmt, ...);
 __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
-
-#define RAISE(...) { raise_error(__VA_ARGS__); }
 
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
@@ -353,7 +351,7 @@ extern value env_ref(value e, value sym);
 /* env_ref's ht == NULL branch, factored out so generated executable
  * code (which always has a NULL-hash-table global_env, see
  * make_global_env) can call it directly instead of through env_ref. GCC
- * does not inline this at its call sites (it's too big once RAISE is
+ * does not inline this at its call sites (it's too big once raise_error is
  * expanded), but being static still lets it be called directly instead
  * of through the PLT indirection a plain extern core.c function needs
  * in a PIE binary (which our binary seems to be by default, at least on
@@ -367,13 +365,13 @@ static value global_env_ref(value sym) {
     struct symbol *s = GET_SYMBOL(sym);
     switch (s->kind) {
     case sym_unbound:
-        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+        raise_error("unbound variable: %.*s", (int) s->name_len, s->name);
     case sym_macro:
-        RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of macro: %.*s", (int) s->name_len, s->name);
     case sym_special:
-        RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of special: %.*s", (int) s->name_len, s->name);
     case sym_aux:
-        RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
     case sym_value:
         return s->value;
     case sym_primcall:

@@ -889,8 +889,8 @@
           (binding-owner-set! (identifier-binding rest-param) new-func))
 
         (if rest-param
-            (gen-code new-func 1 "if (nargs < ~a) RAISE(\"too few arguments for function: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
-            (gen-code new-func 1 "if (nargs != ~a) RAISE(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func)))
+            (gen-code new-func 1 "if (nargs < ~a) raise_error(\"too few arguments for function: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
+            (gen-code new-func 1 "if (nargs != ~a) raise_error(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func)))
 
         ;; generate code for reading arguments
         (gen-code new-func 1 "init_args();\n")
@@ -1220,7 +1220,7 @@
     (if self-tail-target
         (compile-self-tail-call func indent form (cdr self-tail-target))
         (let ((func-varnum (compile-form func indent (car form) #f)))
-          (gen-code func indent "if (!IS_CLOSURE(x~a)) { RAISE(\"called object not a procedure\"); }\n" func-varnum)
+          (gen-code func indent "if (!IS_CLOSURE(x~a)) { raise_error(\"called object not a procedure\"); }\n" func-varnum)
           (let ((arg-varnums (compile-list-of-forms func indent (cdr form))))
             (let ((ret-varnum (func-next-varnum func)))
               (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"

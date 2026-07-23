@@ -1047,7 +1047,7 @@ static value file_read_line(value port) {
     char *r = fgets(buf, sizeof(buf), fp);
     if (!r) {
         if (feof(fp)) { return EOFOBJ; };
-        RAISE("cannot read from file: %s", strerror(errno));
+        raise_error("cannot read from file: %s", strerror(errno));
     }
 
     size_t len = strlen(buf);
@@ -1057,7 +1057,7 @@ static value file_read_line(value port) {
     while (len == sizeof(buf) - 1) {
         r = fgets(buf, sizeof(buf), fp);
         if (!r && !feof(fp)) {
-            RAISE("cannot read from file: %s", strerror(errno));
+            raise_error("cannot read from file: %s", strerror(errno));
         }
 
         len = strlen(buf);
@@ -1088,13 +1088,13 @@ static value file_peek_char(value port) {
 static void file_unread_char(value port, value ch) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     int ret = ungetc(GET_CHAR(ch), fp);
-    if (ret == EOF) { RAISE("error unreading character"); }
+    if (ret == EOF) { raise_error("error unreading character"); }
 }
 
 static void file_write_char(value port, value ch) {
     FILE *fp = GET_OBJECT(port)->port.fp;
     int ret = putc(GET_CHAR(ch), fp);
-    if (ret == EOF) { RAISE("error writing to file: %s", strerror(errno)); }
+    if (ret == EOF) { raise_error("error writing to file: %s", strerror(errno)); }
 }
 
 static void file_printf(value port, const char *fmt, ...) {
@@ -1489,18 +1489,18 @@ value env_ref(value e, value sym) {
 
     struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
     if (binding == SENTINEL) {
-        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+        raise_error("unbound variable: %.*s", (int) s->name_len, s->name);
     }
 
     switch (binding->kind) {
     case sym_unbound:
-        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+        raise_error("unbound variable: %.*s", (int) s->name_len, s->name);
     case sym_macro:
-        RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of macro: %.*s", (int) s->name_len, s->name);
     case sym_special:
-        RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of special: %.*s", (int) s->name_len, s->name);
     case sym_aux:
-        RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
     case sym_value:
         return binding->value;
     case sym_alias:
@@ -1600,7 +1600,7 @@ value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
                 GET_PAIR(tail)->cdr = arg;
             }
         } else {
-            if (!is_proper_list(arg)) { RAISE("append: not a proper list"); }
+            if (!is_proper_list(arg)) { raise_error("append: not a proper list"); }
             for (value p = arg; p != NIL; p = GET_PAIR(p)->cdr) {
                 value cell = make_pair(GET_PAIR(p)->car, NIL);
                 if (head == NIL) {
@@ -1619,11 +1619,11 @@ value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 2) { RAISE("apply needs a procedure and a list argument"); }
+    if (nargs < 2) { raise_error("apply needs a procedure and a list argument"); }
     init_args();
 
     value func = next_arg();
-    if (!IS_CLOSURE(func)) { RAISE("apply first argument is not a procedure"); }
+    if (!IS_CLOSURE(func)) { raise_error("apply first argument is not a procedure"); }
 
     /* the arguments arrive through a va_list, so we must read the leading
        fixed args before we can reach the trailing list and learn the total
@@ -1636,7 +1636,7 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     }
 
     value args_list = next_arg();
-    if (!IS_PAIR(args_list) && args_list != NIL) { RAISE("apply last argument is not a list"); }
+    if (!IS_PAIR(args_list) && args_list != NIL) { raise_error("apply last argument is not a list"); }
 
     int list_len = 0;
     for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) { ++list_len; }
@@ -1671,7 +1671,7 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("boolean? needs a single argument"); }
+    if (nargs != 1) { raise_error("boolean? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1679,7 +1679,7 @@ value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...)
 }
 
 value primcall_box(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("box needs a single argument"); }
+    if (nargs != 1) { raise_error("box needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1690,7 +1690,7 @@ value primcall_box(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("box? needs a single argument"); }
+    if (nargs != 1) { raise_error("box? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1698,52 +1698,52 @@ value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_car(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("car needs a single argument"); }
+    if (nargs != 1) { raise_error("car needs a single argument"); }
     init_args();
     value arg = next_arg();
     free_args();
-    if (!IS_PAIR(arg)) { RAISE("car argument is not a pair") }
+    if (!IS_PAIR(arg)) { raise_error("car argument is not a pair"); }
     return GET_PAIR(arg)->car;
 }
 
 value primcall_cdr(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("car needs a single argument"); }
+    if (nargs != 1) { raise_error("car needs a single argument"); }
     init_args();
     value arg = next_arg();
     free_args();
-    if (!IS_PAIR(arg)) { RAISE("cdr argument is not a pair") }
+    if (!IS_PAIR(arg)) { raise_error("cdr argument is not a pair"); }
     return GET_PAIR(arg)->cdr;
 }
 
 value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("char-downcase needs a single argument"); }
+    if (nargs != 1) { raise_error("char-downcase needs a single argument"); }
     init_args();
     value ch = next_arg();
     free_args();
-    if (!IS_CHAR(ch)) { RAISE("char-downcase argument is not a char") }
+    if (!IS_CHAR(ch)) { raise_error("char-downcase argument is not a char"); }
     return GET_CHAR(ch) >= 'A' && GET_CHAR(ch) <= 'Z' ? CHAR(GET_CHAR(ch) - 'A' + 'a') : ch;
 }
 
 value primcall_char_upcase(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("char-upcase needs a single argument"); }
+    if (nargs != 1) { raise_error("char-upcase needs a single argument"); }
     init_args();
     value ch = next_arg();
     free_args();
-    if (!IS_CHAR(ch)) { RAISE("char-upcase argument is not a char") }
+    if (!IS_CHAR(ch)) { raise_error("char-upcase argument is not a char"); }
     return GET_CHAR(ch) >= 'a' && GET_CHAR(ch) <= 'z' ? CHAR(GET_CHAR(ch) - 'a' + 'A') : ch;
 }
 
 value primcall_char_to_integer(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("char->integer needs a single argument"); }
+    if (nargs != 1) { raise_error("char->integer needs a single argument"); }
     init_args();
     value ch = next_arg();
     free_args();
-    if (!IS_CHAR(ch)) { RAISE("char->integer argument is not a char") }
+    if (!IS_CHAR(ch)) { raise_error("char->integer argument is not a char"); }
     return FIXNUM((int)(uint8_t) GET_CHAR(ch));
 }
 
 value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("char? needs a single argument"); }
+    if (nargs != 1) { raise_error("char? needs a single argument"); }
     init_args();
     value x = next_arg();
     free_args();
@@ -1754,16 +1754,16 @@ value primcall_close_port(environment env, enum call_flags flags, int nargs, ...
     init_args();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port)) { RAISE("close-port argument is not a port") }
+    if (!IS_PORT(port)) { raise_error("close-port argument is not a port"); }
     if (GET_OBJECT(port)->port.closed) return VOID;
     int ret = fclose(GET_OBJECT(port)->port.fp);
-    if (ret) { RAISE("failed to close the port: %s", strerror(errno)); }
+    if (ret) { raise_error("failed to close the port: %s", strerror(errno)); }
     GET_OBJECT(port)->port.closed = 1;
     return VOID;
 }
 
 value primcall_cons(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("cons needs two arguments"); }
+    if (nargs != 2) { raise_error("cons needs two arguments"); }
     init_args();
     value car = next_arg();
     value cdr = next_arg();
@@ -1772,7 +1772,7 @@ value primcall_cons(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_command_line(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("cons needs two arguments"); }
+    if (nargs != 0) { raise_error("cons needs two arguments"); }
 
     value cmdline = NIL;
     for (int i = cmdline_argc - 1; i >= 0; --i) {
@@ -1784,25 +1784,25 @@ value primcall_command_line(environment env, enum call_flags flags, int nargs, .
 }
 
 value primcall_current_error_port(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("current-error-port needs no arguments"); }
+    if (nargs != 0) { raise_error("current-error-port needs no arguments"); }
     return OBJECT(&current_error_port);
 }
 
 value primcall_current_input_port(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("current-input-port needs no arguments"); }
+    if (nargs != 0) { raise_error("current-input-port needs no arguments"); }
     return OBJECT(&current_input_port);
 }
 
 value primcall_current_output_port(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("current-output-port needs no arguments"); }
+    if (nargs != 0) { raise_error("current-output-port needs no arguments"); }
     return OBJECT(&current_output_port);
 }
 
 value primcall_delete_file(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("delete-file needs a single argument"); }
+    if (nargs != 1) { raise_error("delete-file needs a single argument"); }
     init_args();
     value filename = next_arg();
-    if (!IS_STRING(filename)) { RAISE("delete-file argument is not a string"); }
+    if (!IS_STRING(filename)) { raise_error("delete-file argument is not a string"); }
     free_args();
 
     char *filenamez = strz(filename);
@@ -1821,19 +1821,19 @@ value primcall_delete_file(environment env, enum call_flags flags, int nargs, ..
 }
 
 value primcall_display(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("display needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("display needs one or two arguments"); }
     init_args();
     value v = next_arg();
     value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
     free_args();
-    if (!IS_PORT(port)) { RAISE("writing to non-port"); }
-    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("writing to non-output port"); }
+    if (!IS_PORT(port)) { raise_error("writing to non-port"); }
+    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("writing to non-output port"); }
     _display(v, port);
     return VOID;
 }
 
 value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("eof-object? needs a single argument"); }
+    if (nargs != 1) { raise_error("eof-object? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1841,7 +1841,7 @@ value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, .
 }
 
 value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("eq? needs two arguments"); }
+    if (nargs != 2) { raise_error("eq? needs two arguments"); }
     init_args();
     value v1 = next_arg();
     value v2 = next_arg();
@@ -1850,11 +1850,11 @@ value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("error needs a single argument"); }
+    if (nargs != 1) { raise_error("error needs a single argument"); }
     init_args();
     value msg = next_arg();
     free_args();
-    if (!IS_STRING(msg)) { RAISE("error argument is not a string"); }
+    if (!IS_STRING(msg)) { raise_error("error argument is not a string"); }
     fprintf(stderr, "error: ");
     _display(msg, OBJECT(&current_error_port));
     fprintf(stderr, "\n");
@@ -1865,7 +1865,7 @@ value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_error_object_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("error-object? needs a single argument"); }
+    if (nargs != 1) { raise_error("error-object? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1873,7 +1873,7 @@ value primcall_error_object_q(environment env, enum call_flags flags, int nargs,
 }
 
 value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { RAISE("exit needs zero or one argument"); }
+    if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
     init_args();
     value code = nargs == 1 ? next_arg() : FIXNUM(0);
     free_args();
@@ -1887,14 +1887,14 @@ value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
         cleanup();
         exit(GET_FIXNUM(code));
     } else {
-        RAISE("invalid exit code");
+        raise_error("invalid exit code");
     }
 
     return VOID;
 }
 
 value primcall_file_error_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("file-error? needs a single argument"); }
+    if (nargs != 1) { raise_error("file-error? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1902,14 +1902,14 @@ value primcall_file_error_q(environment env, enum call_flags flags, int nargs, .
 }
 
 value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { RAISE("gensym needs zero or one argument"); }
+    if (nargs != 0 && nargs != 1) { raise_error("gensym needs zero or one argument"); }
     init_args();
 
     struct symbol *sym;
 
     if (nargs == 1) {
         value name = next_arg();
-        if (!IS_STRING(name)) { RAISE("gensym argument is not a string"); }
+        if (!IS_STRING(name)) { raise_error("gensym argument is not a string"); }
         uint64_t n = gensym_counter++;
         int prefix_len = (int)GET_STRING(name)->len;
         int suffix_len = snprintf(NULL, 0, "%lu", n);
@@ -1933,10 +1933,10 @@ value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_get_environment_variable(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("get-environment-variable needs a single argument"); }
+    if (nargs != 1) { raise_error("get-environment-variable needs a single argument"); }
     init_args();
     value name = next_arg();
-    if (!IS_STRING(name)) { RAISE("get-environment-variable argument is not a string"); }
+    if (!IS_STRING(name)) { raise_error("get-environment-variable argument is not a string"); }
     free_args();
 
     char *namez = strz(name);
@@ -1954,16 +1954,16 @@ value primcall_get_environment_variable(environment env, enum call_flags flags, 
 }
 
 value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("get-output-string needs a single argument"); }
+    if (nargs != 1) { raise_error("get-output-string needs a single argument"); }
     init_args();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { RAISE("argument is not an output string port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { raise_error("argument is not an output string port"); }
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
 }
 
 value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("input-port? needs a single argument"); }
+    if (nargs != 1) { raise_error("input-port? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -1971,12 +1971,12 @@ value primcall_input_port_q(environment env, enum call_flags flags, int nargs, .
 }
 
 value primcall_integer_to_char(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("integer->char needs a single argument"); }
+    if (nargs != 1) { raise_error("integer->char needs a single argument"); }
     init_args();
     value n = next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { RAISE("integer->char argument is not a number") }
-    if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { RAISE("integer->char argument is out of range") }
+    if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not a number"); }
+    if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { raise_error("integer->char argument is out of range"); }
     return CHAR((char) GET_FIXNUM(n));
 }
 
@@ -1993,7 +1993,7 @@ value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_list_star(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs == 0) { RAISE("list* needs at least one argument"); }
+    if (nargs == 0) { raise_error("list* needs at least one argument"); }
     init_args();
     value rev = NIL;
     for (int i = 0; i < nargs; ++i) {
@@ -2011,12 +2011,12 @@ value primcall_list_star(environment env, enum call_flags flags, int nargs, ...)
 }
 
 value primcall_list_to_vector(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("list->vector needs a single argument"); }
+    if (nargs != 1) { raise_error("list->vector needs a single argument"); }
     init_args();
     value ls = next_arg();
     free_args();
 
-    if (!is_proper_list(ls)) { RAISE("list->vector argument must be a list"); }
+    if (!is_proper_list(ls)) { raise_error("list->vector argument must be a list"); }
 
     size_t len = 0;
     for (value v = ls; v != NIL; v = GET_PAIR(v)->cdr) { ++len; }
@@ -2031,40 +2031,40 @@ value primcall_list_to_vector(environment env, enum call_flags flags, int nargs,
 }
 
 value primcall_make_string(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("make-string needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("make-string needs one or two arguments"); }
     init_args();
     value n = next_arg();
     value ch = nargs == 1 ? CHAR(0) : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { RAISE("make-string first argument should be a number"); }
-    if (GET_FIXNUM(n) < 0) { RAISE("make-string first argument is negative"); }
-    if (!IS_CHAR(ch)) { RAISE("make-string second argument should be a character"); }
+    if (!IS_FIXNUM(n)) { raise_error("make-string first argument should be a number"); }
+    if (GET_FIXNUM(n) < 0) { raise_error("make-string first argument is negative"); }
+    if (!IS_CHAR(ch)) { raise_error("make-string second argument should be a character"); }
     return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
 }
 
 value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("make-vector needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("make-vector needs one or two arguments"); }
     init_args();
     value n = next_arg();
     value fill = nargs == 1 ? VOID : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { RAISE("make-vector first argument should be a number"); }
-    if (GET_FIXNUM(n) < 0) { RAISE("make-vector first argument is negative"); }
+    if (!IS_FIXNUM(n)) { raise_error("make-vector first argument should be a number"); }
+    if (GET_FIXNUM(n) < 0) { raise_error("make-vector first argument is negative"); }
     return make_vector(GET_FIXNUM(n), fill);
 }
 
 value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { RAISE("newline needs zero or one argument"); }
+    if (nargs != 0 && nargs != 1) { raise_error("newline needs zero or one argument"); }
     init_args();
     value port = nargs == 1 ? next_arg() : OBJECT(&current_output_port);
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("newline argument is not an output port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("newline argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, CHAR('\n'));
     return VOID;
 }
 
 value primcall_not(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("not needs a single argument"); }
+    if (nargs != 1) { raise_error("not needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2073,7 +2073,7 @@ value primcall_not(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_null_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("null? needs a single argument"); }
+    if (nargs != 1) { raise_error("null? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2082,7 +2082,7 @@ value primcall_null_q(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("number? needs a single argument"); }
+    if (nargs != 1) { raise_error("number? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2090,13 +2090,13 @@ value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) 
 }
 
 value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("number->string needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("number->string needs one or two arguments"); }
     init_args();
     value n = next_arg();
     value base = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { RAISE("number->string first argument should be a number"); }
-    if (!IS_FIXNUM(base)) { RAISE("number->string second argument should be a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("number->string first argument should be a number"); }
+    if (!IS_FIXNUM(base)) { raise_error("number->string second argument should be a number"); }
     char buf[128];
     int start = 0;
     int64_t m = GET_FIXNUM(n);
@@ -2112,22 +2112,22 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
         buf[start++] = '0' + m;
         buf[start] = 0;
     } else
-        RAISE("radix not supported by number->string");
+        raise_error("radix not supported by number->string");
     return make_string(buf, strlen(buf));
 }
 
 value primcall_open_input_file(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("open-input-file needs a single argument"); }
+    if (nargs != 1) { raise_error("open-input-file needs a single argument"); }
     init_args();
     value filename = next_arg();
     free_args();
-    if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
+    if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
     struct object *obj = alloc_object();
     int filename_len = GET_STRING(filename)->len;
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
     FILE *fp = fopen(obj->port.filename, "r");
-    if (!fp) { RAISE("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
+    if (!fp) { raise_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
 
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_READ;
@@ -2140,14 +2140,14 @@ value primcall_open_input_file(environment env, enum call_flags flags, int nargs
 }
 
 value primcall_open_output_file(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("open-output-file needs a single argument"); }
+    if (nargs != 1) { raise_error("open-output-file needs a single argument"); }
     init_args();
     value filename = next_arg();
     free_args();
-    if (!IS_STRING(filename)) { RAISE("filename is not a string"); }
+    if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
     char *filenamez = strz(GET_STRING(filename));
     FILE *fp = fopen(filenamez, "w");
-    if (!fp) { RAISE("error opening file '%s': %s", filenamez, strerror(errno)); }
+    if (!fp) { raise_error("error opening file '%s': %s", filenamez, strerror(errno)); }
     free(filenamez);
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
@@ -2159,7 +2159,7 @@ value primcall_open_output_file(environment env, enum call_flags flags, int narg
 }
 
 value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("open-output-string accepts no arguments"); }
+    if (nargs != 0) { raise_error("open-output-string accepts no arguments"); }
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_WRITE;
@@ -2172,7 +2172,7 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
 }
 
 value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("port? needs a single argument"); }
+    if (nargs != 1) { raise_error("port? needs a single argument"); }
     init_args();
     value x = next_arg();
     free_args();
@@ -2180,16 +2180,16 @@ value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_peek_char(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { RAISE("peek-char needs zero or one argument"); }
+    if (nargs != 0 && nargs != 1) { raise_error("peek-char needs zero or one argument"); }
     init_args();
     value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("peek-char argument is not an input port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("peek-char argument is not an input port"); }
     return GET_OBJECT(port)->port.peek_char(port);
 }
 
 value primcall_port_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("port? needs a single argument"); }
+    if (nargs != 1) { raise_error("port? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2197,7 +2197,7 @@ value primcall_port_q(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_procedure_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("procedure? needs a single argument"); }
+    if (nargs != 1) { raise_error("procedure? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2205,67 +2205,67 @@ value primcall_procedure_q(environment env, enum call_flags flags, int nargs, ..
 }
 
 value primcall_read_char(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { RAISE("read-char needs zero or one argument"); }
+    if (nargs != 0 && nargs != 1) { raise_error("read-char needs zero or one argument"); }
     init_args();
     value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("read-char argument is not an input port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("read-char argument is not an input port"); }
     return GET_OBJECT(port)->port.read_char(port);
 }
 
 value primcall_read_line(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { RAISE("read-line needs zero or one argument"); }
+    if (nargs != 0 && nargs != 1) { raise_error("read-line needs zero or one argument"); }
     init_args();
     value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("read-line argument is not an input port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("read-line argument is not an input port"); }
     return GET_OBJECT(port)->port.read_line(port);
 }
 
 value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("set-box! needs two arguments"); }
+    if (nargs != 2) { raise_error("set-box! needs two arguments"); }
     init_args();
     value box = next_arg();
     value obj = next_arg();
     free_args();
 
-    if (!IS_BOX(box)) { RAISE("set-box! first argument is not a box"); }
+    if (!IS_BOX(box)) { raise_error("set-box! first argument is not a box"); }
     GET_OBJECT(box)->box.value = obj;
     return VOID;
 }
 
 value primcall_set_car_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("set-car! needs two arguments"); }
+    if (nargs != 2) { raise_error("set-car! needs two arguments"); }
     init_args();
     value pair = next_arg();
     value obj = next_arg();
     free_args();
 
-    if (!IS_PAIR(pair)) { RAISE("set-car! first argument is not a pair"); }
+    if (!IS_PAIR(pair)) { raise_error("set-car! first argument is not a pair"); }
     GET_PAIR(pair)->car = obj;
     return VOID;
 }
 
 value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("set-cdr! needs two arguments"); }
+    if (nargs != 2) { raise_error("set-cdr! needs two arguments"); }
     init_args();
     value pair = next_arg();
     value obj = next_arg();
     free_args();
 
-    if (!IS_PAIR(pair)) { RAISE("set-cdr! first argument is not a pair"); }
+    if (!IS_PAIR(pair)) { raise_error("set-cdr! first argument is not a pair"); }
     GET_PAIR(pair)->cdr = obj;
     return VOID;
 }
 
 value primcall_string_to_number(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("string-to-number needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("string-to-number needs one or two arguments"); }
     init_args();
     value str_v = next_arg();
     value base = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
-    if (!IS_STRING(str_v)) { RAISE("string->number first argument must be a string"); }
-    if (!IS_FIXNUM(base)) { RAISE("string->number second argument must be a number"); }
+    if (!IS_STRING(str_v)) { raise_error("string->number first argument must be a string"); }
+    if (!IS_FIXNUM(base)) { raise_error("string->number second argument must be a number"); }
     if (GET_STRING(str_v)->len == 0) return FALSE;
 
     char *str = strz(str_v);
@@ -2277,20 +2277,20 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
 }
 
 value primcall_string_to_symbol(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("string->symbol needs a single argument"); }
+    if (nargs != 1) { raise_error("string->symbol needs a single argument"); }
     init_args();
     value str = next_arg();
     free_args();
-    if (!IS_STRING(str)) { RAISE("string->symbol argument is not a string"); }
+    if (!IS_STRING(str)) { raise_error("string->symbol argument is not a string"); }
     return string_to_symbol(str);
 }
 
 value primcall_symbol_to_string(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("symbol->string needs a single argument"); }
+    if (nargs != 1) { raise_error("symbol->string needs a single argument"); }
     init_args();
     value sym = next_arg();
     free_args();
-    if (!IS_SYMBOL(sym)) { RAISE("symbol->string argument is not a symbol"); }
+    if (!IS_SYMBOL(sym)) { raise_error("symbol->string argument is not a symbol"); }
     return symbol_to_string(sym);
 }
 
@@ -2299,7 +2299,7 @@ value primcall_string_append(environment env, enum call_flags flags, int nargs, 
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value arg = next_arg();
-        if (!IS_STRING(arg)) { RAISE("string-append argument is not a string"); }
+        if (!IS_STRING(arg)) { raise_error("string-append argument is not a string"); }
 
         struct string *str = GET_STRING(arg);
         total_size += str->len;
@@ -2320,66 +2320,66 @@ value primcall_string_append(environment env, enum call_flags flags, int nargs, 
 }
 
 value primcall_string_copy(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs > 3) { RAISE("string-copy needs at most three arguments"); }
+    if (nargs > 3) { raise_error("string-copy needs at most three arguments"); }
     init_args();
     value str = next_arg();
-    if (!IS_STRING(str)) { RAISE("string-copy first argument is not a string"); }
+    if (!IS_STRING(str)) { raise_error("string-copy first argument is not a string"); }
     value start = nargs > 1 ? next_arg() : FIXNUM(0);
     value end = nargs > 2 ? next_arg() : FIXNUM(GET_STRING(str)->len);
     free_args();
-    if (!IS_FIXNUM(start)) { RAISE("string-copy second argument is not a number"); }
-    if (!IS_FIXNUM(end)) { RAISE("string-copy third argument is not a number"); }
-    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("string-copy start index is out of range"); }
-    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("string-copy end index is out of range"); }
+    if (!IS_FIXNUM(start)) { raise_error("string-copy second argument is not a number"); }
+    if (!IS_FIXNUM(end)) { raise_error("string-copy third argument is not a number"); }
+    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { raise_error("string-copy start index is out of range"); }
+    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("string-copy end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
 
 value primcall_string_length(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("string-length needs a single argument"); }
+    if (nargs != 1) { raise_error("string-length needs a single argument"); }
     init_args();
     value str = next_arg();
     free_args();
-    if (!IS_STRING(str)) { RAISE("string-length argument is not a string"); }
+    if (!IS_STRING(str)) { raise_error("string-length argument is not a string"); }
     return FIXNUM(GET_STRING(str)->len);
 }
 
 value primcall_string_ref(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("string-ref needs two arguments"); }
+    if (nargs != 2) { raise_error("string-ref needs two arguments"); }
     init_args();
     value str = next_arg();
     value idx = next_arg();
     free_args();
-    if (!IS_STRING(str)) { RAISE("string-ref first argument is not a string"); }
-    if (!IS_FIXNUM(idx)) { RAISE("string-ref second argument is not a number"); }
-    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE("string-ref index is out of range"); }
+    if (!IS_STRING(str)) { raise_error("string-ref first argument is not a string"); }
+    if (!IS_FIXNUM(idx)) { raise_error("string-ref second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { raise_error("string-ref index is out of range"); }
     return CHAR(GET_STRING(str)->s[GET_FIXNUM(idx)]);
 }
 
 value primcall_string_set_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("string-set! needs three arguments"); }
+    if (nargs != 3) { raise_error("string-set! needs three arguments"); }
     init_args();
     value str = next_arg();
     value idx = next_arg();
     value ch = next_arg();
     free_args();
-    if (!IS_STRING(str)) { RAISE("string-set! first argument is not a string"); }
-    if (!IS_FIXNUM(idx)) { RAISE("string-set! second argument is not a number"); }
-    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { RAISE("string-set! index is out of range"); }
-    if (!IS_CHAR(ch)) { RAISE("string-set! third argument is not a char"); }
+    if (!IS_STRING(str)) { raise_error("string-set! first argument is not a string"); }
+    if (!IS_FIXNUM(idx)) { raise_error("string-set! second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { raise_error("string-set! index is out of range"); }
+    if (!IS_CHAR(ch)) { raise_error("string-set! third argument is not a char"); }
     GET_STRING(str)->s[GET_FIXNUM(idx)] = GET_CHAR(ch);
     return VOID;
 }
 
 value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 2) { RAISE("string=? needs at least two arguments"); }
+    if (nargs < 2) { raise_error("string=? needs at least two arguments"); }
     init_args();
     value prev = next_arg();
-    if (!IS_STRING(prev)) { RAISE("string=? argument is not a string"); }
+    if (!IS_STRING(prev)) { raise_error("string=? argument is not a string"); }
     for (int i = 1; i < nargs; ++i) {
         value cur = next_arg();
-        if (!IS_STRING(cur)) { RAISE("string=? argument is not a string"); }
+        if (!IS_STRING(cur)) { raise_error("string=? argument is not a string"); }
         if (string_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
             free_args();
             return FALSE;
@@ -2392,13 +2392,13 @@ value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ..
 }
 
 value primcall_string_ci_eq_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 2) { RAISE("string-ci=? needs at least two arguments"); }
+    if (nargs < 2) { raise_error("string-ci=? needs at least two arguments"); }
     init_args();
     value prev = next_arg();
-    if (!IS_STRING(prev)) { RAISE("string-ci=? argument is not a string"); }
+    if (!IS_STRING(prev)) { raise_error("string-ci=? argument is not a string"); }
     for (int i = 1; i < nargs; ++i) {
         value cur = next_arg();
-        if (!IS_STRING(cur)) { RAISE("string-ci=? argument is not a string"); }
+        if (!IS_STRING(cur)) { raise_error("string-ci=? argument is not a string"); }
         if (string_ci_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
             free_args();
             return FALSE;
@@ -2411,7 +2411,7 @@ value primcall_string_ci_eq_q(environment env, enum call_flags flags, int nargs,
 }
 
 value primcall_string_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("string? needs a single argument"); }
+    if (nargs != 1) { raise_error("string? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2419,24 +2419,24 @@ value primcall_string_q(environment env, enum call_flags flags, int nargs, ...) 
 }
 
 value primcall_substring(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("substring needs three arguments"); }
+    if (nargs != 3) { raise_error("substring needs three arguments"); }
     init_args();
     value str = next_arg();
     value start = next_arg();
     value end = next_arg();
     free_args();
-    if (!IS_STRING(str)) { RAISE("substring first argument is not a string"); }
-    if (!IS_FIXNUM(start)) { RAISE("substring second argument is not a number"); }
-    if (!IS_FIXNUM(end)) { RAISE("substring third argument is not a number"); }
-    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { RAISE("substring start index is out of range"); }
-    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { RAISE("substring end index is out of range"); }
+    if (!IS_STRING(str)) { raise_error("substring first argument is not a string"); }
+    if (!IS_FIXNUM(start)) { raise_error("substring second argument is not a number"); }
+    if (!IS_FIXNUM(end)) { raise_error("substring third argument is not a number"); }
+    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
+    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
 }
 
 value primcall_symbol_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("symbol? needs a single argument"); }
+    if (nargs != 1) { raise_error("symbol? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2444,11 +2444,11 @@ value primcall_symbol_q(environment env, enum call_flags flags, int nargs, ...) 
 }
 
 value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("system needs a single argument"); }
+    if (nargs != 1) { raise_error("system needs a single argument"); }
     init_args();
     value cmd = next_arg();
     free_args();
-    if (!IS_STRING(cmd)) { RAISE("system argument is not a string"); }
+    if (!IS_STRING(cmd)) { raise_error("system argument is not a string"); }
     char *cmdz = strz(cmd);
     int ret = system(cmdz);
     free(cmdz);
@@ -2456,55 +2456,55 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_unread_char(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("unread-char needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("unread-char needs one or two arguments"); }
     init_args();
     value ch = next_arg();
-    if (!IS_CHAR(ch)) { RAISE("unread-char first argument is not a character"); }
+    if (!IS_CHAR(ch)) { raise_error("unread-char first argument is not a character"); }
     value port = nargs == 2 ? next_arg() : OBJECT(&current_input_port);
-    if (!IS_PORT(port)) { RAISE("unread-char second argument is not a port"); }
+    if (!IS_PORT(port)) { raise_error("unread-char second argument is not a port"); }
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { RAISE("unread-char argument is not an input port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("unread-char argument is not an input port"); }
     GET_OBJECT(port)->port.unread_char(port, ch);
     return VOID;
 }
 
 value primcall_urandom(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("urandom needs a single argument"); }
+    if (nargs != 1) { raise_error("urandom needs a single argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { RAISE("urandom argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("urandom argument is not a number"); }
     free_args();
 
     FILE *fp = fopen("/dev/urandom", "r");
     value s = STRING(alloc_string(GET_FIXNUM(n), '\0'));
     int nread = fread(GET_STRING(s)->s, 1, GET_FIXNUM(n), fp);
-    if (nread != GET_FIXNUM(n)) { RAISE("could not read enough bytes from /dev/urandom"); }
+    if (nread != GET_FIXNUM(n)) { raise_error("could not read enough bytes from /dev/urandom"); }
 
     return s;
 }
 
 value primcall_unbox(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("unbox needs a single argument"); }
+    if (nargs != 1) { raise_error("unbox needs a single argument"); }
     init_args();
     value box = next_arg();
     free_args();
 
-    if (!IS_BOX(box)) { RAISE("unbox argument is not a box object"); }
+    if (!IS_BOX(box)) { raise_error("unbox argument is not a box object"); }
     return GET_OBJECT(box)->box.value;
 }
 
 value primcall_unwrap(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("unwrap needs a single argument"); }
+    if (nargs != 1) { raise_error("unwrap needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
 
-    if (!IS_WRAPPED(v)) { RAISE("unwrap argument is not a wrapped object"); }
+    if (!IS_WRAPPED(v)) { raise_error("unwrap argument is not a wrapped object"); }
     return GET_OBJECT(v)->wrapped.value;
 }
 
 value primcall_vector_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("vector? needs a single argument"); }
+    if (nargs != 1) { raise_error("vector? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2512,47 +2512,47 @@ value primcall_vector_q(environment env, enum call_flags flags, int nargs, ...) 
 }
 
 value primcall_vector_length(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("vector-length needs a single argument"); }
+    if (nargs != 1) { raise_error("vector-length needs a single argument"); }
     init_args();
     value vec = next_arg();
     free_args();
-    if (!IS_VECTOR(vec)) { RAISE("vector-length argument is not a vector"); }
+    if (!IS_VECTOR(vec)) { raise_error("vector-length argument is not a vector"); }
     return FIXNUM(GET_OBJECT(vec)->vector.len);
 }
 
 value primcall_vector_ref(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("vector-ref needs two arguments"); }
+    if (nargs != 2) { raise_error("vector-ref needs two arguments"); }
     init_args();
     value vec = next_arg();
     value idx = next_arg();
     free_args();
-    if (!IS_VECTOR(vec)) { RAISE("vector-ref first argument is not a vector"); }
-    if (!IS_FIXNUM(idx)) { RAISE("vector-ref second argument is not a number"); }
-    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { RAISE("vector-ref index is out of range"); }
+    if (!IS_VECTOR(vec)) { raise_error("vector-ref first argument is not a vector"); }
+    if (!IS_FIXNUM(idx)) { raise_error("vector-ref second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector-ref index is out of range"); }
     return GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)];
 }
 
 value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("vector-set! needs three arguments"); }
+    if (nargs != 3) { raise_error("vector-set! needs three arguments"); }
     init_args();
     value vec = next_arg();
     value idx = next_arg();
     value v = next_arg();
     free_args();
-    if (!IS_VECTOR(vec)) { RAISE("vector-set! first argument is not a vector"); }
-    if (!IS_FIXNUM(idx)) { RAISE("vector-set! second argument is not a number"); }
-    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { RAISE("vector index is out of range"); }
+    if (!IS_VECTOR(vec)) { raise_error("vector-set! first argument is not a vector"); }
+    if (!IS_FIXNUM(idx)) { raise_error("vector-set! second argument is not a number"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector index is out of range"); }
     GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)] = v;
     return VOID;
 }
 
 value primcall_void(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("void accepts no arguments"); }
+    if (nargs != 0) { raise_error("void accepts no arguments"); }
     return VOID;
 }
 
 value primcall_void_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("void? accepts a single argument"); }
+    if (nargs != 1) { raise_error("void? accepts a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2560,7 +2560,7 @@ value primcall_void_q(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_wrap(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("wrap needs two arguments"); }
+    if (nargs != 2) { raise_error("wrap needs two arguments"); }
     init_args();
     value v = next_arg();
     value kind = next_arg();
@@ -2574,7 +2574,7 @@ value primcall_wrap(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_wrapped_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("wrapped? needs a single argument"); }
+    if (nargs != 1) { raise_error("wrapped? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2582,23 +2582,23 @@ value primcall_wrapped_q(environment env, enum call_flags flags, int nargs, ...)
 }
 
 value primcall_wrapped_kind(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("wrapped-kind needs a single argument"); }
+    if (nargs != 1) { raise_error("wrapped-kind needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
 
-    if (!IS_WRAPPED(v)) { RAISE("wrapped-kind argument is not a wrapped object"); }
+    if (!IS_WRAPPED(v)) { raise_error("wrapped-kind argument is not a wrapped object"); }
     return GET_OBJECT(v)->wrapped.kind;
 }
 
 value primcall_wrapped_set_print(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("wrapped-set-print needs two arguments"); }
+    if (nargs != 2) { raise_error("wrapped-set-print needs two arguments"); }
     init_args();
     value kind = next_arg();
     value proc = next_arg();
     free_args();
 
-    if (!IS_CLOSURE(proc)) { RAISE("wrapped-set-print second argument not a procedure"); }
+    if (!IS_CLOSURE(proc)) { raise_error("wrapped-set-print second argument not a procedure"); }
 
     n_wrapped_print_procs++;
     wrapped_print_procs = realloc(wrapped_print_procs, n_wrapped_print_procs * sizeof(struct kind_proc));
@@ -2609,24 +2609,24 @@ value primcall_wrapped_set_print(environment env, enum call_flags flags, int nar
 }
 
 value primcall_write(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("write needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("write needs one or two arguments"); }
     init_args();
     value v = next_arg();
     value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("write second argument is not an output port"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("write second argument is not an output port"); }
     _write(v, port);
     return VOID;
 }
 
 value primcall_write_char(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("write-char needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("write-char needs one or two arguments"); }
     init_args();
     value ch = next_arg();
     value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
     free_args();
-    if (!IS_CHAR(ch)) { RAISE("write-char first argument is not a char"); }
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { RAISE("write-char second argument is not an output port"); }
+    if (!IS_CHAR(ch)) { raise_error("write-char first argument is not a char"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("write-char second argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, ch);
     return VOID;
 }
@@ -2636,17 +2636,17 @@ value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { RAISE("addition (+) argument is not a number") }
+        if (!IS_FIXNUM(v)) { raise_error("addition (+) argument is not a number"); }
         result += (int64_t) v;
     }
     return result;
 }
 
 value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE("division (-) needs at least one argument"); }
+    if (nargs < 1) { raise_error("division (-) needs at least one argument"); }
     init_args();
     value result_v = next_arg();
-    if (!IS_FIXNUM(result_v)) { RAISE("division (/) argument is not a number"); }
+    if (!IS_FIXNUM(result_v)) { raise_error("division (/) argument is not a number"); }
     int64_t result = GET_FIXNUM(result_v);
     if (nargs == 1) {
         if (result == 1)
@@ -2654,14 +2654,14 @@ value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
         if (result == -1)
             return FIXNUM(-1);
         if (result == 0)
-            RAISE("division by zero");
+            raise_error("division by zero");
         return FIXNUM(0); /* we don't have fractionals, so 1/n is always zero */
     }
     for (int i = 1; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { RAISE("division (/) argument is not a number") }
+        if (!IS_FIXNUM(v)) { raise_error("division (/) argument is not a number"); }
         if (GET_FIXNUM(v) == 0)
-            RAISE("division by zero");
+            raise_error("division by zero");
         result /= GET_FIXNUM(v);
     }
 
@@ -2674,7 +2674,7 @@ value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { RAISE("multiplication (*) argument is not a number") }
+        if (!IS_FIXNUM(v)) { raise_error("multiplication (*) argument is not a number"); }
         result *= GET_FIXNUM(v);
     }
 
@@ -2683,14 +2683,14 @@ value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE("subtraction (-) needs at least one argument"); }
+    if (nargs < 1) { raise_error("subtraction (-) needs at least one argument"); }
     init_args();
     value result = next_arg();
-    if (!IS_FIXNUM(result)) { RAISE("subtraction (-) argument is not a number"); }
+    if (!IS_FIXNUM(result)) { raise_error("subtraction (-) argument is not a number"); }
     if (nargs == 1) return FIXNUM(-GET_FIXNUM(result));
     for (int i = 1; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { RAISE("subtraction (-) argument is not a number") }
+        if (!IS_FIXNUM(v)) { raise_error("subtraction (-) argument is not a number"); }
         result -= (int64_t) v;
     }
 
@@ -2699,13 +2699,13 @@ value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_num_eq(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE("= needs at least one argument"); }
+    if (nargs < 1) { raise_error("= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { RAISE("= argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("= argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { RAISE("= argument is not a number") }
+        if (!IS_FIXNUM(m)) { raise_error("= argument is not a number"); }
         if (GET_FIXNUM(n) != GET_FIXNUM(m)) return FALSE;
     }
 
@@ -2714,13 +2714,13 @@ value primcall_num_eq(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_num_lt(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE("< needs at least one argument"); }
+    if (nargs < 1) { raise_error("< needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { RAISE("< argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("< argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { RAISE("< argument is not a number") }
+        if (!IS_FIXNUM(m)) { raise_error("< argument is not a number"); }
         if (GET_FIXNUM(n) >= GET_FIXNUM(m)) return FALSE;
     }
 
@@ -2729,13 +2729,13 @@ value primcall_num_lt(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE("> needs at least one argument"); }
+    if (nargs < 1) { raise_error("> needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { RAISE("> argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("> argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { RAISE("> argument is not a number") }
+        if (!IS_FIXNUM(m)) { raise_error("> argument is not a number"); }
         if (GET_FIXNUM(n) <= GET_FIXNUM(m)) return FALSE;
     }
 
@@ -2744,13 +2744,13 @@ value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_num_le(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE("<= needs at least one argument"); }
+    if (nargs < 1) { raise_error("<= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { RAISE("<= argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("<= argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { RAISE("<= argument is not a number") }
+        if (!IS_FIXNUM(m)) { raise_error("<= argument is not a number"); }
         if (GET_FIXNUM(n) > GET_FIXNUM(m)) return FALSE;
     }
 
@@ -2759,13 +2759,13 @@ value primcall_num_le(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { RAISE(">= needs at least one argument"); }
+    if (nargs < 1) { raise_error(">= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { RAISE(">= argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error(">= argument is not a number"); }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { RAISE(">= argument is not a number") }
+        if (!IS_FIXNUM(m)) { raise_error(">= argument is not a number"); }
         if (GET_FIXNUM(n) < GET_FIXNUM(m)) return FALSE;
     }
 
@@ -2785,18 +2785,18 @@ static int eq_fn_wrapper(struct hash_table *ht, value a, value b) {
 }
 
 value primcall_percent_make_hash_table(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("%%make-hash-table accepts two arguments"); }
+    if (nargs != 2) { raise_error("%%make-hash-table accepts two arguments"); }
     init_args();
     value eq_fn = next_arg();
     value hash_fn = next_arg();
     free_args();
 
     if (eq_fn != FALSE && (!IS_CLOSURE(eq_fn) || !CLOSURE_ACCEPTS(GET_CLOSURE(eq_fn), 2))) {
-        RAISE("%%make-hash-table first argument must be #f or a procedure that accepts two arguments");
+        raise_error("%%make-hash-table first argument must be #f or a procedure that accepts two arguments");
     }
 
     if (hash_fn != FALSE && (!IS_CLOSURE(hash_fn) || !CLOSURE_ACCEPTS(GET_CLOSURE(hash_fn), 1))) {
-        RAISE("%%make-hash-table second argument must be #f or a procedure that accepts a single argument");
+        raise_error("%%make-hash-table second argument must be #f or a procedure that accepts a single argument");
     }
 
     struct object *obj = alloc_object();
@@ -2811,7 +2811,7 @@ value primcall_percent_make_hash_table(environment env, enum call_flags flags, i
 }
 
 value primcall_hash_table_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table? needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -2819,32 +2819,32 @@ value primcall_hash_table_q(environment env, enum call_flags flags, int nargs, .
 }
 
 value primcall_hash_table_set_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("hash-table-set! needs three arguments"); }
+    if (nargs != 3) { raise_error("hash-table-set! needs three arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
     value v = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-set! first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-set! first argument is not a hash-table"); }
     hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, k, v);
     return VOID;
 }
 
 value primcall_hash_table_delete_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("hash-table-delete! needs two arguments"); }
+    if (nargs != 2) { raise_error("hash-table-delete! needs two arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-delete! first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-delete! first argument is not a hash-table"); }
     hash_table_delete(&GET_OBJECT(ht)->hash_table.ht, ht, k);
     return VOID;
 }
 
 value primcall_hash_table_ref(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2 && nargs != 3) { RAISE("hash-table-ref needs two or three arguments"); }
+    if (nargs != 2 && nargs != 3) { raise_error("hash-table-ref needs two or three arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
@@ -2853,20 +2853,20 @@ value primcall_hash_table_ref(environment env, enum call_flags flags, int nargs,
 
     if (thunk != FALSE) {
         if (!IS_CLOSURE(thunk)) {
-            RAISE("thunk is not a procedure");
+            raise_error("thunk is not a procedure");
         }
 
         if (!CLOSURE_ACCEPTS(GET_CLOSURE(thunk), 0)) {
-            RAISE("thunk should accept 0 arguments");
+            raise_error("thunk should accept 0 arguments");
         }
     }
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-ref first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-ref first argument is not a hash-table"); }
     value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
 
     if (v == SENTINEL) {
         if (thunk == FALSE) {
-            RAISE("key not found in hash-table");
+            raise_error("key not found in hash-table");
         } else {
             struct closure *c = GET_CLOSURE(thunk);
             return c->func(c->freevars, NO_CALL_FLAGS, 0);
@@ -2877,14 +2877,14 @@ value primcall_hash_table_ref(environment env, enum call_flags flags, int nargs,
 }
 
 value primcall_hash_table_ref_default(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("hash-table-ref/default needs three arguments"); }
+    if (nargs != 3) { raise_error("hash-table-ref/default needs three arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
     value deflt = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-ref/default first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-ref/default first argument is not a hash-table"); }
     value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
 
     if (v == SENTINEL) {
@@ -2895,29 +2895,29 @@ value primcall_hash_table_ref_default(environment env, enum call_flags flags, in
 }
 
 value primcall_hash_table_exists_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("hash-table-exists? needs two arguments"); }
+    if (nargs != 2) { raise_error("hash-table-exists? needs two arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-exists? first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-exists? first argument is not a hash-table"); }
     value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
     return BOOL(v != SENTINEL);
 }
 
 value primcall_hash_table_size(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table-size needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table-size needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-size argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-size argument is not a hash-table"); }
     return FIXNUM(GET_OBJECT(ht)->hash_table.ht.size);
 }
 
 value primcall_hash_table_update_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3 && nargs != 4) { RAISE("hash-table-update! needs three or four arguments"); }
+    if (nargs != 3 && nargs != 4) { raise_error("hash-table-update! needs three or four arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
@@ -2925,29 +2925,29 @@ value primcall_hash_table_update_b(environment env, enum call_flags flags, int n
     value thunk = nargs == 4 ? next_arg() : FALSE;
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-update! first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-update! first argument is not a hash-table"); }
 
     if (!IS_CLOSURE(func)) {
-        RAISE("hash-table-update! third argument (function) is not a procedure");
+        raise_error("hash-table-update! third argument (function) is not a procedure");
     }
     if (!CLOSURE_ACCEPTS(GET_CLOSURE(func), 1)) {
-        RAISE("hash-table-update! third argument (function) procedure should accept a single argument");
+        raise_error("hash-table-update! third argument (function) procedure should accept a single argument");
     }
 
     if (thunk != FALSE) {
         if (!IS_CLOSURE(thunk)) {
-            RAISE("hash-table-update! fourth argument (thunk) is not a procedure");
+            raise_error("hash-table-update! fourth argument (thunk) is not a procedure");
         }
 
         if (!CLOSURE_ACCEPTS(GET_CLOSURE(thunk), 0)) {
-            RAISE("hash-table-update! fourth argument (thunk) should accept 0 arguments");
+            raise_error("hash-table-update! fourth argument (thunk) should accept 0 arguments");
         }
     }
 
     value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
     if (v == SENTINEL) {
         if (thunk == FALSE) {
-            RAISE("key not found in hash-table");
+            raise_error("key not found in hash-table");
         }
 
         struct closure *c = GET_CLOSURE(thunk);
@@ -2963,7 +2963,7 @@ value primcall_hash_table_update_b(environment env, enum call_flags flags, int n
 }
 
 value primcall_hash_table_update_b_default(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 4) { RAISE("hash-table-update!/default needs four arguments"); }
+    if (nargs != 4) { raise_error("hash-table-update!/default needs four arguments"); }
     init_args();
     value ht = next_arg();
     value k = next_arg();
@@ -2971,13 +2971,13 @@ value primcall_hash_table_update_b_default(environment env, enum call_flags flag
     value deflt = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-update!/default first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-update!/default first argument is not a hash-table"); }
 
     if (!IS_CLOSURE(func)) {
-        RAISE("hash-table-update!/default third argument (function) is not a procedure");
+        raise_error("hash-table-update!/default third argument (function) is not a procedure");
     }
     if (!CLOSURE_ACCEPTS(GET_CLOSURE(func), 1)) {
-        RAISE("hash-table-update!/default hash-table-update!/default argument (function) procedure should accept a single argument");
+        raise_error("hash-table-update!/default hash-table-update!/default argument (function) procedure should accept a single argument");
     }
 
     value v = hash_table_get(&GET_OBJECT(ht)->hash_table.ht, ht, k);
@@ -2999,12 +2999,12 @@ static void keys_accummulator(value k, value v, void *ctx) {
 }
 
 value primcall_hash_table_keys(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table-keys needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table-keys needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-keys argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-keys argument is not a hash-table"); }
 
     value list = NIL;
     hash_table_each(&GET_OBJECT(ht)->hash_table.ht, keys_accummulator, &list);
@@ -3018,12 +3018,12 @@ static void values_accummulator(value k, value v, void *ctx) {
 }
 
 value primcall_hash_table_values(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table-values needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table-values needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-values argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-values argument is not a hash-table"); }
 
     value list = NIL;
     hash_table_each(&GET_OBJECT(ht)->hash_table.ht, values_accummulator, &list);
@@ -3037,16 +3037,16 @@ static void ht_walker(value k, value v, void *ctx) {
 }
 
 value primcall_hash_table_walk(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("hash-table-walk needs two arguments"); }
+    if (nargs != 2) { raise_error("hash-table-walk needs two arguments"); }
     init_args();
     value ht = next_arg();
     value proc = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-walk first argument is not a hash-table"); }
-    if (!IS_CLOSURE(proc)) { RAISE("hash-table-walk second argument is not a procedure"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-walk first argument is not a hash-table"); }
+    if (!IS_CLOSURE(proc)) { raise_error("hash-table-walk second argument is not a procedure"); }
     if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 2)) {
-        RAISE("hash-table-walk second argument (proc) procedure should accept two arguments");
+        raise_error("hash-table-walk second argument (proc) procedure should accept two arguments");
     }
 
     hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_walker, proc);
@@ -3065,17 +3065,17 @@ static void ht_folder(value k, value v, void *ctx) {
 }
 
 value primcall_hash_table_fold(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 3) { RAISE("hash-table-fold needs three arguments"); }
+    if (nargs != 3) { raise_error("hash-table-fold needs three arguments"); }
     init_args();
     value ht = next_arg();
     value f = next_arg();
     value init_value = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-fold first argument is not a hash-table"); }
-    if (!IS_CLOSURE(f)) { RAISE("hash-table-fold second argument is not a procedure"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-fold first argument is not a hash-table"); }
+    if (!IS_CLOSURE(f)) { raise_error("hash-table-fold second argument is not a procedure"); }
     if (!CLOSURE_ACCEPTS(GET_CLOSURE(f), 3)) {
-        RAISE("hash-table-fold second argument (f) procedure should accept three arguments");
+        raise_error("hash-table-fold second argument (f) procedure should accept three arguments");
     }
 
     struct folder_ctx ctx = {
@@ -3093,12 +3093,12 @@ static void ht_to_alist(value k, value v, void *ctx) {
 }
 
 value primcall_hash_table_to_alist(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table->alist needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table->alist needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table->alist argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table->alist argument is not a hash-table"); }
 
     value alist = NIL;
     hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_to_alist, &alist);
@@ -3113,12 +3113,12 @@ static void ht_copier(value k, value v, void *ctx) {
 }
 
 value primcall_hash_table_copy(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table-copy needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table-copy needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-copy argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-copy argument is not a hash-table"); }
 
     struct object *new_ht = alloc_object();
     new_ht->type = OBJ_HASH_TABLE;
@@ -3135,14 +3135,14 @@ value primcall_hash_table_copy(environment env, enum call_flags flags, int nargs
 }
 
 value primcall_hash_table_merge_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("hash-table-merge! needs two arguments"); }
+    if (nargs != 2) { raise_error("hash-table-merge! needs two arguments"); }
     init_args();
     value ht1 = next_arg();
     value ht2 = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht1)) { RAISE("hash-table-merge! first argument is not a hash-table"); }
-    if (!IS_HASH_TABLE(ht2)) { RAISE("hash-table-merge! second argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht1)) { raise_error("hash-table-merge! first argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht2)) { raise_error("hash-table-merge! second argument is not a hash-table"); }
 
     hash_table_each(&GET_OBJECT(ht2)->hash_table.ht, ht_copier, ht1);
 
@@ -3150,14 +3150,14 @@ value primcall_hash_table_merge_b(environment env, enum call_flags flags, int na
 }
 
 value primcall_hash_by_identity(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("hash-by-identity needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("hash-by-identity needs one or two arguments"); }
     init_args();
     value v = next_arg();
     value bound = nargs == 2 ? next_arg() : FALSE;
     free_args();
 
     if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
-        RAISE("hash-by-identity second argument must be a positive integer");
+        raise_error("hash-by-identity second argument must be a positive integer");
     }
 
     uint64_t h = hash_table_default_hash(NULL, v);
@@ -3228,29 +3228,29 @@ static uint64_t hash_finalize(uint64_t h, value bound) {
 }
 
 value primcall_hash(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("hash needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("hash needs one or two arguments"); }
     init_args();
     value v = next_arg();
     value bound = nargs == 2 ? next_arg() : FALSE;
     free_args();
 
     if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
-        RAISE("hash second argument must be a positive integer");
+        raise_error("hash second argument must be a positive integer");
     }
 
     return FIXNUM(hash_finalize(hash_equal_recursive(v, 8), bound));
 }
 
 value primcall_string_hash(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("string-hash needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("string-hash needs one or two arguments"); }
     init_args();
     value v = next_arg();
     value bound = nargs == 2 ? next_arg() : FALSE;
     free_args();
 
-    if (!IS_STRING(v)) { RAISE("string-hash first argument must be a string"); }
+    if (!IS_STRING(v)) { raise_error("string-hash first argument must be a string"); }
     if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
-        RAISE("string-hash second argument must be a positive integer");
+        raise_error("string-hash second argument must be a positive integer");
     }
 
     struct string *s = GET_STRING(v);
@@ -3258,15 +3258,15 @@ value primcall_string_hash(environment env, enum call_flags flags, int nargs, ..
 }
 
 value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1 && nargs != 2) { RAISE("string-ci-hash needs one or two arguments"); }
+    if (nargs != 1 && nargs != 2) { raise_error("string-ci-hash needs one or two arguments"); }
     init_args();
     value v = next_arg();
     value bound = nargs == 2 ? next_arg() : FALSE;
     free_args();
 
-    if (!IS_STRING(v)) { RAISE("string-ci-hash first argument must be a string"); }
+    if (!IS_STRING(v)) { raise_error("string-ci-hash first argument must be a string"); }
     if (bound != FALSE && (!IS_FIXNUM(bound) || GET_FIXNUM(bound) <= 0)) {
-        RAISE("string-ci-hash second argument must be a positive integer");
+        raise_error("string-ci-hash second argument must be a positive integer");
     }
 
     struct string *s = GET_STRING(v);
@@ -3274,27 +3274,27 @@ value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs,
 }
 
  value primcall_hash_table_equivalence_function(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table-equivalence-function needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table-equivalence-function needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-equivalence-function argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-equivalence-function argument is not a hash-table"); }
     return GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
 }
 
 value primcall_hash_table_hash_function(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("hash-table-hash-function needs a single argument"); }
+    if (nargs != 1) { raise_error("hash-table-hash-function needs a single argument"); }
     init_args();
     value ht = next_arg();
     free_args();
 
-    if (!IS_HASH_TABLE(ht)) { RAISE("hash-table-hash-function argument is not a hash-table"); }
+    if (!IS_HASH_TABLE(ht)) { raise_error("hash-table-hash-function argument is not a hash-table"); }
     return GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
 }
 
 value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("make-empty-environment takes no arguments"); }
+    if (nargs != 0) { raise_error("make-empty-environment takes no arguments"); }
     struct object *obj = alloc_object();
     obj->type = OBJ_ENVIRONMENT;
     obj->environment.hash_table = malloc(sizeof(struct hash_table));
@@ -3329,21 +3329,21 @@ static enum sym_kind symbol_to_sym_kind(value sym) {
     if (sym == extend_global_env("primcall", 8, sym_unbound)) return sym_primcall;
     if (sym == extend_global_env("alias", 5, sym_unbound))    return sym_alias;
     struct symbol *s = GET_SYMBOL(sym);
-    RAISE("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
+    raise_error("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }
 
 value primcall_environment_lookup(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("environment-lookup needs 2 arguments"); }
+    if (nargs != 2) { raise_error("environment-lookup needs 2 arguments"); }
     init_args();
     value e = next_arg();
     value sym = next_arg();
     free_args();
 
-    if (!IS_ENVIRONMENT(e)) { RAISE("environment-lookup first argument is not an environment"); }
-    if (!IS_SYMBOL(sym)) { RAISE("environment-lookup second argument is not a symbol"); }
+    if (!IS_ENVIRONMENT(e)) { raise_error("environment-lookup first argument is not an environment"); }
+    if (!IS_SYMBOL(sym)) { raise_error("environment-lookup second argument is not a symbol"); }
 
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == NULL) { RAISE("environment-lookup does not support the global environment"); }
+    if (ht == NULL) { raise_error("environment-lookup does not support the global environment"); }
 
     struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
     if (binding == SENTINEL || binding->kind == sym_unbound) { return FALSE; }
@@ -3352,26 +3352,26 @@ value primcall_environment_lookup(environment env, enum call_flags flags, int na
 }
 
 value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 4) { RAISE("environment-bind! needs 4 arguments"); }
+    if (nargs != 4) { raise_error("environment-bind! needs 4 arguments"); }
     init_args();
     value e = next_arg();
     value sym = next_arg();
     value kind = next_arg();
     value val = next_arg();
     free_args();
-    if (!IS_ENVIRONMENT(e)) { RAISE("environment-bind! first argument is not an environment"); }
-    if (!IS_SYMBOL(sym)) { RAISE("environment-bind! second argument is not a symbol"); }
-    if (!IS_SYMBOL(kind)) { RAISE("environment-bind! third argument is not a symbol"); }
+    if (!IS_ENVIRONMENT(e)) { raise_error("environment-bind! first argument is not an environment"); }
+    if (!IS_SYMBOL(sym)) { raise_error("environment-bind! second argument is not a symbol"); }
+    if (!IS_SYMBOL(kind)) { raise_error("environment-bind! third argument is not a symbol"); }
 
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == NULL) { RAISE("environment-bind! does not support the sentinel environment"); }
+    if (ht == NULL) { raise_error("environment-bind! does not support the sentinel environment"); }
 
     env_define(e, sym, val, symbol_to_sym_kind(kind));
     return VOID;
 }
 
 value primcall_environment_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("environment? needs a single argument"); }
+    if (nargs != 1) { raise_error("environment? needs a single argument"); }
     init_args();
     value v = next_arg();
     free_args();
@@ -3379,22 +3379,22 @@ value primcall_environment_q(environment env, enum call_flags flags, int nargs, 
 }
 
 value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { RAISE("run-so needs two arguments"); }
+    if (nargs != 2) { raise_error("run-so needs two arguments"); }
     init_args();
     value filename = next_arg();
     value e = next_arg();
     free_args();
 
-    if (!IS_STRING(filename)) { RAISE("run-so first argument (filename) must be a string"); }
-    if (!IS_ENVIRONMENT(e)) { RAISE("run-so second argument (environment) must be an environment"); }
+    if (!IS_STRING(filename)) { raise_error("run-so first argument (filename) must be a string"); }
+    if (!IS_ENVIRONMENT(e)) { raise_error("run-so second argument (environment) must be an environment"); }
 
     char *filenamez = strz(filename);
     void *handle = dlopen(filenamez, RTLD_NOW | RTLD_LOCAL);
     free(filenamez);
-    if (!handle) { RAISE("run-so: cannot load file: %.*s", (int) GET_STRING(filename)->len, GET_STRING(filename)->s); }
+    if (!handle) { raise_error("run-so: cannot load file: %.*s", (int) GET_STRING(filename)->len, GET_STRING(filename)->s); }
 
     value (*whisper_main_sym)(value env) = dlsym(handle, "whisper_main");
-    if (!whisper_main_sym) { RAISE("run-so: cannot find symbol whisper_main in shared object"); }
+    if (!whisper_main_sym) { raise_error("run-so: cannot find symbol whisper_main in shared object"); }
 
     value result = whisper_main_sym(e);
 
@@ -3405,12 +3405,12 @@ value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_list_directory(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("list-directory needs a single argument"); }
+    if (nargs != 1) { raise_error("list-directory needs a single argument"); }
     init_args();
     value path = next_arg();
     free_args();
 
-    if (!IS_STRING(path)) { RAISE("list-directory argument is not a string"); }
+    if (!IS_STRING(path)) { raise_error("list-directory argument is not a string"); }
 
     char *pathz = strz(path);
     DIR *dir = opendir(pathz);
@@ -3431,13 +3431,13 @@ value primcall_list_directory(environment env, enum call_flags flags, int nargs,
 }
 
 value primcall_gc(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("gc takes no arguments"); }
+    if (nargs != 0) { raise_error("gc takes no arguments"); }
     gc();
     return VOID;
 }
 
 value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { RAISE("gc-manual-mode! needs a single argument"); }
+    if (nargs != 1) { raise_error("gc-manual-mode! needs a single argument"); }
     init_args();
     value enabled = next_arg();
     free_args();
@@ -3446,7 +3446,7 @@ value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int narg
 }
 
 value primcall_percent_gc_stats(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { RAISE("%%gc-stats takes no arguments"); }
+    if (nargs != 0) { raise_error("%%gc-stats takes no arguments"); }
 
     /* snapshot counters before allocating */
     size_t full_sweeps = gc_full_sweeps;
