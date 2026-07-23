@@ -143,6 +143,32 @@ void print_stacktrace(void) {
 void print_stacktrace(void) {}
 #endif /* DEBUG */
 
+__attribute__((noreturn, cold))
+void raise_error(const char *fmt, ...) {
+    print_stacktrace();
+    fprintf(stderr, "exception: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    cleanup();
+    exit(1);
+}
+
+__attribute__((noreturn, cold))
+void panic(const char *fmt, ...) {
+    print_stacktrace();
+    fprintf(stderr, "panic: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    cleanup();
+    exit(1);
+}
+
 const char *find_func_name(funcptr func) {
     char *buf;
     struct symbol_ht_ctx ctx;
@@ -1485,7 +1511,7 @@ value env_ref(value e, value sym) {
          * a real closure from program init. */
         return GET_SYMBOL(binding->value)->value;
     default:
-        RAISE("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case");
     }
 }
 
@@ -3290,7 +3316,7 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
     case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
     case sym_alias:    return extend_global_env("alias", 5, sym_unbound);
     default:
-        RAISE("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case");
     }
 }
 
