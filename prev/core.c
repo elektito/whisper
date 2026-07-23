@@ -143,6 +143,32 @@ void print_stacktrace(void) {
 void print_stacktrace(void) {}
 #endif /* DEBUG */
 
+__attribute__((noreturn, cold))
+void raise_error(const char *fmt, ...) {
+    print_stacktrace();
+    fprintf(stderr, "exception: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    cleanup();
+    exit(1);
+}
+
+__attribute__((noreturn, cold))
+void panic(const char *fmt, ...) {
+    print_stacktrace();
+    fprintf(stderr, "panic: ");
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    cleanup();
+    exit(1);
+}
+
 const char *find_func_name(funcptr func) {
     char *buf;
     struct symbol_ht_ctx ctx;
@@ -534,8 +560,17 @@ struct freevars_closure_mapping {
     value    closure;
 };
 
-/* Build a map from each large closure's malloc'd freevars pointer to its
- * closure value.  The caller must free() the returned array. */
+static int freevars_map_cmp(const void *a, const void *b) {
+    uint64_t fa = ((const struct freevars_closure_mapping *)a)->freevars;
+    uint64_t fb = ((const struct freevars_closure_mapping *)b)->freevars;
+    if (fa < fb) return -1;
+    if (fa > fb) return 1;
+    return 0;
+}
+
+/* Build a map from each large closure's malloc'd freevars pointer to
+ * its closure value, sorted by freevars pointer so gc_scan_stack can
+ * binary search it. The caller must free() the returned array. */
 static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
     /* calculate the number of in-use (large) closure objects */
     int len = 0;
@@ -561,10 +596,34 @@ static struct freevars_closure_mapping *build_freevars_map(int *out_len) {
                 }
             }
         }
+
+        /* Sort by freevars pointer. Each in-use large closure owns a
+         * distinct malloc'd freevars array, so the keys are unique and
+         * a binary search in gc_scan_stack finds an exact match or
+         * nothing. */
+        qsort(map, len, sizeof(*map), freevars_map_cmp);
     }
 
     *out_len = len;
     return map;
+}
+
+/* Binary search the sorted freevars map for an exact freevars-pointer
+ * match, returning the associated closure value or 0 if none. */
+static value lookup_freevars_closure(struct freevars_closure_mapping *map, int len, uint64_t raw) {
+    int lo = 0;
+    int hi = len - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        uint64_t f = map[mid].freevars;
+        if (f == raw)
+            return map[mid].closure;
+        else if (f < raw)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return 0;
 }
 
 /* see gc_mark() function's comment to see why no_sanitize */
@@ -619,11 +678,9 @@ static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
                 }
             }
 
-            for (int j = 0; j < freevars_map_len; j++) {
-                if (freevars_map[j].freevars == raw) {
-                    gc_recurse(freevars_map[j].closure);
-                    break;
-                }
+            value cl = lookup_freevars_closure(freevars_map, freevars_map_len, raw);
+            if (cl) {
+                gc_recurse(cl);
             }
         }
     }
@@ -796,7 +853,7 @@ static void gc_auto(void) {
         char *env = getenv("GC_FULL_SWEEP_RATIO");
         gc_full_sweep_ratio = env ? atoi(env) : 0;
         if (gc_full_sweep_ratio <= 0) {
-            gc_full_sweep_ratio = 1;
+            gc_full_sweep_ratio = 8;
         }
     }
 
@@ -1454,7 +1511,7 @@ value env_ref(value e, value sym) {
          * a real closure from program init. */
         return GET_SYMBOL(binding->value)->value;
     default:
-        RAISE("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case");
     }
 }
 
@@ -3259,7 +3316,7 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
     case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
     case sym_alias:    return extend_global_env("alias", 5, sym_unbound);
     default:
-        RAISE("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case");
     }
 }
 
@@ -3410,7 +3467,7 @@ value primcall_percent_gc_stats(environment env, enum call_flags flags, int narg
     GET_OBJECT(result)->vector.data[1] = FIXNUM(full_sweeps);
     GET_OBJECT(result)->vector.data[2] = FIXNUM(lazy_reclaims);
     GET_OBJECT(result)->vector.data[3] = FIXNUM(live);
-    GET_OBJECT(result)->vector.data[4] = FIXNUM(gc_manual_mode);
+    GET_OBJECT(result)->vector.data[4] = BOOL(gc_manual_mode);
     GET_OBJECT(result)->vector.data[5] = FIXNUM(pools);
 
     return result;

@@ -264,7 +264,17 @@ struct object {
 
 /************ globals and helpers ***********/
 
-#define RAISE(...) { print_stacktrace(); fprintf(stderr, "exception: " __VA_ARGS__); fprintf(stderr, "\n"); cleanup(); exit(1); }
+/* raise_error signals a Scheme-level error. It is the single choke
+ * point every RAISE flows through, so that once exceptions exist it can
+ * unwind to an installed handler instead of exiting. The RAISE macro
+ * stays as the spelling the code generator emits into generated C.
+ * panic is for unrecoverable internal invariants that must never be
+ * caught (e.g. reached-impossible-case, out of memory). Both never
+ * return, so callers that end in one need no trailing return. */
+__attribute__((noreturn, cold)) void raise_error(const char *fmt, ...);
+__attribute__((noreturn, cold)) void panic(const char *fmt, ...);
+
+#define RAISE(...) { raise_error(__VA_ARGS__); }
 
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
@@ -371,7 +381,7 @@ static value global_env_ref(value sym) {
     case sym_alias:
         return global_env_ref(s->value);
     default:
-        RAISE("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case");
     }
 }
 
