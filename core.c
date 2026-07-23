@@ -2172,7 +2172,7 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
 }
 
 value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("port? needs a single argument"); }
+    if (nargs != 1) { raise_error("pair? needs a single argument"); }
     init_args();
     value x = next_arg();
     free_args();
