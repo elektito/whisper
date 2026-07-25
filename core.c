@@ -2541,7 +2541,7 @@ value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, .
     free_args();
     if (!IS_VECTOR(vec)) { raise_error("vector-set! first argument is not a vector"); }
     if (!IS_FIXNUM(idx)) { raise_error("vector-set! second argument is not a number"); }
-    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector index is out of range"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector-set! index is out of range"); }
     GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)] = v;
     return VOID;
 }

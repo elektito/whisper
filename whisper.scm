@@ -743,9 +743,98 @@
                       (<= "num_le" 1 -1)
                       (>= "num_ge" 1 -1)))
 
+;; a list of lists, describing a primcall that can be inline. the lists
+;; have the following elements: (name arity return-type guards code)
+;;  - name is the primcall name, like car, or cdr
+;;  - arity is the number of arguments for inlining to take place
+;;  - return-type is either value or void. the former causes the output
+;;    of the expression in "code" to be returned by the exprssion.
+;;    "void" causes void to be returned.
+;;  - guards: explained below
+;;  - code: a code template explained below
+;;
+;; code templates are lists of strings and numbers. strings are output
+;; as they are, and numbers are replaced with the argument with that
+;; index.
+;;
+;; guards are lists of cons cells in the form of (code-template .
+;; error-ms) in which code-template is a template used for the condition
+;; of an if statement and error-msg is used as the error messae in the
+;; if body.
+(define *inline-primcalls* '((boolean? 1 value () ("BOOL(IS_BOOL(" 0 "))"))
+                             (box? 1 value () ("BOOL(IS_BOX(" 0 "))"))
+                             (car 1 value
+                              ((("!IS_PAIR(" 0 ")") . "car argument is not a pair"))
+                              ("GET_PAIR(" 0 ")->car"))
+                             (cdr 1 value
+                              ((("!IS_PAIR(" 0 ")") . "cdr argument is not a pair"))
+                              ("GET_PAIR(" 0 ")->cdr"))
+                             (char? 1 value () ("BOOL(IS_CHAR(" 0 "))"))
+                             (eq? 2 value () ("BOOL(" 0 " == " 1 ")"))
+                             (environment? 1 value () ("BOOL(IS_ENVIRONMENT(" 0 "))"))
+                             (eof-object? 1 value () ("BOOL(IS_EOFOBJ(" 0 "))"))
+                             (hash-table? 1 value () ("BOOL(IS_HASH_TABLE(" 0 "))"))
+                             (not 1 value () ("BOOL(" 0 " == FALSE)"))
+                             (null? 1 value () ("BOOL(" 0 " == NIL)"))
+                             (number? 1 value () ("BOOL(IS_FIXNUM(" 0 "))")) ;; TODO fix this when we have other number types
+                             (pair? 1 value () ("BOOL(IS_PAIR(" 0 "))"))
+                             (port? 1 value () ("BOOL(IS_PORT(" 0 "))"))
+                             (procedure? 1 value () ("BOOL(IS_CLOSURE(" 0 "))"))
+                             (set-car! 2 void
+                              ((("!IS_PAIR(" 0 ")") . "set-car! first argument is not a pair"))
+                              ("GET_PAIR(" 0 ")->car = " 1))
+                             (set-cdr! 2 void
+                              ((("!IS_PAIR(" 0 ")") . "set-cdr! first argument is not a pair"))
+                              ("GET_PAIR(" 0 ")->cdr = " 1))
+                             (string? 1 value () ("BOOL(IS_STRING(" 0 "))"))
+                             (string-length 1 value
+                              ((("!IS_STRING(" 0 ")") . "string-length argument is not a string"))
+                              ("FIXNUM(GET_STRING(" 0 ")->len)"))
+                             (string-ref 2 value
+                              ((("!IS_STRING(" 0 ")") . "string-ref first argument is not a string")
+                               (("!IS_FIXNUM(" 1 ")") . "string-ref second argument is not a number")
+                               (("GET_FIXNUM(" 1 ") < 0 || GET_FIXNUM(" 1 ") >= GET_STRING(" 0 ")->len")
+                                . "string-ref index is out of range"))
+                              ("CHAR(GET_STRING(" 0 ")->s[GET_FIXNUM(" 1 ")])"))
+                             (string-set! 3 void
+                              ((("!IS_STRING(" 0 ")") . "string-set! first argument is not a string")
+                               (("!IS_FIXNUM(" 1 ")") . "string-set! second argument is not a number")
+                               (("GET_FIXNUM(" 1 ") < 0 || GET_FIXNUM(" 1 ") >= GET_STRING(" 0 ")->len")
+                                . "string-set! index is out of range")
+                               (("!IS_CHAR(" 2 ")") . "string-set! third argument is not a char"))
+                              ("GET_STRING(" 0 ")->s[GET_FIXNUM(" 1 ")] = GET_CHAR(" 2 ")"))
+                             (symbol? 1 value () ("BOOL(IS_SYMBOL(" 0 "))"))
+                             (vector? 1 value () ("BOOL(IS_VECTOR(" 0 "))"))
+                             (vector-length 1 value
+                              ((("!IS_VECTOR(" 0 ")") . "vector-length argument is not a vector"))
+                              ("FIXNUM(GET_OBJECT(" 0 ")->vector.len)"))
+                             (vector-ref 2 value
+                              ((("!IS_VECTOR(" 0 ")") . "vector-ref first argument is not a vector")
+                               (("!IS_FIXNUM(" 1 ")") . "vector-ref second argument is not a number")
+                               (("GET_FIXNUM(" 1 ") < 0 || GET_FIXNUM(" 1 ") >= GET_OBJECT(" 0 ")->vector.len")
+                                . "vector-ref index is out of range"))
+                              ("GET_OBJECT(" 0 ")->vector.data[GET_FIXNUM(" 1 ")]"))
+                             (vector-set! 3 void
+                              ((("!IS_VECTOR(" 0 ")") . "vector-set! first argument is not a vector")
+                               (("!IS_FIXNUM(" 1 ")") . "vector-set! second argument is not a number")
+                               (("GET_FIXNUM(" 1 ") < 0 || GET_FIXNUM(" 1 ") >= GET_OBJECT(" 0 ")->vector.len")
+                                . "vector-set! index is out of range"))
+                              ("GET_OBJECT(" 0 ")->vector.data[GET_FIXNUM(" 1 ")] = " 2))
+                             (void? 1 value () ("BOOL(IS_VOID(" 0 "))"))
+                             (void 0 value () ("VOID"))
+                             (wrapped? 1 value () ("BOOL(IS_WRAPPED(" 0 "))"))))
+
 (define *primcalls-table*
   (let ((ht (make-eq-hash-table)))
     (let loop ((lst *primcalls*))
+      (unless (null? lst)
+        (hash-table-set! ht (caar lst) (car lst))
+        (loop (cdr lst))))
+    ht))
+
+(define *inline-primcalls-table*
+  (let ((ht (make-eq-hash-table)))
+    (let loop ((lst *inline-primcalls*))
       (unless (null? lst)
         (hash-table-set! ht (caar lst) (car lst))
         (loop (cdr lst))))
@@ -769,20 +858,47 @@
         (loop (cons (compile-quoted-item func indent (car forms)) varnums)
               (cdr forms)))))
 
+(define (compile-inline-primcall func indent form inline-info arg-varnums varnum)
+  (define (render template acc)
+    (if (null? template)
+        (string-join (reverse acc) "")
+        (if (string? (car template))
+            (render (cdr template) (cons (car template) acc))
+            (render (cdr template)
+                    (cons (format "x~a" (list-ref arg-varnums (car template)))
+                          acc)))))
+  (let ((kind (caddr inline-info))
+        (guards (cadddr inline-info))
+        (code-template (list-ref inline-info 4)))
+    (let loop ((guards guards))
+      (unless (null? guards)
+        (let ((cond-template (caar guards))
+              (msg (cdar guards)))
+          (gen-code func indent "if(~a) { raise_error(\"~a\"); }\n" (render cond-template '()) msg))
+        (loop (cdr guards))))
+    (if (eq? kind 'value)
+        (gen-code func indent "value x~a = ~a;\n" varnum (render code-template '()))
+        (begin
+          (gen-code func indent "~a;\n" (render code-template '()))
+          (gen-code func indent "value x~a = VOID;\n" varnum)))))
+
 (define (compile-primcall func indent form primcall-info)
   (let ((c-name (list-ref primcall-info 1))
         (min-args (list-ref primcall-info 2))
         (max-args (list-ref primcall-info 3))
         (arg-varnums (compile-list-of-forms func indent (cdr form)))
         (varnum (func-next-varnum func)))
-    (gen-code func
-              indent
-              "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a~a~a);\n"
-              varnum
-              c-name
-              (length arg-varnums)
-              (if (null? arg-varnums) "" ", ")
-              (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
+    (let ((inline (hash-table-ref/default *inline-primcalls-table* (car primcall-info) #f)))
+      (if (and inline (= (cadr inline) (length arg-varnums))) ;; only if arity matches
+          (compile-inline-primcall func indent form inline arg-varnums varnum)
+          (gen-code func
+                    indent
+                    "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a~a~a);\n"
+                    varnum
+                    c-name
+                    (length arg-varnums)
+                    (if (null? arg-varnums) "" ", ")
+                    (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))))
     varnum))
 
 (define (mangle-name name)
