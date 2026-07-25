@@ -260,8 +260,18 @@
             (mapcar cdr arg-lists)
             (cons (apply func (mapcar car arg-lists)) acc))))
 
+;; single-list map. kept separate from %map because the one-list case is
+;; overwhelmingly the common one, and %map costs three mapcar traversals
+;; plus an any? per element to handle the n-ary case.
+(define (%map1 func ls acc)
+  (if (null? ls)
+      (reverse acc)
+      (%map1 func (cdr ls) (cons (func (car ls)) acc))))
+
 (define (map func . arg-lists)
-  (%map func arg-lists '()))
+  (cond ((null? arg-lists) '())
+        ((null? (cdr arg-lists)) (%map1 func (car arg-lists) '()))
+        (else (%map func arg-lists '()))))
 
 (define (for-each proc . arg-lists)
   (unless (null? arg-lists)
@@ -317,38 +327,42 @@
 ;;
 ;; for example, (pairwise list '(1 2 3 4)) would result in (1 2) (2 3) (3 4)
 (define (pairwise fn ls)
-  (cond ((< (length ls) 2)
+  (cond ((or (null? ls) (null? (cdr ls)))
          (error "Invalid number of arguments for pairwise"))
-        ((eqv? (length ls) 2)
+        ((null? (cddr ls))
          (list (fn (car ls) (cadr ls))))
         (else
          (cons (fn (car ls) (cadr ls))
                (pairwise fn (cdr ls))))))
 
 (define (char=? . chars)
-  (if (null? (cdr chars))
-      #t
-      (all? (pairwise eq? chars))))
+  (cond ((null? (cdr chars)) #t)
+        ((null? (cddr chars)) (eq? (car chars) (cadr chars)))
+        (else (all? (pairwise eq? chars)))))
 
 (define (char<? . chars)
-  (if (null? (cdr chars))
-      #t
-      (all? (pairwise < (map char->integer chars)))))
+  (cond ((null? (cdr chars)) #t)
+        ((null? (cddr chars))
+         (< (char->integer (car chars)) (char->integer (cadr chars))))
+        (else (all? (pairwise < (map char->integer chars))))))
 
 (define (char>? . chars)
-  (if (null? (cdr chars))
-      #t
-      (all? (pairwise > (map char->integer chars)))))
+  (cond ((null? (cdr chars)) #t)
+        ((null? (cddr chars))
+         (> (char->integer (car chars)) (char->integer (cadr chars))))
+        (else (all? (pairwise > (map char->integer chars))))))
 
 (define (char<=? . chars)
-  (if (null? (cdr chars))
-      #t
-      (all? (pairwise <= (map char->integer chars)))))
+  (cond ((null? (cdr chars)) #t)
+        ((null? (cddr chars))
+         (<= (char->integer (car chars)) (char->integer (cadr chars))))
+        (else (all? (pairwise <= (map char->integer chars))))))
 
 (define (char>=? . chars)
-  (if (null? (cdr chars))
-      #t
-      (all? (pairwise >= (map char->integer chars)))))
+  (cond ((null? (cdr chars)) #t)
+        ((null? (cddr chars))
+         (>= (char->integer (car chars)) (char->integer (cadr chars))))
+        (else (all? (pairwise >= (map char->integer chars))))))
 
 (define (char-whitespace? c)
   (or (char=? #\space c)
