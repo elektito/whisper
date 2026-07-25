@@ -882,7 +882,7 @@
           (gen-code func indent "~a;\n" (render code-template '()))
           (gen-code func indent "value x~a = VOID;\n" varnum)))))
 
-(define (compile-primcall func indent form primcall-info)
+(define (compile-primcall func indent form primcall-info tail?)
   (let ((c-name (list-ref primcall-info 1))
         (min-args (list-ref primcall-info 2))
         (max-args (list-ref primcall-info 3))
@@ -893,9 +893,10 @@
           (compile-inline-primcall func indent form inline arg-varnums varnum)
           (gen-code func
                     indent
-                    "value x~a = primcall_~a(NULL, NO_CALL_FLAGS, ~a~a~a);\n"
+                    "value x~a = primcall_~a(NULL, ~a, ~a~a~a);\n"
                     varnum
                     c-name
+                    (if tail? "IN_TAIL_POSITION" "NO_CALL_FLAGS")
                     (length arg-varnums)
                     (if (null? arg-varnums) "" ", ")
                     (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))))
@@ -1337,16 +1338,17 @@
         (compile-self-tail-call func indent form (cdr self-tail-target))
         (let ((func-varnum (compile-form func indent (car form) #f)))
           (gen-code func indent "if (!IS_CLOSURE(x~a)) { raise_error(\"called object not a procedure\"); }\n" func-varnum)
-          (let ((arg-varnums (compile-list-of-forms func indent (cdr form))))
-            (let ((ret-varnum (func-next-varnum func)))
-              (gen-code func indent "value x~a = GET_CLOSURE(x~a)->func(GET_CLOSURE(x~a)->freevars, NO_CALL_FLAGS, ~a~a~a);\n"
-                        ret-varnum
-                        func-varnum
-                        func-varnum
-                        (length arg-varnums)
-                        (if (eq? '() arg-varnums) "" ", ")
-                        (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))
-              ret-varnum))))))
+          (let ((arg-varnums (compile-list-of-forms func indent (cdr form)))
+                (ret-varnum (func-next-varnum func)))
+            (gen-code func indent "value x~a = ~a(x~a, ~a, ~a);\n"
+                      ret-varnum
+                      (if tail? "tail_call_with_args" "call_with_args")
+                      func-varnum
+                      (length arg-varnums)
+                      (if (null? arg-varnums)
+                          "NULL"
+                          (format "(value[]){~a}" (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))))
+            ret-varnum)))))
 
 (define (lookup-primcall meaning)
   (hash-table-ref/default *primcalls-table* meaning #f))
@@ -1358,7 +1360,7 @@
              (meaning (binding-meaning binding)))
         (case (binding-kind binding)
           ((lexical global alias) (compile-call func indent form tail?))
-          ((primcall) (compile-primcall func indent form (lookup-primcall meaning)))
+          ((primcall) (compile-primcall func indent form (lookup-primcall meaning) tail?))
           ((special) (compile-special func indent form meaning tail?))
           ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name (car form))))
           (else (compile-error "internal error: unhandled identifier kind: ~a" meaning))))))

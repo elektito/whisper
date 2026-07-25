@@ -67,6 +67,8 @@ struct hash_table symbols;
 int cmdline_argc;
 const char **cmdline_argv;
 
+struct tail_call pending_tail_call;
+
 /*************** stack trace **************/
 
 /* these are also used by find_func_name so it's defined outside ifdef */
@@ -187,6 +189,63 @@ const char *find_func_name(funcptr func) {
     }
 
     return buf;
+}
+
+/************ trampoline ***********/
+
+/* call a closure with arguments passed as an array (trampoline) */
+value call_with_args(value closure, int nargs, value *args) {
+    for (;;) {
+        struct closure *c = GET_CLOSURE(closure);
+        value r = c->func(c->freevars, CALL_HAS_ARG_ARRAY, nargs, args);
+        if (r != TAILCALL) {
+            return r;
+        }
+
+        closure = pending_tail_call.closure;
+        nargs = pending_tail_call.nargs;
+        args = nargs <= TAILCALL_MAX_INLINE
+            ? pending_tail_call.args
+            : GET_OBJECT(pending_tail_call.overflow)->vector.data;
+    }
+}
+
+/* call a closure with arguments passed as varargs. calls call_with_args
+ * in turn. not used in codegen because it was a bit slow, but it is
+ * used in some places in this file, for calling user functions. those
+ * places could directly call call_with_args for improved performance,
+ * but this looks nicer! */
+value call(value closure, int nargs, ...) {
+    va_list ap;
+    va_start(ap, nargs);
+    value args[nargs > 0 ? nargs : 1];
+
+    for (int i = 0; i < nargs; i++) {
+        args[i] = va_arg(ap, value);
+    }
+
+    va_end(ap);
+    return call_with_args(closure, nargs, args);
+}
+
+/* helper function to perform a tail call */
+value tail_call_with_args(value closure, int nargs, value *args) {
+    pending_tail_call.closure = closure;
+    pending_tail_call.nargs = nargs;
+    if (nargs <= TAILCALL_MAX_INLINE) {
+        pending_tail_call.overflow = VOID;
+        for (int i = 0; i < nargs; i++) {
+            pending_tail_call.args[i] = args[i];
+        }
+    } else {
+        value vec = make_vector(nargs, VOID);
+        value *data = GET_OBJECT(vec)->vector.data;
+        for (int i = 0; i < nargs; i++) {
+            data[i] = args[i];
+        }
+        pending_tail_call.overflow = vec;
+    }
+    return TAILCALL;
 }
 
 /************ hash table ***********/
@@ -806,6 +865,13 @@ static void gc_mark(void) {
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
+    gc_recurse(pending_tail_call.closure);
+    for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
+      gc_recurse(pending_tail_call.args[i]);
+    }
+    gc_recurse(pending_tail_call.overflow);
+
+
     gc_scan_stack(cur_stack, heaps, n_heaps);
 
     if (gc_threshold_multiplier == 0) {
@@ -1171,7 +1237,7 @@ static void print_unprintable(value v, value port) {
             if (wrapped_print_procs[i].kind == kind) {
                 found = 1;
                 value proc = wrapped_print_procs[i].proc;
-                GET_CLOSURE(proc)->func(GET_CLOSURE(proc)->freevars, NO_CALL_FLAGS, 2, v, port);
+                call(proc, 2, v, port);
             }
         }
 
@@ -1654,6 +1720,20 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
         args[i++] = GET_PAIR(p)->car;
     }
 
+    if (flags & IN_TAIL_POSITION) {
+        pending_tail_call.closure = func;
+        pending_tail_call.nargs = func_nargs;
+        pending_tail_call.overflow = func_nargs <= TAILCALL_MAX_INLINE ? VOID : argvec;
+        if (func_nargs <= TAILCALL_MAX_INLINE) {
+            for (int i = 0; i < func_nargs; ++i) {
+                pending_tail_call.args[i] = args[i];
+            }
+        }
+
+        free_args();
+        return TAILCALL;
+    }
+
     /* `args` is an interior pointer into argvec's buffer and is
      * invisible to the conservative scan. the callee might allocate
      * (and trigger GC), so argvec must stay findable on this frame for
@@ -1662,7 +1742,7 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
      * which would let the sweep free the buffer out from under the
      * callee. nothing allocates between here and the call, so there is
      * no earlier window to guard. */
-    value ret = GET_CLOSURE(func)->func(GET_CLOSURE(func)->freevars, CALL_HAS_ARG_ARRAY, func_nargs, args);
+    value ret = call_with_args(func, func_nargs, args);
     volatile value keep_alive = argvec;
     (void) keep_alive;
 
@@ -2774,14 +2854,12 @@ value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 static uint64_t hash_fn_wrapper(struct hash_table *ht, value key) {
-    struct closure *c = GET_CLOSURE(ht->user_hash_fn);
-    value result = c->func(c->freevars, NO_CALL_FLAGS, 1, key);
+    value result = call(ht->user_hash_fn, 1, key);
     return (uint64_t) GET_FIXNUM(result);
 }
 
 static int eq_fn_wrapper(struct hash_table *ht, value a, value b) {
-    struct closure *c = GET_CLOSURE(ht->user_eq_fn);
-    return c->func(c->freevars, NO_CALL_FLAGS, 2, a, b) != FALSE;
+    return call(ht->user_eq_fn, 2, a, b) != FALSE;
 }
 
 value primcall_percent_make_hash_table(environment env, enum call_flags flags, int nargs, ...) {
@@ -2868,8 +2946,7 @@ value primcall_hash_table_ref(environment env, enum call_flags flags, int nargs,
         if (thunk == FALSE) {
             raise_error("key not found in hash-table");
         } else {
-            struct closure *c = GET_CLOSURE(thunk);
-            return c->func(c->freevars, NO_CALL_FLAGS, 0);
+            return call(thunk, 0);
         }
     }
 
@@ -2950,13 +3027,10 @@ value primcall_hash_table_update_b(environment env, enum call_flags flags, int n
             raise_error("key not found in hash-table");
         }
 
-        struct closure *c = GET_CLOSURE(thunk);
-        v = c->func(c->freevars, NO_CALL_FLAGS, 0);
+        v = call(thunk, 0);
     }
 
-    struct closure *c = GET_CLOSURE(func);
-    v = c->func(c->freevars, NO_CALL_FLAGS, 1, v);
-
+    v = call(func, 1, v);
     hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, k, v);
 
     return VOID;
@@ -2985,9 +3059,7 @@ value primcall_hash_table_update_b_default(environment env, enum call_flags flag
         v = deflt;
     }
 
-    struct closure *c = GET_CLOSURE(func);
-    v = c->func(c->freevars, NO_CALL_FLAGS, 1, v);
-
+    v = call(func, 1, v);
     hash_table_set(&GET_OBJECT(ht)->hash_table.ht, ht, k, v);
 
     return VOID;
@@ -3033,7 +3105,7 @@ value primcall_hash_table_values(environment env, enum call_flags flags, int nar
 
 static void ht_walker(value k, value v, void *ctx) {
     value proc = (value) ctx;
-    GET_CLOSURE(proc)->func(GET_CLOSURE(proc)->freevars, NO_CALL_FLAGS, 2, k, v);
+    call(proc, 2, k, v);
 }
 
 value primcall_hash_table_walk(environment env, enum call_flags flags, int nargs, ...) {
@@ -3061,7 +3133,7 @@ struct folder_ctx {
 
 static void ht_folder(value k, value v, void *ctx) {
     struct folder_ctx *c = ctx;
-    c->acc = GET_CLOSURE(c->func)->func(GET_CLOSURE(c->func)->freevars, NO_CALL_FLAGS, 3, k, v, c->acc);
+    c->acc = call(c->func, 3, k, v, c->acc);
 }
 
 value primcall_hash_table_fold(environment env, enum call_flags flags, int nargs, ...) {

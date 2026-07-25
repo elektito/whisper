@@ -1397,3 +1397,51 @@
 ;; tco: a deep iteration count that would previously overflow the C
 ;; stack must run in constant stack space.
 (= 10000000 (let loop ((i 0)) (if (= i 10000000) i (loop (+ i 1)))))
+
+;; calls f with itself and a decreasing counter until n hits 0. this is
+;; used in the following tests instead of writing a function that calls
+;; itself, so that we're sure the call cannot be optimized into a goto
+;; by the compiler (since the function is passed as a parameter and not
+;; named directly).
+(define (deep-loop f n) (if (= n 0) n (f f (- n 1))))
+
+;; a tail call through a parameter, many iterations, must run in
+;; constant stack.
+(= 0 (deep-loop deep-loop 10000000))
+
+;; apply in tail position, many iterations, must run in constant stack.
+(define (apply-loop . args)
+  (let ((n (car args)))
+    (if (= n 0)
+        'done
+        (apply apply-loop (list (- n 1))))))
+(eq? 'done (apply-loop 10000000))
+
+;; a tail call with 9 arguments (more than it fits inline) must still
+;; pass them all through correctly.
+(define (sum9 a b c d e f g h i) (+ a b c d e f g h i))
+(define (call-with-9 g) (g 1 2 3 4 5 6 7 8 9))
+(= 45 (call-with-9 sum9))
+
+;; a hash-table-ref default thunk, and hash-table-update!'s default
+;; thunk and update function, must produce their real result correctly
+;; even if their own body tail-recurses deeply before returning it.
+(and (= 0 (hash-table-ref (make-eq-hash-table) 'missing (lambda () (deep-loop deep-loop 1000000))))
+     (let ((ht (make-eq-hash-table)))
+       (hash-table-update! ht 'missing
+                            (lambda (x) (deep-loop deep-loop 1000000))
+                            (lambda () (deep-loop deep-loop 1000000)))
+       (= 0 (hash-table-ref ht 'missing))))
+
+;; a custom hash/equivalence function passed to make-hash-table must
+;; work correctly even when its own tail call chain (not just some
+;; nested non-tail call inside it) is what tail-recurses deeply before
+;; producing its result. eq_fn_wrapper/hash_fn_wrapper call these
+;; directly and must resolve the escape themselves.
+(define (deep-eq-loop f n a b) (if (= n 0) (string-ci=? a b) (f f (- n 1) a b)))
+(define (my-eq? a b) (deep-eq-loop deep-eq-loop 1000000 a b))
+(define (deep-hash-loop f n k) (if (= n 0) (string-ci-hash k) (f f (- n 1) k)))
+(define (my-hash k) (deep-hash-loop deep-hash-loop 1000000 k))
+(let ((ht (make-hash-table my-eq? my-hash)))
+  (hash-table-set! ht "FoO" 1000)
+  (= 1000 (hash-table-ref ht "foo")))

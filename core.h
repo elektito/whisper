@@ -13,6 +13,7 @@
 enum call_flags {
     NO_CALL_FLAGS = 0,
     CALL_HAS_ARG_ARRAY = 1, /* first vararg is a value* of all args; see primcall_apply */
+    IN_TAIL_POSITION = 2, /* used specifically to let apply primcall know it's in tail position */
 };
 
 typedef void *value;
@@ -28,15 +29,16 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define CLOSURE_TAG 0x02
 #define STRING_TAG 0x03
 #define PAIR_TAG 0x04
-#define SENTINEL_TAG 0x5       /*  0...0_101 */
-#define VOID_TAG 0x15          /*     10_101 */
-#define BOOL_TAG 0xd           /*      1_101 */
-#define TRUE_TAG 0x1d          /*     11_101 */
-#define FALSE_TAG 0x0d         /*     01_101 */
-#define CHAR_TAG 0x25          /*    100_101 */
-#define NIL_TAG 0x45           /*   1000_101 */
-#define EOFOBJ_TAG 0x85        /*  10000_101 */
-#define HT_TOMBSTONE_TAG 0x105 /* 100000_101 */
+#define SENTINEL_TAG 0x5       /*   0...0_101 */
+#define VOID_TAG 0x15          /*      10_101 */
+#define BOOL_TAG 0xd           /*       1_101 */
+#define TRUE_TAG 0x1d          /*      11_101 */
+#define FALSE_TAG 0x0d         /*      01_101 */
+#define CHAR_TAG 0x25          /*     100_101 */
+#define NIL_TAG 0x45           /*    1000_101 */
+#define EOFOBJ_TAG 0x85        /*   10000_101 */
+#define HT_TOMBSTONE_TAG 0x105 /*  100000_101 */
+#define TAILCALL_TAG 0x205     /* 1000000_101 */
 #define SYMBOL_TAG 0x06
 
 #define TAG_MASK 0x7
@@ -61,6 +63,7 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define TRUE (value)(TRUE_TAG)
 #define FALSE (value)(FALSE_TAG)
 #define HT_TOMBSTONE (value)(HT_TOMBSTONE_TAG)
+#define TAILCALL (value)(TAILCALL_TAG)
 #define NIL (value)(NIL_TAG)
 #define EOFOBJ (value)(EOFOBJ_TAG)
 
@@ -283,6 +286,26 @@ struct kind_proc {
     value kind;
     value proc;
 };
+
+#define TAILCALL_MAX_INLINE 8
+
+struct tail_call {
+    value closure;
+    int nargs;
+    value args[TAILCALL_MAX_INLINE]; /* used when nargs <= TAILCALL_MAX_INLINE */
+    value overflow; /* a GC vector when nargs > TAILCALL_MAX_INLINE */
+};
+
+/* this is populated when a function wants to request a tail call from
+ * the trampoline. it's okay for this to be a global (in a
+ * single-threaded environment) because it's only filled by the caller
+ * and then read from in the callee, and is never kept alive beyond
+ * that. */
+extern struct tail_call pending_tail_call;
+
+extern value call_with_args(value closure, int nargs, value *args);
+extern value call(value closure, int nargs, ...);
+extern value tail_call_with_args(value closure, int nargs, value *args);
 
 /************ memory management ***********/
 
