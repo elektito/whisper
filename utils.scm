@@ -94,26 +94,46 @@
   (syntax-rules ()
     ((case-lambda (params body0 ...) ...)
      (lambda args
-       (let ((len (length args)))
-         (letrec-syntax
-             ((cl (syntax-rules ::: ()
-                    ((cl)
-                     (error "no matching clause"))
-                    ((cl ((p :::) . body) . rest)
-                     (if (= len (length '(p :::)))
-                         (apply (lambda (p :::)
-                                  . body)
-                                args)
-                         (cl . rest)))
-                    ((cl ((p ::: . tail) . body)
-                         . rest)
-                     (if (>= len (length '(p :::)))
-                         (apply
-                          (lambda (p ::: . tail)
-                            . body)
-                          args)
-                         (cl . rest))))))
-           (cl (params body0 ...) ...)))))))
+       (letrec-syntax
+           ;; arity tests, expanded inline as pair?/null? chains so that
+           ;; dispatch costs no calls at all (as opposed to calling
+           ;; length which we used to do). the parameter list is only
+           ;; used as a counter, so the pattern variable p is never
+           ;; referenced in the template.
+           ((args=? (syntax-rules ::: ()
+                      ((_ a ())
+                       (null? a))
+                      ((_ a (p . rest))
+                       (and (pair? a) (args=? (cdr a) rest)))))
+            (args>=? (syntax-rules ::: ()
+                       ((_ a ())
+                        #t)
+                       ((_ a (p . rest))
+                        (and (pair? a) (args>=? (cdr a) rest)))))
+            ;; binds the parameters directly out of the argument list,
+            ;; avoiding the closure allocation and variadic re-dispatch
+            ;; that going through apply would cost.
+            (bind (syntax-rules ::: ()
+                    ((_ a () b :::)
+                     (begin b :::))
+                    ((_ a (p . rest) b :::)
+                     (let ((p (car a)))
+                       (bind (cdr a) rest b :::)))
+                    ((_ a t b :::)
+                     (let ((t a)) b :::))))
+            (cl (syntax-rules ::: ()
+                  ((cl)
+                   (error "no matching clause"))
+                  ((cl ((p :::) . body) . rest)
+                   (if (args=? args (p :::))
+                       (bind args (p :::) . body)
+                       (cl . rest)))
+                  ((cl ((p ::: . tail) . body)
+                       . rest)
+                   (if (args>=? args (p :::))
+                       (bind args (p ::: . tail) . body)
+                       (cl . rest))))))
+         (cl (params body0 ...) ...))))))
 
 (define (eqv? x y)
   (eq? x y))
