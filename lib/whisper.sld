@@ -24,8 +24,6 @@
           string-suffix?
           string-append-char
           print
-          real-part
-          imag-part
           format
           pretty-print
 
