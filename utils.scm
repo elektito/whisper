@@ -273,12 +273,19 @@
         ((null? (cdr arg-lists)) (%map1 func (car arg-lists) '()))
         (else (%map func arg-lists '()))))
 
+(define (%for-each1 proc ls)
+  (unless (null? ls)
+    (proc (car ls))
+    (%for-each1 proc (cdr ls))))
+
 (define (for-each proc . arg-lists)
-  (unless (null? arg-lists)
-    (let loop ((arg-lists arg-lists))
-      (unless (any? (mapcar null? arg-lists))
-        (apply proc (mapcar car arg-lists))
-        (loop (mapcar cdr arg-lists))))))
+  (cond ((null? arg-lists) (void))
+        ((null? (cdr arg-lists)) (%for-each1 proc (car arg-lists)))
+        (else
+         (let loop ((arg-lists arg-lists))
+           (unless (any? (mapcar null? arg-lists))
+             (apply proc (mapcar car arg-lists))
+             (loop (mapcar cdr arg-lists)))))))
 
 (define (filter pred ls)
   (let loop ((ls ls) (acc '()))
