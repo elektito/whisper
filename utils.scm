@@ -342,6 +342,27 @@
          (cons (fn (car ls) (cadr ls))
                (pairwise fn (cdr ls))))))
 
+(define (sort lst less?)
+  (define (merge a b)
+    (cond ((null? a) b)
+          ((null? b) a)
+          ((less? (car b) (car a))
+           (cons (car b) (merge a (cdr b))))
+          (else
+           (cons (car a) (merge (cdr a) b)))))
+  ;; split (1 2 3 4 5) into p1=(1 3 5) and p2=(2 4), returned as a pair
+  ;; (p1 . p2)
+  (define (split lst)
+    (if (or (null? lst) (null? (cdr lst)))
+        (cons lst '())
+        (let ((rest (split (cddr lst))))
+          (cons (cons (car lst) (car rest))
+                (cons (cadr lst) (cdr rest))))))
+  (if (or (null? lst) (null? (cdr lst)))
+      lst
+      (let ((halves (split lst)))
+        (merge (sort (car halves) less?) (sort (cdr halves) less?)))))
+
 (define (char=? . chars)
   (cond ((null? (cdr chars)) #t)
         ((null? (cddr chars)) (eq? (car chars) (cadr chars)))

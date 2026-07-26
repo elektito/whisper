@@ -27,6 +27,7 @@
           string<=?
           string>?
           string>=?
+          sort
           print
           format
           pretty-print

@@ -399,7 +399,7 @@
                 (list port)
                 '() ; funcs
                 0   ; funcnum (function counter)
-                '() ; interned symbols
+                (make-eq-hash-table) ; interned symbols
                 #f  ; init func, to be set later
                 #f  ; is test suite?
                 0   ; test counter
@@ -457,31 +457,36 @@
 (define (intern-primcalls program)
   (for-each (lambda (p) (intern program (car p))) *primcalls*))
 
+(define (symbol<? a b)
+  (string<? (symbol->string a) (symbol->string b)))
+
+(define (sorted-program-symbols program)
+  (sort (hash-table-keys (program-symbols program)) symbol<?))
+
 (define (gen-symbol-defines program output)
-  (let loop ((symbols (program-symbols program)))
-    (unless (null? symbols)
-      (format output "static value symb~a;\n" (mangle-name (car symbols)))
-      (loop (cdr symbols)))))
+  (for-each
+   (lambda (symbol)
+     (format output "static value symb~a;\n" (mangle-name symbol)))
+   (sorted-program-symbols program)))
 
 (define (gen-register-globals program output)
   (display "static void register_globals() {\n" output)
-  (let loop ((symbols (program-symbols program)))
-    (unless (null? symbols)
-      (let* ((sym (car symbols))
-             (primcall-info (hash-table-ref/default *primcalls-table* sym #f))
-             (sym-name (symbol->string sym))
-             (sym-len (string-length sym-name)))
-        (format output "    symb~a = extend_global_env(\"~a\", ~a, ~a);\n"
-                (mangle-name sym) sym sym-len
-                (if primcall-info "sym_value" "sym_unbound"))
-        (when primcall-info
-          (let* ((c-name (cadr primcall-info))
-                 (min-args (caddr primcall-info))
-                 (max-args (cadddr primcall-info))
-                 (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
-            (format output "    GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
-                    (mangle-name sym) c-name min-args c-max-args)))
-        (loop (cdr symbols)))))
+  (for-each
+   (lambda (sym)
+     (let* ((primcall-info (hash-table-ref/default *primcalls-table* sym #f))
+            (sym-name (symbol->string sym))
+            (sym-len (string-length sym-name)))
+       (format output "    symb~a = extend_global_env(\"~a\", ~a, ~a);\n"
+               (mangle-name sym) sym sym-len
+               (if primcall-info "sym_value" "sym_unbound"))
+       (when primcall-info
+         (let* ((c-name (cadr primcall-info))
+                (min-args (caddr primcall-info))
+                (max-args (cadddr primcall-info))
+                (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
+           (format output "    GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
+                   (mangle-name sym) c-name min-args c-max-args)))))
+   (sorted-program-symbols program))
   (display "}\n" output))
 
 (define (output-program-code program filename)
@@ -928,12 +933,9 @@
   (mangle-name (binding-meaning b)))
 
 (define (intern program sym)
-  (let loop ((i 0) (symbols (program-symbols program)))
-    (if (null? symbols)
-        (program-symbols-set! program (cons sym (program-symbols program)))
-        (if (eq? sym (car symbols))
-            i
-            (loop (+ i 1) (cdr symbols))))))
+  ;; no particular value associated with the symbol; we're using the
+  ;; hash table as a set.
+  (hash-table-set! (program-symbols program) sym (void)))
 
 (define (compile-quoted-item func indent form)
   (cond ((boolean? form) (compile-form func indent form #f))
