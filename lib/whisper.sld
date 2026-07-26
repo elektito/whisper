@@ -23,6 +23,10 @@
           string-split
           string-suffix?
           string-append-char
+          string<?
+          string<=?
+          string>?
+          string>=?
           print
           format
           pretty-print

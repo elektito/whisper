@@ -431,6 +431,39 @@
     (and (>= str-len suffix-len)
          (string=? suffix (substring str (- str-len suffix-len) str-len)))))
 
+(define (%string<? a b)
+  (let ((len-a (string-length a)) (len-b (string-length b)))
+    (let loop ((i 0))
+      (cond ((= i len-a) (< len-a len-b))
+            ((= i len-b) #f)
+            ((char<? (string-ref a i) (string-ref b i)) #t)
+            ((char<? (string-ref b i) (string-ref a i)) #f)
+            (else (loop (+ i 1)))))))
+
+(define (string<? . strings)
+  (cond ((null? strings) (error "string<?: requires at least one argument"))
+        ((null? (cdr strings)) #t)
+        ((null? (cddr strings)) (%string<? (car strings) (cadr strings)))
+        (else (all? (pairwise %string<? strings)))))
+
+(define (string>? . strings)
+  (cond ((null? strings) (error "string>?: requires at least one argument"))
+        ((null? (cdr strings)) #t)
+        ((null? (cddr strings)) (%string<? (cadr strings) (car strings)))
+        (else (all? (pairwise (lambda (a b) (%string<? b a)) strings)))))
+
+(define (string<=? . strings)
+  (cond ((null? strings) (error "string<=?: requires at least one argument"))
+        ((null? (cdr strings)) #t)
+        ((null? (cddr strings)) (not (%string<? (cadr strings) (car strings))))
+        (else (all? (pairwise (lambda (a b) (not (%string<? b a))) strings)))))
+
+(define (string>=? . strings)
+  (cond ((null? strings) (error "string>=?: requires at least one argument"))
+        ((null? (cdr strings)) #t)
+        ((null? (cddr strings)) (not (%string<? (car strings) (cadr strings))))
+        (else (all? (pairwise (lambda (a b) (not (%string<? a b))) strings)))))
+
 (define (string-append-char str ch)
   (string-append str (make-string 1 ch)))
 
