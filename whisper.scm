@@ -457,19 +457,23 @@
 (define (intern-primcalls program)
   (for-each (lambda (p) (intern program (car p))) *primcalls*))
 
-(define (symbol<? a b)
-  (string<? (symbol->string a) (symbol->string b)))
-
+;; sorts on precomputed name strings so symbol->string runs once per
+;; symbol. Comparing with symbol->string inside the ordering procedure
+;; instead allocates two strings on every comparison, which is n log n
+;; of them.
 (define (sorted-program-symbols program)
-  (sort (hash-table-keys (program-symbols program)) symbol<?))
+  (map cdr
+       (sort (map (lambda (sym) (cons (symbol->string sym) sym))
+                  (hash-table-keys (program-symbols program)))
+             (lambda (a b) (string<? (car a) (car b))))))
 
-(define (gen-symbol-defines program output)
+(define (gen-symbol-defines symbols output)
   (for-each
    (lambda (symbol)
      (format output "static value symb~a;\n" (mangle-name symbol)))
-   (sorted-program-symbols program)))
+   symbols))
 
-(define (gen-register-globals program output)
+(define (gen-register-globals symbols output)
   (display "static void register_globals() {\n" output)
   (for-each
    (lambda (sym)
@@ -486,19 +490,20 @@
                 (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
            (format output "    GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
                    (mangle-name sym) c-name min-args c-max-args)))))
-   (sorted-program-symbols program))
+   symbols)
   (display "}\n" output))
 
 (define (output-program-code program filename)
   (intern-primcalls program)
-  (let ((port (open-output-file filename)))
+  (let ((port (open-output-file filename))
+        (symbols (sorted-program-symbols program)))
     (display "#include \"core.h\"\n\n" port)
-    (gen-symbol-defines program port)
+    (gen-symbol-defines symbols port)
     (display "\nstatic value global_env;\n" port)
     (newline port)
     (gen-func-prototypes program port)
     (newline port)
-    (gen-register-globals program port)
+    (gen-register-globals symbols port)
     (newline port)
     (gen-func-bodies program port)
     (if (program-library-mode program)
