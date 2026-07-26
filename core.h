@@ -309,7 +309,10 @@ extern value tail_call_with_args(value closure, int nargs, value *args);
 
 /************ memory management ***********/
 
+/* must be a power of two */
 #define POOL_SIZE 16384
+
+/* align the given integer on a boundary of 8 */
 #define ALIGN8(n) (((n) + 7) & ~7)
 
 /* this is used as a header for all objects we allocate in a pool */

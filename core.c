@@ -939,7 +939,9 @@ static void *alloc_from_heap(struct pool *head) {
     struct pool *pool = start_cursor;
     for (;;) { /* in case the pool is actually full but the flag not set */
         for (int i = 0; i < POOL_SIZE; ++i) {
-            int j = (i + pool->next_index) % POOL_SIZE;
+            /* equivalent to (i + pool->next_index) % POOL_SIZE, with
+             * POOL_SIZE a power of two. */
+            int j = (i + pool->next_index) & (POOL_SIZE - 1);
             struct block *block = pool->start + pool->block_size * j;
 
             /* if unused, or not-yet-reclaimed */
@@ -957,7 +959,8 @@ static void *alloc_from_heap(struct pool *head) {
                 block->in_use = 1;
                 allocations_since_gc++;
 
-                pool->next_index = (j + 1) % POOL_SIZE;
+                /* same as (j + 1) % POOL_SIZE */
+                pool->next_index = (j + 1) & (POOL_SIZE - 1);
 
                 /* mark this block as live now */
                 block->gc_epoch = gc_epoch;
