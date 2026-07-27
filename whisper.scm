@@ -265,7 +265,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program env ports funcs funcnum interned-symbols init-func is-test-suite test-counter debug library-mode libraries)
+  (make-program env ports funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries)
   program?
   (env program-env program-env-set!)
   (ports program-ports program-ports-set!)
@@ -274,7 +274,6 @@
   (interned-symbols program-symbols program-symbols-set!)
   (init-func program-init-func program-init-func-set!)
   (is-test-suite program-is-test-suite program-is-test-suite-set!)
-  (test-counter program-test-counter program-test-counter-set!)
   (debug program-debug program-debug-set!)
   (library-mode program-library-mode program-library-mode-set!)
 
@@ -402,7 +401,6 @@
                 (make-eq-hash-table) ; interned symbols
                 #f  ; init func, to be set later
                 #f  ; is test suite?
-                0   ; test counter
                 #f  ; debug instrumentation
                 #f  ; library mode
                 '() ; libraries
@@ -431,11 +429,6 @@
   (let ((n (program-funcnum program)))
     (program-funcnum-set! program (+ n 1))
     n))
-
-(define (program-test-counter-inc! program)
-  (let ((c (+ 1 (program-test-counter program))))
-    (program-test-counter-set! program c)
-    c))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
@@ -1657,7 +1650,7 @@
             (when (and (!= varnum -1)
                        (program-is-test-suite program)
                        (program-is-main-file program))
-              (gen-code func 1 "if (x~a == TRUE) { printf(\".\"); } else { printf(\"F(~a)\"); }\n" varnum (program-test-counter-inc! program)))
+              (gen-code func 1 "test_assert(x~a);\n" varnum))
             (loop (read (program-port program))))))))
 
 (define (compile-library program)

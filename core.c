@@ -171,6 +171,16 @@ void panic(const char *fmt, ...) {
     exit(1);
 }
 
+void test_assert(value result) {
+    static int test_counter = 0;
+    test_counter++;
+    if (result == TRUE) {
+        printf(".");
+    } else {
+        printf("F(%d)", test_counter);
+    }
+}
+
 const char *find_func_name(funcptr func) {
     char *buf;
     struct symbol_ht_ctx ctx;

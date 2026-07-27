@@ -277,6 +277,10 @@ struct object {
 __attribute__((noreturn, cold)) void raise_error(const char *fmt, ...);
 __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
 
+/* used by -t test-suite mode: prints "." if result is TRUE, otherwise
+ * "F(n)" where n is a 1-based count of assertions seen so far. */
+void test_assert(value result);
+
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
