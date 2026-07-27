@@ -13,6 +13,7 @@
 enum call_flags {
     NO_CALL_FLAGS = 0,
     CALL_HAS_ARG_ARRAY = 1, /* first vararg is a value* of all args; see primcall_apply */
+    IN_TAIL_POSITION = 2, /* used specifically to let apply primcall know it's in tail position */
 };
 
 typedef void *value;
@@ -28,15 +29,16 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define CLOSURE_TAG 0x02
 #define STRING_TAG 0x03
 #define PAIR_TAG 0x04
-#define SENTINEL_TAG 0x5       /*  0...0_101 */
-#define VOID_TAG 0x15          /*     10_101 */
-#define BOOL_TAG 0xd           /*      1_101 */
-#define TRUE_TAG 0x1d          /*     11_101 */
-#define FALSE_TAG 0x0d         /*     01_101 */
-#define CHAR_TAG 0x25          /*    100_101 */
-#define NIL_TAG 0x45           /*   1000_101 */
-#define EOFOBJ_TAG 0x85        /*  10000_101 */
-#define HT_TOMBSTONE_TAG 0x105 /* 100000_101 */
+#define SENTINEL_TAG 0x5       /*   0...0_101 */
+#define VOID_TAG 0x15          /*      10_101 */
+#define BOOL_TAG 0xd           /*       1_101 */
+#define TRUE_TAG 0x1d          /*      11_101 */
+#define FALSE_TAG 0x0d         /*      01_101 */
+#define CHAR_TAG 0x25          /*     100_101 */
+#define NIL_TAG 0x45           /*    1000_101 */
+#define EOFOBJ_TAG 0x85        /*   10000_101 */
+#define HT_TOMBSTONE_TAG 0x105 /*  100000_101 */
+#define TAILCALL_TAG 0x205     /* 1000000_101 */
 #define SYMBOL_TAG 0x06
 
 #define TAG_MASK 0x7
@@ -61,6 +63,7 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define TRUE (value)(TRUE_TAG)
 #define FALSE (value)(FALSE_TAG)
 #define HT_TOMBSTONE (value)(HT_TOMBSTONE_TAG)
+#define TAILCALL (value)(TAILCALL_TAG)
 #define NIL (value)(NIL_TAG)
 #define EOFOBJ (value)(EOFOBJ_TAG)
 
@@ -265,16 +268,14 @@ struct object {
 /************ globals and helpers ***********/
 
 /* raise_error signals a Scheme-level error. It is the single choke
- * point every RAISE flows through, so that once exceptions exist it can
- * unwind to an installed handler instead of exiting. The RAISE macro
+ * point every raise_error flows through, so that once exceptions exist it can
+ * unwind to an installed handler instead of exiting. The raise_error macro
  * stays as the spelling the code generator emits into generated C.
  * panic is for unrecoverable internal invariants that must never be
  * caught (e.g. reached-impossible-case, out of memory). Both never
  * return, so callers that end in one need no trailing return. */
 __attribute__((noreturn, cold)) void raise_error(const char *fmt, ...);
 __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
-
-#define RAISE(...) { raise_error(__VA_ARGS__); }
 
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
@@ -286,9 +287,32 @@ struct kind_proc {
     value proc;
 };
 
+#define TAILCALL_MAX_INLINE 8
+
+struct tail_call {
+    value closure;
+    int nargs;
+    value args[TAILCALL_MAX_INLINE]; /* used when nargs <= TAILCALL_MAX_INLINE */
+    value overflow; /* a GC vector when nargs > TAILCALL_MAX_INLINE */
+};
+
+/* this is populated when a function wants to request a tail call from
+ * the trampoline. it's okay for this to be a global (in a
+ * single-threaded environment) because it's only filled by the caller
+ * and then read from in the callee, and is never kept alive beyond
+ * that. */
+extern struct tail_call pending_tail_call;
+
+extern value call_with_args(value closure, int nargs, value *args);
+extern value call(value closure, int nargs, ...);
+extern value tail_call_with_args(value closure, int nargs, value *args);
+
 /************ memory management ***********/
 
+/* must be a power of two */
 #define POOL_SIZE 16384
+
+/* align the given integer on a boundary of 8 */
 #define ALIGN8(n) (((n) + 7) & ~7)
 
 /* this is used as a header for all objects we allocate in a pool */
@@ -353,7 +377,7 @@ extern value env_ref(value e, value sym);
 /* env_ref's ht == NULL branch, factored out so generated executable
  * code (which always has a NULL-hash-table global_env, see
  * make_global_env) can call it directly instead of through env_ref. GCC
- * does not inline this at its call sites (it's too big once RAISE is
+ * does not inline this at its call sites (it's too big once raise_error is
  * expanded), but being static still lets it be called directly instead
  * of through the PLT indirection a plain extern core.c function needs
  * in a PIE binary (which our binary seems to be by default, at least on
@@ -367,13 +391,13 @@ static value global_env_ref(value sym) {
     struct symbol *s = GET_SYMBOL(sym);
     switch (s->kind) {
     case sym_unbound:
-        RAISE("unbound variable: %.*s", (int) s->name_len, s->name);
+        raise_error("unbound variable: %.*s", (int) s->name_len, s->name);
     case sym_macro:
-        RAISE("invalid use of macro: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of macro: %.*s", (int) s->name_len, s->name);
     case sym_special:
-        RAISE("invalid use of special: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of special: %.*s", (int) s->name_len, s->name);
     case sym_aux:
-        RAISE("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
+        raise_error("invalid use of aux keyword: %.*s", (int) s->name_len, s->name);
     case sym_value:
         return s->value;
     case sym_primcall:
@@ -400,6 +424,10 @@ extern value primcall_box(environment env, enum call_flags flags, int nargs, ...
 extern value primcall_box_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_car(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cdr(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_caar(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_cadr(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_cdar(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_cddr(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_upcase(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_to_integer(environment env, enum call_flags flags, int nargs, ...);
@@ -414,6 +442,7 @@ extern value primcall_delete_file(environment env, enum call_flags flags, int na
 extern value primcall_display(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_error(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_error_object_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_exit(environment env, enum call_flags flags, int nargs, ...);
