@@ -836,6 +836,9 @@
                                (("!IS_CHAR(" 2 ")") . "string-set! third argument is not a char"))
                               ("GET_STRING(" 0 ")->s[GET_FIXNUM(" 1 ")] = GET_CHAR(" 2 ")"))
                              (symbol? 1 value () ("BOOL(IS_SYMBOL(" 0 "))"))
+                             (unwrap 1 value
+                              ((("!IS_WRAPPED(" 0 ")") . "unwrap argument is not a wrapped object"))
+                              ("GET_OBJECT(" 0 ")->wrapped.value"))
                              (vector? 1 value () ("BOOL(IS_VECTOR(" 0 "))"))
                              (vector-length 1 value
                               ((("!IS_VECTOR(" 0 ")") . "vector-length argument is not a vector"))
@@ -854,7 +857,10 @@
                               ("GET_OBJECT(" 0 ")->vector.data[GET_FIXNUM(" 1 ")] = " 2))
                              (void? 1 value () ("BOOL(IS_VOID(" 0 "))"))
                              (void 0 value () ("VOID"))
-                             (wrapped? 1 value () ("BOOL(IS_WRAPPED(" 0 "))"))))
+                             (wrapped? 1 value () ("BOOL(IS_WRAPPED(" 0 "))"))
+                             (wrapped-kind 1 value
+                              ((("!IS_WRAPPED(" 0 ")") . "wrapped-kind argument is not a wrapped object"))
+                              ("GET_OBJECT(" 0 ")->wrapped.kind"))))
 
 (define *primcalls-table*
   (let ((ht (make-eq-hash-table)))
