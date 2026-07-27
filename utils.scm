@@ -135,9 +135,6 @@
                        (cl . rest))))))
          (cl (params body0 ...) ...))))))
 
-(define (eqv? x y)
-  (eq? x y))
-
 (define (symbol=? x y)
   (eq? x y))
 
@@ -167,11 +164,6 @@
    ((x) x)
    ((x y) (if (< x y) x y))
    ((x y . rest) (apply min (min x y) rest))))
-
-(define (caar x) (car (car x)))
-(define (cadr x) (car (cdr x)))
-(define (cdar x) (cdr (car x)))
-(define (cddr x) (cdr (cdr x)))
 
 (define (caaar x) (car (car (car x))))
 (define (caadr x) (car (car (cdr x))))
