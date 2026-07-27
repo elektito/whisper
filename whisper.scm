@@ -1314,7 +1314,7 @@
                           (func-add-freevar func b))))
              (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, envget(env, ~a), x~a);\n" idx value-varnum))))
       (else
-       (compile-error "set! target is not a variable: ~a" (cadr form)))))
+       (compile-error "set! target is not a variable: ~a" (identifier-name (cadr form))))))
   (let ((varnum (func-next-varnum func)))
     (gen-code func indent "value x~a = VOID;\n" varnum)
     varnum))
