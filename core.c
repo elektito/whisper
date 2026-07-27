@@ -1798,6 +1798,46 @@ value primcall_cdr(environment env, enum call_flags flags, int nargs, ...) {
     return GET_PAIR(arg)->cdr;
 }
 
+value primcall_caar(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("caar needs a single argument"); }
+    init_args();
+    value arg = next_arg();
+    free_args();
+    if (!IS_PAIR(arg)) { raise_error("caar argument is not a pair"); }
+    if (!IS_PAIR(GET_PAIR(arg)->car)) { raise_error("caar argument's car is not a pair"); }
+    return GET_PAIR(GET_PAIR(arg)->car)->car;
+}
+
+value primcall_cadr(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("cadr needs a single argument"); }
+    init_args();
+    value arg = next_arg();
+    free_args();
+    if (!IS_PAIR(arg)) { raise_error("cadr argument is not a pair"); }
+    if (!IS_PAIR(GET_PAIR(arg)->cdr)) { raise_error("cadr argument's cdr is not a pair"); }
+    return GET_PAIR(GET_PAIR(arg)->cdr)->car;
+}
+
+value primcall_cdar(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("cdar needs a single argument"); }
+    init_args();
+    value arg = next_arg();
+    free_args();
+    if (!IS_PAIR(arg)) { raise_error("cdar argument is not a pair"); }
+    if (!IS_PAIR(GET_PAIR(arg)->car)) { raise_error("cdar argument's car is not a pair"); }
+    return GET_PAIR(GET_PAIR(arg)->car)->cdr;
+}
+
+value primcall_cddr(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("cddr needs a single argument"); }
+    init_args();
+    value arg = next_arg();
+    free_args();
+    if (!IS_PAIR(arg)) { raise_error("cddr argument is not a pair"); }
+    if (!IS_PAIR(GET_PAIR(arg)->cdr)) { raise_error("cddr argument's cdr is not a pair"); }
+    return GET_PAIR(GET_PAIR(arg)->cdr)->cdr;
+}
+
 value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("char-downcase needs a single argument"); }
     init_args();
@@ -1929,6 +1969,18 @@ value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...) {
     value v1 = next_arg();
     value v2 = next_arg();
     free_args();
+    return BOOL(v1 == v2);
+}
+
+value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("eqv? needs two arguments"); }
+    init_args();
+    value v1 = next_arg();
+    value v2 = next_arg();
+    free_args();
+
+    /* TODO pointer equality might not hold in the future when we add,
+     * for example, bignums. */
     return BOOL(v1 == v2);
 }
 
