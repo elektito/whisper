@@ -1304,7 +1304,7 @@
   (let ((value-varnum (compile-form func indent (caddr form) #f))
         (b (identifier-binding (cadr form))))
     (case (binding-kind b)
-      ((global alias)
+      ((global)
        (intern (func-program func) (binding-meaning b))
        (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name (cadr form)) value-varnum))
       ((lexical)
@@ -1313,6 +1313,11 @@
            (let ((idx (or (func-find-freevar func b)
                           (func-add-freevar func b))))
              (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, envget(env, ~a), x~a);\n" idx value-varnum))))
+      ((alias primcall)
+       ;; imported names should not be mutable. this is important for
+       ;; certain optimizations, like eliminating environment lookups
+       ;; for globals.
+       (compile-error "set! target is immutable: ~a" (identifier-name (cadr form))))
       (else
        (compile-error "set! target is not a variable: ~a" (identifier-name (cadr form))))))
   (let ((varnum (func-next-varnum func)))
