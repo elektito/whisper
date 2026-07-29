@@ -1349,6 +1349,6 @@
                (loop (cdr forms) (cons (cons name-identifier (caddr define-form))
                                        defines))))
             ((binding-is-special head-binding 'begin)
-             (loop (append (cdar forms) (cdr forms)) defines))
+             (loop (append (cdr form) (cdr forms)) defines))
             (else ;; hit an expression
              (cons forms (reverse defines)))))))
