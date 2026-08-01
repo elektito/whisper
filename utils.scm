@@ -439,10 +439,10 @@
   (not (= m n)))
 
 (define (string-join strs sep)
-  (let loop ((result "") (strs strs))
+  (let loop ((result #f) (strs strs))
     (if (null? strs)
-        result
-        (if (string=? "" result)
+        (or result "")
+        (if (not result)
             (loop (car strs) (cdr strs))
             (loop (string-append result sep (car strs)) (cdr strs))))))
 
