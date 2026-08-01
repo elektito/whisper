@@ -174,6 +174,16 @@
 ;; returns a <library> record.
 (define *find-library*)
 
+;; this must be set to a function that receives a filename and a
+;; parent-filename, and resolves the filename against the parent, read
+;; the file, and returns a pair (resolved-filename . forms) where
+;; resolved-filename is the resolved absolute path of the file, and
+;; forms the list of forms read from the file.
+;;
+;; parent-filename can be passed as #f meaning there's no known current
+;; filename (like in the repl).
+(define *read-included-file*)
+
 ;;;;;; private globals ;;;;;;
 
 ;; loaded libraries, as entries of the form (lib-name lib results) where
@@ -659,7 +669,7 @@
 ;; expand a top-level into a _list_ of core forms. The return value is a
 ;; list of forms because a splicing begin is eliminated and is turned
 ;; into a list of expanded forms.
-(define (expand-top-level-form form env)
+(define (expand-top-level-form form env filename)
   (let* ((cu (expand-root-env-compilation-unit env))
          (program-mode? (compilation-unit-program-mode? cu))
          (past-imports? (compilation-unit-past-imports? cu)))
@@ -674,28 +684,36 @@
       (when (and program-mode? (not (compilation-unit-seen-import? cu)))
         (compile-error "a program must begin with at least one import"))
       (compilation-unit-past-imports?-set! cu #t)
-      (expand-top-level-form form env))
+      (expand-top-level-form form env filename))
      ((atom? form)
-      (list (expand-form form env)))
+      (list (expand-form form env filename)))
      (else
       (let ((head (car form)))
         (if (symbol-or-identifier? head)
             (let ((binding (resolve-head head env)))
               (cond ((not binding)
-                     (list (expand-form form env)))
+                     (list (expand-form form env filename)))
                     ((binding-is-special binding 'define)
-                     (list (expand-top-level-define binding form env)))
+                     (list (expand-top-level-define binding form env filename)))
                     ((binding-is-special binding 'define-syntax)
                      (process-define-syntax form env)
                      '())
                     ((binding-is-special binding 'begin)
                      (apply append (map (lambda (form)
-                                          (expand-top-level-form form env))
+                                          (expand-top-level-form form env filename))
                                         (cdr form))))
+                    ((binding-is-special binding 'include)
+                     (expand-top-level-include form env filename))
                     ((eq? 'macro (binding-kind binding))
-                     (expand-top-level-form (expand-macro binding form env) env))
-                    (else (list (expand-form form env)))))
-            (list (expand-form form env))))))))
+                     (expand-top-level-form (expand-macro binding form env) env filename))
+                    (else (list (expand-form form env filename)))))
+            (list (expand-form form env filename))))))))
+
+(define (expand-top-level-include form env filename)
+  (apply append
+         (map (lambda (form+filename)
+                (expand-top-level-form (car form+filename) env (cdr form+filename)))
+              (read-include-form form filename))))
 
 (define (process-import form env)
   (let loop ((import-sets (cdr form)))
@@ -933,7 +951,7 @@
 ;; like (define (f . formals) <body>) are desugared to normal define
 ;; with lambda. valueless defines like (define x) are converted to
 ;; (define x (void)).
-(define (expand-top-level-define head-binding form env)
+(define (expand-top-level-define head-binding form env filename)
   (let ((form (validate-and-normalize-define form env)))
     (let* ((name (cadr form))
            (key (binder-key name))
@@ -954,7 +972,7 @@
       (let ((define (if (identifier? (car form))
                         (car form)
                         (make-identifier (car form) head-binding)))
-            (expanded-value (expand-form (caddr form) env)))
+            (expanded-value (expand-form (caddr form) env filename)))
         (list define name expanded-value)))))
 
 ;; validate the given define form and then normalize it so it's always
@@ -1025,7 +1043,7 @@
       (compile-error "invalid macro transformer (only syntax-rules supported)")))
   (compile-syntax-rules form env))
 
-(define (expand-form form env)
+(define (expand-form form env filename)
   (cond ((identifier? form)
          ;; if there's a rename, look it up in current local environment
          ;; first to see if it's beeing rebound by the same template
@@ -1055,51 +1073,62 @@
         (else ;; pair
          (let* ((head (car form))
                 (head-binding (resolve-head head env)))
-           (cond ((not head-binding) (expand-other form env))
+           (cond ((not head-binding) (expand-other form env filename))
                  ((eq? 'macro (binding-kind head-binding))
-                  (expand-form (expand-macro head-binding form env) env))
+                  (expand-form (expand-macro head-binding form env) env filename))
                  ((binding-is-special head-binding 'quote)
                   (list (if (identifier? head)
                             head
                             (make-identifier head head-binding))
                         (cadr form)))
                  ((binding-is-special head-binding 'quasiquote)
-                  (expand-quasiquote form env))
+                  (expand-quasiquote form env filename))
                  ((binding-is-special head-binding 'set!)
-                  (process-set! head-binding form env))
+                  (process-set! head-binding form env filename))
                  ((binding-is-special head-binding 'define)
                   (compile-error "define in expression position"))
                  ((binding-is-special head-binding 'define-syntax)
                   (compile-error "define-syntax in expression position"))
                  ((binding-is-special head-binding 'lambda)
-                  (expand-lambda head-binding form env))
+                  (expand-lambda head-binding form env filename))
                  ((binding-is-special head-binding 'let)
-                  (expand-let head-binding form env))
+                  (expand-let head-binding form env filename))
                  ((binding-is-special head-binding 'letrec)
-                  (expand-letrec head-binding form env))
+                  (expand-letrec head-binding form env filename))
                  ((binding-is-special head-binding 'letrec*)
-                  (expand-letrec* head-binding form env))
+                  (expand-letrec* head-binding form env filename))
                  ((binding-is-special head-binding 'let-syntax)
-                  (expand-let-syntax head-binding form env))
+                  (expand-let-syntax head-binding form env filename))
                  ((binding-is-special head-binding 'letrec-syntax)
-                  (expand-letrec-syntax head-binding form env))
-                 (else (expand-other form env)))))))
+                  (expand-letrec-syntax head-binding form env filename))
+                 ((binding-is-special head-binding 'include)
+                  (expand-include form env filename))
+                 (else (expand-other form env filename)))))))
+
+;; expand non-top-level include form. an include is equivalent to a
+;; begin around the contents of the files it names, so that is what we
+;; expand to here.
+(define (expand-include form env filename)
+  `(,(identifier 'special 'begin 'begin)
+    ,@(map (lambda (form+filename)
+             (expand-form (car form+filename) env (cdr form+filename)))
+           (read-include-form form filename))))
 
 ;; expands a list which can be a procedure application or a special form
 ;; that does not introduce new bindings or otherwise need special
 ;; handling. we simply map over the list with expand-form.
-(define (expand-other form env)
+(define (expand-other form env filename)
   (map (lambda (form)
-         (expand-form form env))
+         (expand-form form env filename))
        form))
 
-(define (expand-quasiquote form env)
-  (qq-quasiquote form env))
+(define (expand-quasiquote form env filename)
+  (qq-quasiquote form env filename))
 
-(define (process-set! head-binding form env)
+(define (process-set! head-binding form env filename)
   (unless (= 3 (length form))
     (compile-error "invalid set! form"))
-  (let ((target (expand-form (cadr form) env)))
+  (let ((target (expand-form (cadr form) env filename)))
     (unless (identifier? target)
       (compile-error "invalid set! target"))
     (binding-mutated?-set! (identifier-binding target) #t)
@@ -1107,9 +1136,9 @@
               (car form)
               (make-identifier (car form) head-binding))
           target
-          (expand-form (caddr form) env))))
+          (expand-form (caddr form) env filename))))
 
-(define (expand-lambda head-binding form env)
+(define (expand-lambda head-binding form env filename)
   (when (< (length form) 3)
     (compile-error "invalid lambda form"))
 
@@ -1131,7 +1160,7 @@
     ;; then create a child environment with those ids
     (let ((new-env (make-expand-env ids env)))
       ;; and then expand the body in the new environment
-      (let ((body (expand-body (cddr form) new-env)))
+      (let ((body (expand-body (cddr form) new-env filename)))
         `(,(if (identifier? (car form))
                (car form)
                (make-identifier (car form) head-binding))
@@ -1141,7 +1170,7 @@
                    (else (car ids))))
           ,@body)))))
 
-(define (expand-let head-binding form env)
+(define (expand-let head-binding form env filename)
   (cond ((< (length form) 3)
          (compile-error "invalid let form"))
         ((and (not (list? (cadr form)))
@@ -1174,7 +1203,7 @@
         (expand-form `(,letrec ((,name (,lambda (,@vars)
                                          ,@body)))
                        (,name ,@inits))
-                     env))
+                     env filename))
       ;; regular let
       ;;  - expand inits in env.
       ;;  - replace var names with lexical identifiers
@@ -1183,7 +1212,7 @@
       (let* ((bindings (cadr form))
              (inits (map cadr bindings))
              (expanded-inits (map (lambda (form)
-                                    (expand-form form env))
+                                    (expand-form form env filename))
                                   inits))
              (vars (map (lambda (b) (lexical-binder (car b))) bindings))
              (expanded-bindings (map list vars expanded-inits))
@@ -1193,9 +1222,9 @@
                (car form)
                (make-identifier (car form) head-binding))
           (,@expanded-bindings)
-          ,@(expand-body body new-env)))))
+          ,@(expand-body body new-env filename)))))
 
-(define (%expand-letrec form-name head-binding form env)
+(define (%expand-letrec form-name head-binding form env filename)
   (cond ((< (length form) 3)
          (compile-error "bad ~a form" form-name))
         ((not (list? (cadr form)))
@@ -1211,7 +1240,7 @@
          (new-env (make-expand-env vars env))
          (inits (map cadr bindings))
          (expanded-inits (map (lambda (form)
-                                (expand-form form new-env))
+                                (expand-form form new-env filename))
                               inits))
          (expanded-bindings (map list vars expanded-inits))
          (body (cddr form)))
@@ -1219,17 +1248,17 @@
            (car form)
            (make-identifier (car form) head-binding))
       (,@expanded-bindings)
-      ,@(expand-body body new-env))))
+      ,@(expand-body body new-env filename))))
 
-(define (expand-letrec head-binding form env)
-  (%expand-letrec "letrec" head-binding form env))
+(define (expand-letrec head-binding form env filename)
+  (%expand-letrec "letrec" head-binding form env filename))
 
-(define (expand-letrec* head-binding form env)
+(define (expand-letrec* head-binding form env filename)
   ;; from the expander's point of view, letrec* is exactly the same as
   ;; letrec
-  (%expand-letrec "letrec*" head-binding form env))
+  (%expand-letrec "letrec*" head-binding form env filename))
 
-(define (%expand-let-syntax form-name recursive? head-binding form env)
+(define (%expand-let-syntax form-name recursive? head-binding form env filename)
   (when (< (length form) 3)
     (compile-error "invalid ~a form" form-name))
 
@@ -1251,15 +1280,15 @@
                 (binding-meaning-set! (identifier-binding id)
                                       (compile-transformer (cadr b) def-env)))
               bindings ids)
-    (let ((expanded-body (expand-body (cddr form) new-env)))
+    (let ((expanded-body (expand-body (cddr form) new-env filename)))
       `(,(identifier 'special 'begin 'begin)
         ,@expanded-body))))
 
-(define (expand-let-syntax head-binding form env)
-  (%expand-let-syntax "let-syntax" #f head-binding form env))
+(define (expand-let-syntax head-binding form env filename)
+  (%expand-let-syntax "let-syntax" #f head-binding form env filename))
 
-(define (expand-letrec-syntax head-binding form env)
-  (%expand-let-syntax "letrec-syntax" #t head-binding form env))
+(define (expand-letrec-syntax head-binding form env filename)
+  (%expand-let-syntax "letrec-syntax" #t head-binding form env filename))
 
 ;; this functions expands the body of a lambda/let/letrec/letrec* per
 ;; the following rules:
@@ -1290,18 +1319,20 @@
 ;;    into a letrec* with define inits as letrec* variable inits, and
 ;;    the body as letrec* body, otherwise return the expanded body
 ;;    expressions.
-(define (expand-body body env)
+(define (expand-body body env filename)
   (let ((internal-env (make-expand-env '() env)))
-    (let* ((forms-defines (scan-body-for-defines body internal-env))
+    (let* ((forms-defines (scan-body-for-defines body internal-env filename))
            (forms (car forms-defines))
            (defines (cdr forms-defines))
            (expanded-defines (let loop ((defines defines) (expanded '()))
                                (if (null? defines)
                                    (reverse expanded)
-                                   (let ((name (caar defines))
-                                         (init (cdar defines)))
+                                   (let* ((define-info (car defines))
+                                          (name (car define-info))
+                                          (init (cadr define-info))
+                                          (filename (caddr define-info)))
                                      (loop (cdr defines)
-                                           (cons (cons name (expand-form init internal-env))
+                                           (cons (cons name (expand-form init internal-env filename))
                                                  expanded)))))))
       (let loop ((forms forms) (expanded '()))
         (if (null? forms)
@@ -1313,29 +1344,39 @@
                   (list `(,(identifier 'special 'letrec* 'letrec*)
                           (,@bindings)
                           ,@(reverse expanded)))))
-            (loop (cdr forms)
-                  (cons (expand-form (car forms) internal-env)
-                        expanded)))))))
+            (let ((form (caar forms))
+                  (filename (cdar forms)))
+              (loop (cdr forms)
+                    (cons (expand-form form internal-env filename)
+                          expanded))))))))
 
 ;; scan body for defines and define-syntax forms. the given environment
 ;; is the internal env inside a lambda/let/etc. macros are immediately
 ;; installed in the environment. defines are collected, normalzied but
 ;; unexpanded.
 ;;
-;; Returns the (forms . defines) in which forms is the rest of the body
-;; when the first non-define form is reached, and defines is an alist of
-;; (name . init-form) for each define form collected, name being an
-;; identifier.
-(define (scan-body-for-defines body env)
-  (let loop ((forms body) (defines '()))
+;; when the first non-define form is reached, returns (rest . defines)
+;; in which rest is the rest of the body, with each form annotated with
+;; the filename it came from as a pair (form . filename), and defines is
+;; an alist of (name init-form filename) for each define form collected,
+;; name being an identifier, init-form still unexpanded, and filename
+;; the path to the file that the form was read from (in case it contains
+;; any includes).
+(define (scan-body-for-defines body env filename)
+  (let loop ((forms (map (lambda (form)
+                           (cons form filename))
+                         body))
+             (defines '()))
     (when (null? forms)
       (compile-error "empty body"))
-    (let* ((form (car forms))
+    (let* ((form (caar forms))
+           (filename (cdar forms))
            (head-binding (and (pair? form)
                               (resolve-head (car form) env))))
       (cond ((not head-binding) (cons forms (reverse defines)))
             ((eq? 'macro (binding-kind head-binding))
-             (loop (cons (expand-macro head-binding form env)
+             (loop (cons (cons (expand-macro head-binding form env)
+                               filename)
                          (cdr forms))
                    defines))
             ((binding-is-special head-binding 'define-syntax)
@@ -1346,9 +1387,33 @@
                     (define-name (cadr define-form))
                     (name-identifier (lexical-binder define-name)))
                (expand-env-add-identifier! env name-identifier)
-               (loop (cdr forms) (cons (cons name-identifier (caddr define-form))
+               (loop (cdr forms) (cons (list name-identifier (caddr define-form) filename)
                                        defines))))
             ((binding-is-special head-binding 'begin)
-             (loop (append (cdr form) (cdr forms)) defines))
+             (loop (append (map (lambda (form)
+                                  (cons form filename))
+                                (cdr form))
+                           (cdr forms)) defines))
+            ((binding-is-special head-binding 'include)
+             (loop (append (read-include-form form filename) (cdr forms))
+                   defines))
             (else ;; hit an expression
              (cons forms (reverse defines)))))))
+
+;; validate an (include <string> ...) form and read every file it names,
+;; resolving each against parent-filename. returns the concatenation of
+;; their forms, each paired with the resolved path of the file it was
+;; read from, as (form . filename), so an include nested inside one of
+;; them in turn resolves against that file.
+(define (read-include-form form parent-filename)
+  (when (or (null? (cdr form))
+            (not (all? (map string? (cdr form)))))
+    (compile-error "invalid include form: ~a" form))
+  (apply append
+         (map (lambda (included-filename)
+                (let* ((resolved+forms (*read-included-file* included-filename parent-filename))
+                       (filename (car resolved+forms)))
+                  (map (lambda (form)
+                         (cons form filename))
+                       (cdr resolved+forms))))
+              (cdr form))))

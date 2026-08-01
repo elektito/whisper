@@ -265,10 +265,11 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program env ports funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries)
+  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries)
   program?
   (env program-env program-env-set!)
-  (ports program-ports program-ports-set!)
+  (port program-port program-port-set!)
+  (filename program-filename program-filename-set!)
   (funcs program-funcs program-funcs-set!)
   (funcnum program-funcnum program-funcnum-set!)
   (interned-symbols program-symbols program-symbols-set!)
@@ -393,9 +394,76 @@
 (define (init-find-library search-dirs)
   (set! *find-library* (make-find-library search-dirs)))
 
-(define (create-program port env program-mode?)
+(define (make-read-included-file)
+  (lambda (filename parent-filename)
+    (read-included-file filename parent-filename)))
+
+(define (init-read-included-file)
+  (set! *read-included-file* (make-read-included-file)))
+
+(define (path-absolute? path)
+  (and (> (string-length path) 0)
+       (char=? (string-ref path 0) #\/)))
+
+;; strips the last path component off. "a/b/c" -> "a/b", "a" -> ".",
+;; "/a" -> "/", "/" -> "/". a trailing slash is not special, so
+;; "a/b/" -> "a/b".
+(define (path-dirname path)
+  (let loop ((i (- (string-length path) 1)))
+    (cond ((negative? i) ".")
+          ((not (char=? (string-ref path i) #\/)) (loop (- i 1)))
+          ((zero? i) "/")
+          (else (substring path 0 i)))))
+
+;; collapses "." and ".." components in a path. a ".." above the root
+;; of an absolute path is dropped (there's nowhere higher to go); a
+;; ".." that runs off the top of a relative path is kept literally,
+;; since it may still resolve once combined with more of the path.
+(define (path-normalize path)
+  (let* ((absolute? (path-absolute? path))
+         (parts (filter (lambda (p) (and (> (string-length p) 0)
+                                         (not (string=? p "."))))
+                        (string-split path #\/)))
+         (collapsed (let loop ((parts parts) (stack '()))
+                      (cond ((null? parts) (reverse stack))
+                            ((string=? (car parts) "..")
+                             (cond ((and (pair? stack) (not (string=? (car stack) "..")))
+                                    (loop (cdr parts) (cdr stack)))
+                                   (absolute? (loop (cdr parts) stack))
+                                   (else (loop (cdr parts) (cons ".." stack)))))
+                            (else (loop (cdr parts) (cons (car parts) stack)))))))
+    (if (null? collapsed)
+        (if absolute? "/" ".")
+        (string-append (if absolute? "/" "") (string-join collapsed "/")))))
+
+;; resolves filename against the directory of parent-filename (or
+;; against the current directory if parent-filename is #f, meaning
+;; there's no current file, like in the repl), and normalizes the
+;; result. an absolute filename is normalized as-is, ignoring
+;; parent-filename.
+(define (resolve-relative-filename filename parent-filename)
+  (path-normalize
+   (if (or (path-absolute? filename) (not parent-filename))
+       filename
+       (string-append (path-dirname parent-filename) "/" filename))))
+
+;; resolve filename relative to parent-filename, read all the forms in
+;; the file, and return a pair (resolved-filename . forms).
+(define (read-included-file filename parent-filename)
+  (let* ((filename (resolve-relative-filename filename parent-filename))
+         (port (open-input-file filename)))
+    (let loop ((form (read port))
+               (forms '()))
+      (if (eof-object? form)
+          (begin
+            (close-port port)
+            (cons filename (reverse forms)))
+          (loop (read port) (cons form forms))))))
+
+(define (create-program port filename env program-mode?)
   (make-program (new-expand-root-env env program-mode?)
-                (list port)
+                port
+                filename
                 '() ; funcs
                 0   ; funcnum (function counter)
                 (make-eq-hash-table) ; interned symbols
@@ -405,22 +473,6 @@
                 #f  ; library mode
                 '() ; libraries
                 ))
-
-(define (program-port program)
-  (car (program-ports program)))
-
-(define (program-is-main-file program)
-  ;; returns true if we are not inside an included file.
-  ;; we check if there's only one input port.
-  (null? (cdr (program-ports program))))
-
-(define (program-push-port program port)
-  (let ((ports (program-ports program)))
-    (program-ports-set! program (cons port ports))))
-
-(define (program-pop-port program)
-  (let ((ports (program-ports program)))
-    (program-ports-set! program (cdr ports))))
 
 (define (program-add-function program func)
   (program-funcs-set! program (cons func (program-funcs program))))
@@ -1270,14 +1322,6 @@
                 (gen-code func indent "}\n")))))
       ret-varnum)))
 
-(define (compile-include func indent form)
-  (when (or (!= (length form) 2)
-            (not (string? (cadr form))))
-    (compile-error "bad include form: ~s" form))
-  (let ((port (open-input-file (cadr form))))
-    (program-push-port (func-program func) port))
-  -1)
-
 (define (compile-begin func indent form tail?)
   (when (= 1 (length form))
     (compile-error "empty begin expression is not allowed"))
@@ -1321,7 +1365,6 @@
   (case kind
     ((begin) (compile-begin func indent form tail?))
     ((define) (compile-define func indent form))
-    ((include) (compile-include func indent form))
     ((if) (compile-if func indent form tail?))
     ((let) (compile-let func indent form tail?))
     ((letrec) (compile-letrec func indent form tail?))
@@ -1617,8 +1660,8 @@
                                  (identifier 'primcall '<= '<=)
                                  (identifier 'primcall '>= '>=)))
 
-(define (compile-top-level-form func env form)
-  (let ((expanded (expand-top-level-form form env)))
+(define (compile-top-level-form func env form filename)
+  (let ((expanded (expand-top-level-form form env filename)))
     (let loop ((forms expanded) (varnum -1))
       (if (null? forms)
           varnum
@@ -1638,18 +1681,13 @@
         (env (program-env program)))
     (let loop ((form (read (program-port program))))
       (if (eof-object? form)
-          (if (= (length (program-ports program)) 1)
-              (begin
-                (when (program-is-test-suite program)
-                  (gen-code func 1 "printf(\"\\n\");\n"))
-                (gen-code func 1 "return VOID;\n"))
-              (begin
-                (program-pop-port program)
-                (loop (read (program-port program)))))
-          (let ((varnum (compile-top-level-form func env form)))
+          (begin
+            (when (program-is-test-suite program)
+              (gen-code func 1 "printf(\"\\n\");\n"))
+            (gen-code func 1 "return VOID;\n"))
+          (let ((varnum (compile-top-level-form func env form (program-filename program))))
             (when (and (!= varnum -1)
-                       (program-is-test-suite program)
-                       (program-is-main-file program))
+                       (program-is-test-suite program))
               (gen-code func 1 "test_assert(x~a);\n" varnum))
             (loop (read (program-port program))))))))
 
@@ -1660,27 +1698,6 @@
         (compile-error "a library file must contain only define-library forms"))
       (compile-library-definition form program)
       (loop (read (program-port program))))))
-
-(define (read-all-forms path)
-  (let ((port (open-input-file path)))
-    (let loop ((form (read port)) (forms '()))
-      (if (eof-object? form)
-          (begin (close-port port) (reverse forms))
-          (loop (read port) (cons form forms))))))
-
-;; like read-all-forms, but splices any top-level (include ...) form in
-;; place by recursively reading the files it names, so a source file
-;; that itself includes others yields one correctly ordered form list.
-(define (read-source-forms path)
-  (let ((port (open-input-file path)))
-    (let loop ((form (read port)) (acc '()))
-      (if (eof-object? form)
-          (begin (close-port port) (reverse acc))
-          (loop (read port)
-                (if (and (pair? form) (eq? (car form) 'include))
-                    (append (reverse (apply append (map read-source-forms (cdr form))))
-                            acc)
-                    (cons form acc)))))))
 
 ;; parses one export spec into (local-name . export-name); a bare symbol
 ;; exports itself, (rename local export) exports under a different name.
@@ -1699,7 +1716,14 @@
          (lib-env (new-expand-root-env (make-empty-environment) #f))
          (cu (expand-root-env-compilation-unit lib-env)))
     (compilation-unit-library-name-set! cu lib-name)
-    (let loop ((decls (cddr form))
+    ;; declarations travel through the loop paired with the file they
+    ;; were read from, as (decl . filename), because declarations pulled
+    ;; in by include-library-declarations end up in the same worklist as
+    ;; the library file's own remaining declarations, and each group
+    ;; resolves its includes against the file holding it.
+    (let loop ((decls (map (lambda (decl)
+                             (cons decl (program-filename program)))
+                           (cddr form)))
                (imports '())
                (export-names '()))
       (if (null? decls)
@@ -1722,7 +1746,8 @@
                                    (reverse (compilation-unit-syntax-defs cu))
                                    value-defines #f)
                      (program-libraries program)))))
-          (let ((decl (car decls)))
+          (let ((decl (caar decls))
+                (filename (cdar decls)))
             (unless (and (pair? decl) (symbol? (car decl)))
               (compile-error "invalid define-library declaration: ~a" decl))
             (case (car decl)
@@ -1733,15 +1758,18 @@
                (loop (cdr decls) imports
                      (append export-names (map parse-export-spec (cdr decl)))))
               ((begin)
-               (for-each (lambda (f) (compile-top-level-form func lib-env f)) (cdr decl))
+               (for-each (lambda (f) (compile-top-level-form func lib-env f filename))
+                         (cdr decl))
                (loop (cdr decls) imports export-names))
               ((include)
-               (for-each (lambda (f) (compile-top-level-form func lib-env f))
-                         (apply append (map read-source-forms (cdr decl))))
+               (for-each (lambda (form+filename)
+                           (compile-top-level-form func lib-env
+                                                   (car form+filename)
+                                                   (cdr form+filename)))
+                         (read-include-form decl filename))
                (loop (cdr decls) imports export-names))
               ((include-library-declarations)
-               (loop (append (apply append (map read-all-forms (cdr decl)))
-                             (cdr decls))
+               (loop (append (read-include-form decl filename) (cdr decls))
                      imports export-names))
               ((include-ci)
                (compile-error "include-ci is not yet supported in define-library"))
@@ -1903,12 +1931,12 @@
 (define (compile-expr-to-so expr env)
   (let* ((c-file (string-append (temp-filename) ".c"))
          (so-file (string-append (temp-filename) ".so"))
-         (program (create-program #f env #f))
+         (program (create-program #f #f env #f))
          (func (add-function program #f))
          (root-env (program-env program)))
     (program-init-func-set! program func)
     (program-library-mode-set! program 'so)
-    (let ((varnum (compile-top-level-form func root-env expr)))
+    (let ((varnum (compile-top-level-form func root-env expr (program-filename program))))
       (if (negative? varnum)
           (gen-code func 1 "return VOID;\n")
           (gen-code func 1 "return x~a;\n" varnum)))

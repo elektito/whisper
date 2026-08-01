@@ -1,15 +1,15 @@
 (define-library (whisper)
   (import (whisper core))
-  (include "utils.scm")
-  (include "format.scm")
+  (include "../utils.scm")
+  (include "../format.scm")
 
-  (include-library-declarations "lib/scheme-base-exports.scm")
-  (include-library-declarations "lib/scheme-cxr-exports.scm")
-  (include-library-declarations "lib/scheme-char-exports.scm")
-  (include-library-declarations "lib/scheme-case-lambda-exports.scm")
-  (include-library-declarations "lib/scheme-file-exports.scm")
-  (include-library-declarations "lib/scheme-process-context-exports.scm")
-  (include-library-declarations "lib/scheme-write-exports.scm")
+  (include-library-declarations "scheme-base-exports.scm")
+  (include-library-declarations "scheme-cxr-exports.scm")
+  (include-library-declarations "scheme-char-exports.scm")
+  (include-library-declarations "scheme-case-lambda-exports.scm")
+  (include-library-declarations "scheme-file-exports.scm")
+  (include-library-declarations "scheme-process-context-exports.scm")
+  (include-library-declarations "scheme-write-exports.scm")
 
   (export atom?
           list*
