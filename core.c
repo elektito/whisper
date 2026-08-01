@@ -206,6 +206,7 @@ const char *find_func_name(funcptr func) {
 /* call a closure with arguments passed as an array (trampoline) */
 value call_with_args(value closure, int nargs, value *args) {
     for (;;) {
+        if (!IS_CLOSURE(closure)) { raise_error("called object not a procedure"); }
         struct closure *c = GET_CLOSURE(closure);
         value r = c->func(c->freevars, CALL_HAS_ARG_ARRAY, nargs, args);
         if (r != TAILCALL) {

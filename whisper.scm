@@ -1480,7 +1480,6 @@
     (if self-tail-target
         (compile-self-tail-call func indent form (cdr self-tail-target))
         (let ((func-varnum (compile-form func indent (car form) #f)))
-          (gen-code func indent "if (!IS_CLOSURE(x~a)) { raise_error(\"called object not a procedure\"); }\n" func-varnum)
           (let ((arg-varnums (compile-list-of-forms func indent (cdr form)))
                 (ret-varnum (func-next-varnum func)))
             (gen-code func indent "value x~a = ~a(x~a, ~a, ~a);\n"
