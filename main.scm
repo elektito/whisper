@@ -14,7 +14,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode library-paths core-path)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode library-paths include-paths core-path)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -28,6 +28,7 @@
   (cflags cmdline-cflags cmdline-cflags-set!)
   (library-mode cmdline-library-mode cmdline-library-mode-set!)
   (library-paths cmdline-library-paths cmdline-library-paths-set!)
+  (include-paths cmdline-include-paths cmdline-include-paths-set!)
   (core-path cmdline-core-path cmdline-core-path-set!))
 
 (define (create-cmdline-args)
@@ -43,6 +44,7 @@
                 ""  ; cflags
                 #f  ; library mode
                 '() ; library paths
+                '() ; include paths
                 "." ; core path
                 ))
 
@@ -79,6 +81,12 @@
                (command-line-error "missing argument to -L"))
              (cmdline-library-paths-set! args (cons (cadr cl)
                                                     (cmdline-library-paths args)))
+             (loop (cddr cl)))
+            ((string=? (car cl) "-I")
+             (when (null? (cdr cl))
+               (command-line-error "missing argument to -I"))
+             (cmdline-include-paths-set! args (cons (cadr cl)
+                                                    (cmdline-include-paths args)))
              (loop (cddr cl)))
             ((string=? (car cl) "-C")
              (if (null? (cdr cl))
@@ -129,13 +137,16 @@
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-C core-path] [-o output-file] [-f cflags] [-g]
+  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
  -c\tonly compile a c file
  -l\tcompile as a library, producing both a .so and a .a
  -L\tadd the given path to the list of locations the compiler looks for
 \tlibraries in (may be repeated)
+ -I\tadd the given path to the list of locations the compiler looks for
+\tincluded files in, after the directory of the file containing the
+\tinclude (may be repeated)
  -C\tpath to core files (core.h and core.c).
  -o\tthe name of the output file, or output stem for -l. defaults to
 \tb.c, b.out, or b (producing b.so and b.a), depending on -c, -l, or neither.
@@ -163,7 +174,8 @@
 
 (let ((args (parse-command-line-args)))
   (init-find-library (resolve-library-search-path (reverse (cmdline-library-paths args))))
-  (init-read-included-file)
+  (init-read-included-file (resolve-include-search-path
+                            (reverse (cmdline-include-paths args))))
   (when (not (cmdline-input-file args))
     (repl (environment '(whisper) '(scheme eval)))
     (exit 0))

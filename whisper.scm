@@ -284,13 +284,26 @@
 
 ;; resolves the library manifest search path from the -L flags
 ;; (cmdline-dirs, already in given order) and WHISPER_LIBRARY_PATH. The
-;; default "." is included only when neither source supplied anything, so
-;; either one alone suppresses it.
+;; search path is the only way to find a library, so it falls back to
+;; the current directory when it would otherwise be empty.
 (define (resolve-library-search-path cmdline-dirs)
-  (let* ((env-value (get-environment-variable "WHISPER_LIBRARY_PATH"))
+  (resolve-search-path cmdline-dirs "WHISPER_LIBRARY_PATH" '(".")))
+
+;; resolves the include search path from the -I flags (cmdline-dirs,
+;; already in given order) and WHISPER_INCLUDE_PATH. Unlike the library
+;; path this has no default, because an include is looked up next to the
+;; file containing it before the search path is consulted at all.
+(define (resolve-include-search-path cmdline-dirs)
+  (resolve-search-path cmdline-dirs "WHISPER_INCLUDE_PATH" '()))
+
+;; combines the command line dirs with the ones named by env-var, in
+;; that order. default-dirs is used only when neither source supplied
+;; anything, so either one alone suppresses it.
+(define (resolve-search-path cmdline-dirs env-var default-dirs)
+  (let* ((env-value (get-environment-variable env-var))
          (env-dirs (if env-value (string-split env-value #\:) '())))
     (if (and (null? cmdline-dirs) (not env-value))
-        '(".")
+        default-dirs
         (append cmdline-dirs env-dirs))))
 
 ;; return a library representing (whisper core) if lib-name is (whisper
@@ -394,12 +407,15 @@
 (define (init-find-library search-dirs)
   (set! *find-library* (make-find-library search-dirs)))
 
-(define (make-read-included-file)
+;; Builds the closure installed as the expander's *read-included-file*,
+;; closing over the resolved include search path (see
+;; resolve-include-search-path).
+(define (make-read-included-file search-dirs)
   (lambda (filename parent-filename)
-    (read-included-file filename parent-filename)))
+    (read-included-file filename parent-filename search-dirs)))
 
-(define (init-read-included-file)
-  (set! *read-included-file* (make-read-included-file)))
+(define (init-read-included-file search-dirs)
+  (set! *read-included-file* (make-read-included-file search-dirs)))
 
 (define (path-absolute? path)
   (and (> (string-length path) 0)
@@ -436,29 +452,59 @@
         (if absolute? "/" ".")
         (string-append (if absolute? "/" "") (string-join collapsed "/")))))
 
-;; resolves filename against the directory of parent-filename (or
-;; against the current directory if parent-filename is #f, meaning
-;; there's no current file, like in the repl), and normalizes the
-;; result. an absolute filename is normalized as-is, ignoring
-;; parent-filename.
-(define (resolve-relative-filename filename parent-filename)
-  (path-normalize
-   (if (or (path-absolute? filename) (not parent-filename))
-       filename
-       (string-append (path-dirname parent-filename) "/" filename))))
+;; the last path component. "a/b/c" -> "c", "a" -> "a", "a/" -> "".
+(define (path-basename path)
+  (let loop ((i (- (string-length path) 1)))
+    (cond ((negative? i) path)
+          ((char=? (string-ref path i) #\/)
+           (substring path (+ i 1) (string-length path)))
+          (else (loop (- i 1))))))
 
-;; resolve filename relative to parent-filename, read all the forms in
-;; the file, and return a pair (resolved-filename . forms).
-(define (read-included-file filename parent-filename)
-  (let* ((filename (resolve-relative-filename filename parent-filename))
-         (port (open-input-file filename)))
-    (let loop ((form (read port))
-               (forms '()))
-      (if (eof-object? form)
-          (begin
-            (close-port port)
-            (cons filename (reverse forms)))
-          (loop (read port) (cons form forms))))))
+;; we have no file-exists? primcall for now, so we ask the containing
+;; directory for its listing instead. list-directory gives #f for a
+;; directory that doesn't exist or can't be opened.
+(define (file-exists? path)
+  (if (member (path-basename path)
+              (or (list-directory (path-dirname path)) '()))
+      #t
+      #f))
+
+;; finds the file an include names and returns its normalized path, or
+;; #f if no candidate exists. an absolute filename is taken as-is. a
+;; relative one is looked for next to the file containing the include
+;; first and then in each of search-dirs in turn. parent-filename is #f
+;; when there is no containing file, as in the repl, and the current
+;; directory stands in for it there.
+(define (find-include-file filename parent-filename search-dirs)
+  (if (path-absolute? filename)
+      (let ((path (path-normalize filename)))
+        (and (file-exists? path) path))
+      (let loop ((dirs (cons (if parent-filename
+                                 (path-dirname parent-filename)
+                                 ".")
+                             search-dirs)))
+        (if (null? dirs)
+            #f
+            (let ((path (path-normalize (string-append (car dirs) "/" filename))))
+              (if (file-exists? path)
+                  path
+                  (loop (cdr dirs))))))))
+
+;; resolve filename against parent-filename and the include search path,
+;; read all the forms in the file, and return a pair (resolved-filename
+;; . forms).
+(define (read-included-file filename parent-filename search-dirs)
+  (let ((path (find-include-file filename parent-filename search-dirs)))
+    (unless path
+      (compile-error "include file not found: ~a" filename))
+    (let ((port (open-input-file path)))
+      (let loop ((form (read port))
+                 (forms '()))
+        (if (eof-object? form)
+            (begin
+              (close-port port)
+              (cons path (reverse forms)))
+            (loop (read port) (cons form forms)))))))
 
 (define (create-program port filename env program-mode?)
   (make-program (new-expand-root-env env program-mode?)
