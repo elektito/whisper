@@ -265,7 +265,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries)
+  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries sealed-globals)
   program?
   (env program-env program-env-set!)
   (port program-port program-port-set!)
@@ -280,7 +280,15 @@
 
   ;; in library mode (-l), one <library> record per define-library form
   ;; compiled so far, in reverse source order.
-  (libraries program-libraries program-libraries-set!))
+  (libraries program-libraries program-libraries-set!)
+
+  ;; every sealed global binding found so far, across the program's own
+  ;; top level and every define-library form compiled into it. each
+  ;; library gets its own throwaway compilation unit, so this is the
+  ;; only place sealed bindings survive long enough for
+  ;; gen-sealed-globals to see them all at once, after every unit is
+  ;; done.
+  (sealed-globals program-sealed-globals program-sealed-globals-set!))
 
 ;; resolves the library manifest search path from the -L flags
 ;; (cmdline-dirs, already in given order) and WHISPER_LIBRARY_PATH. The
@@ -518,6 +526,7 @@
                 #f  ; debug instrumentation
                 #f  ; library mode
                 '() ; libraries
+                '() ; sealed globals
                 ))
 
 (define (program-add-function program func)
@@ -564,6 +573,14 @@
      (format output "static value symb~a;\n" (mangle-name symbol)))
    symbols))
 
+;; for each sealed global (one that's never mutated or redefined) define
+;; a static varaible.
+(define (gen-sealed-globals program output)
+  (for-each
+   (lambda (mangled)
+     (format output "static value sealed~a;\n" mangled))
+   (sort (map mangle-unique-name-for-binding (program-sealed-globals program)) string<?)))
+
 (define (gen-register-globals symbols output)
   (display "static void register_globals() {\n" output)
   (for-each
@@ -590,6 +607,8 @@
         (symbols (sorted-program-symbols program)))
     (display "#include \"core.h\"\n\n" port)
     (gen-symbol-defines symbols port)
+    (newline port)
+    (gen-sealed-globals program port)
     (display "\nstatic value global_env;\n" port)
     (newline port)
     (gen-func-prototypes program port)
@@ -1347,6 +1366,8 @@
     ;; the top-level), or declare it as a variable.
     (let ((init-varnum (compile-form func indent init-form #f)))
       (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name name) init-varnum)
+      (when (binding-sealed? (identifier-binding name))
+        (gen-code func indent "sealed~a = x~a;\n" (mangle-unique-name name) init-varnum))
 
       ;; define returns no meaningful value (unspecified in Scheme)
       -1)))
@@ -1510,13 +1531,15 @@
                  (gen-code func indent "value x~a = envget(env, ~a);\n" varnum idx)))))
       ((global alias)
        (intern (func-program func) (binding-meaning b))
-       ;; global_env is only ever a fresh, NULL-hash-table environment
-       ;; for a plain executable. a library can be handed an arbitrary
-       ;; environment via run-so, so it must keep going through the
-       ;; general env_ref.
-       (if (program-library-mode (func-program func))
-           (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form))
-           (gen-code func indent "value x~a = global_env_ref(symb~a);\n" varnum (mangle-name form))))
+       (if (binding-sealed? b)
+           (gen-code func indent "value x~a = sealed~a;\n" varnum (mangle-unique-name form))
+           ;; global_env is only ever a fresh, NULL-hash-table
+           ;; environment for a plain executable. a library can be
+           ;; handed an arbitrary environment via run-so, so it must
+           ;; keep going through the general env_ref.
+           (if (program-library-mode (func-program func))
+               (gen-code func indent "value x~a = env_ref(global_env, symb~a);\n" varnum (mangle-name form))
+               (gen-code func indent "value x~a = global_env_ref(symb~a);\n" varnum (mangle-name form)))))
       ((primcall)
        (intern (func-program func) (identifier-name form))
        (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n"
@@ -1710,12 +1733,18 @@
 ;; whole unit has been expanded, so mutated? has its final value. only
 ;; called from the executable and library codegen paths, both
 ;; closed-world by construction (compile-expr-to-so never calls this).
-(define (mark-sealed-globals! cu)
+;; each sealed binding found is also appended to program's
+;; sealed-globals list, since cu itself (particularly a library's own
+;; lib-env compilation unit) does not outlive this call.
+(define (mark-sealed-globals! program cu)
   (hash-table-walk
    (compilation-unit-defines cu)
    (lambda (name b)
-     (binding-sealed?-set! b (and (eq? 'global (binding-kind b))
-                                   (not (binding-mutated? b)))))))
+     (let ((sealed (and (eq? 'global (binding-kind b))
+                        (not (binding-mutated? b)))))
+       (binding-sealed?-set! b sealed)
+       (when sealed
+         (program-sealed-globals-set! program (cons b (program-sealed-globals program))))))))
 
 ;; codegens an already-expanded list of top-level forms (the output of
 ;; one call to expand-top-level-form), in order, returning the last
@@ -1748,7 +1777,7 @@
                (groups '()))
       (if (eof-object? form)
           (begin
-            (mark-sealed-globals! (expand-root-env-compilation-unit env))
+            (mark-sealed-globals! program (expand-root-env-compilation-unit env))
             (for-each (lambda (forms)
                         (let ((varnum (compile-expanded-forms func forms)))
                           (when (and (!= varnum -1) (program-is-test-suite program))
@@ -1819,7 +1848,7 @@
           (begin
             (raise-if-undefined
              (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
-            (mark-sealed-globals! cu)
+            (mark-sealed-globals! program cu)
             (for-each (lambda (f) (compile-form func 1 f #f))
                       (reverse forms))
             (let ((exports (map (lambda (spec)
