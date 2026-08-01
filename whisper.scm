@@ -1706,12 +1706,17 @@
                                  (identifier 'primcall '<= '<=)
                                  (identifier 'primcall '>= '>=)))
 
+;; codegens an already-expanded list of top-level forms (the output of
+;; one call to expand-top-level-form), in order, returning the last
+;; one's varnum, or -1 if the list is empty.
+(define (compile-expanded-forms func forms)
+  (let loop ((forms forms) (varnum -1))
+    (if (null? forms)
+        varnum
+        (loop (cdr forms) (compile-form func 1 (car forms) #f)))))
+
 (define (compile-top-level-form func env form filename)
-  (let ((expanded (expand-top-level-form form env filename)))
-    (let loop ((forms expanded) (varnum -1))
-      (if (null? forms)
-          varnum
-          (loop (cdr forms) (compile-form func 1 (car forms) #f))))))
+  (compile-expanded-forms func (expand-top-level-form form env filename)))
 
 (define (compile-program program)
   (let ((func (add-function program #f)))
@@ -1724,18 +1729,24 @@
 
 (define (compile-executable program)
   (let ((func (program-init-func program))
-        (env (program-env program)))
-    (let loop ((form (read (program-port program))))
+        (env (program-env program))
+        (filename (program-filename program)))
+    (let loop ((form (read (program-port program)))
+               ;; one entry per top-level form, since each might turn
+               ;; into several by the expander
+               (groups '()))
       (if (eof-object? form)
           (begin
+            (for-each (lambda (forms)
+                        (let ((varnum (compile-expanded-forms func forms)))
+                          (when (and (!= varnum -1) (program-is-test-suite program))
+                            (gen-code func 1 "test_assert(x~a);\n" varnum))))
+                      (reverse groups))
             (when (program-is-test-suite program)
               (gen-code func 1 "printf(\"\\n\");\n"))
             (gen-code func 1 "return VOID;\n"))
-          (let ((varnum (compile-top-level-form func env form (program-filename program))))
-            (when (and (!= varnum -1)
-                       (program-is-test-suite program))
-              (gen-code func 1 "test_assert(x~a);\n" varnum))
-            (loop (read (program-port program))))))))
+          (loop (read (program-port program))
+                (cons (expand-top-level-form form env filename) groups))))))
 
 (define (compile-library program)
   (let loop ((form (read (program-port program))))
@@ -1761,21 +1772,43 @@
          (func (program-init-func program))
          (lib-env (new-expand-root-env (make-empty-environment) #f))
          (cu (expand-root-env-compilation-unit lib-env)))
+    ;; expands each (form . filename) pair against lib-env, flattens
+    ;; the resulting groups in source order, and prepends them onto
+    ;; forms-so-far, which (like imports/export-names below) is kept in
+    ;; reverse source order until the whole library body is done.
+    (define (expand-and-prepend forms+filenames forms-so-far)
+      (append (reverse (apply append
+                              (map (lambda (form+filename)
+                                     (expand-top-level-form (car form+filename)
+                                                             lib-env
+                                                             (cdr form+filename)))
+                                   forms+filenames)))
+              forms-so-far))
     (compilation-unit-library-name-set! cu lib-name)
     ;; declarations travel through the loop paired with the file they
     ;; were read from, as (decl . filename), because declarations pulled
     ;; in by include-library-declarations end up in the same worklist as
     ;; the library file's own remaining declarations, and each group
     ;; resolves its includes against the file holding it.
+    ;; forms accumulates every expanded core form from begin/include
+    ;; declarations, in order, across the whole library body. Expanding
+    ;; everything before codegening any of it (the codegen pass below,
+    ;; once decls runs out) is what lets a later (set! foo ...) or
+    ;; redefinition of foo, wherever it appears in the library, be
+    ;; visible (via mutated?, see expand-top-level-define) by the time
+    ;; foo's own define is codegen'd.
     (let loop ((decls (map (lambda (decl)
                              (cons decl (program-filename program)))
                            (cddr form)))
                (imports '())
-               (export-names '()))
+               (export-names '())
+               (forms '()))
       (if (null? decls)
           (begin
             (raise-if-undefined
              (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
+            (for-each (lambda (f) (compile-form func 1 f #f))
+                      (reverse forms))
             (let ((exports (map (lambda (spec)
                                   (resolve-library-export lib-env (car spec) (cdr spec)))
                                 export-names))
@@ -1799,24 +1832,21 @@
             (case (car decl)
               ((import)
                (process-import decl lib-env)
-               (loop (cdr decls) (cons decl imports) export-names))
+               (loop (cdr decls) (cons decl imports) export-names forms))
               ((export)
                (loop (cdr decls) imports
-                     (append export-names (map parse-export-spec (cdr decl)))))
+                     (append export-names (map parse-export-spec (cdr decl)))
+                     forms))
               ((begin)
-               (for-each (lambda (f) (compile-top-level-form func lib-env f filename))
-                         (cdr decl))
-               (loop (cdr decls) imports export-names))
+               (loop (cdr decls) imports export-names
+                     (expand-and-prepend (map (lambda (f) (cons f filename)) (cdr decl))
+                                          forms)))
               ((include)
-               (for-each (lambda (form+filename)
-                           (compile-top-level-form func lib-env
-                                                   (car form+filename)
-                                                   (cdr form+filename)))
-                         (read-include-form decl filename))
-               (loop (cdr decls) imports export-names))
+               (loop (cdr decls) imports export-names
+                     (expand-and-prepend (read-include-form decl filename) forms)))
               ((include-library-declarations)
                (loop (append (read-include-form decl filename) (cdr decls))
-                     imports export-names))
+                     imports export-names forms))
               ((include-ci)
                (compile-error "include-ci is not yet supported in define-library"))
               ((cond-expand)

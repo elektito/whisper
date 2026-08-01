@@ -967,8 +967,13 @@
            (binding (cond (reuse? existing)
                           (library-name (new-binding 'global (library-mangle-name library-name key)))
                           (else (new-binding 'global key))))
-           (name (make-identifier key binding)))
-      (hash-table-set! (compilation-unit-defines (expand-root-env-compilation-unit env)) key binding)
+           (name (make-identifier key binding))
+           (defines (compilation-unit-defines (expand-root-env-compilation-unit env)))
+           (redefinition (hash-table-ref/default defines key #f)))
+      (when redefinition
+        ;; r7rs small treats a redefinition the same as set!
+        (binding-mutated?-set! redefinition #t))
+      (hash-table-set! defines key binding)
       (let ((define (if (identifier? (car form))
                         (car form)
                         (make-identifier (car form) head-binding)))
