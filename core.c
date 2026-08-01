@@ -2573,8 +2573,8 @@ value primcall_substring(environment env, enum call_flags flags, int nargs, ...)
     if (!IS_STRING(str)) { raise_error("substring first argument is not a string"); }
     if (!IS_FIXNUM(start)) { raise_error("substring second argument is not a number"); }
     if (!IS_FIXNUM(end)) { raise_error("substring third argument is not a number"); }
-    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
-    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
+    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) > GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
+    if (GET_FIXNUM(end) < GET_FIXNUM(start) || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);

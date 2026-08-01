@@ -506,6 +506,15 @@
 (equal? "cde" (substring "abcdefg" 2 5))
 (equal? "" (substring "abcdefg" 4 4))
 
+;; an empty substring at the very end of the string. r7rs does not say
+;; whether start may equal the end, but chez, chibi, and chicken all
+;; allow it, and string-split relies on it to produce the empty last
+;; component of something like "a/b/".
+(equal? "" (substring "abcdefg" 7 7))
+(equal? "" (substring "" 0 0))
+(equal? '("a" "b" "") (string-split "a/b/" #\/))
+(equal? '("" "a") (string-split "/a" #\/))
+
 (string<? "a")
 (string<? "a" "b")
 (string<? "a" "b" "c")
