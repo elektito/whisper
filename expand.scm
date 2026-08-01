@@ -262,7 +262,15 @@
   ;; when this binding is a letrec var whose init is a never-set!
   ;; lambda, so a self tail call can be compiled to a goto instead of a
   ;; real call. #f otherwise.
-  (self-func binding-self-func binding-self-func-set!))
+  (self-func binding-self-func binding-self-func-set!)
+
+  ;; not used by the expander. codegen stores #t here for a global
+  ;; binding once the whole unit has been expanded, when the binding is
+  ;; eligible for the sealed-globals optimizations (closed-world unit,
+  ;; never set! or redefined). #f otherwise, including for every
+  ;; non-global binding. we could calculate this on every reference.
+  ;; storing it here is only an optimization.
+  (sealed? binding-sealed? binding-sealed?-set!))
 
 (record-set-print <binding>
                   (lambda (b port)
@@ -273,6 +281,7 @@
     (binding-mutated?-set! b #f)
     (binding-owner-set! b #f)
     (binding-self-func-set! b #f)
+    (binding-sealed?-set! b #f)
     b))
 
 (define (binding-denotes-same? bx by)

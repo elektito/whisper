@@ -1706,6 +1706,17 @@
                                  (identifier 'primcall '<= '<=)
                                  (identifier 'primcall '>= '>=)))
 
+;; marks every global binding in cu's defines table as sealed once the
+;; whole unit has been expanded, so mutated? has its final value. only
+;; called from the executable and library codegen paths, both
+;; closed-world by construction (compile-expr-to-so never calls this).
+(define (mark-sealed-globals! cu)
+  (hash-table-walk
+   (compilation-unit-defines cu)
+   (lambda (name b)
+     (binding-sealed?-set! b (and (eq? 'global (binding-kind b))
+                                   (not (binding-mutated? b)))))))
+
 ;; codegens an already-expanded list of top-level forms (the output of
 ;; one call to expand-top-level-form), in order, returning the last
 ;; one's varnum, or -1 if the list is empty.
@@ -1737,6 +1748,7 @@
                (groups '()))
       (if (eof-object? form)
           (begin
+            (mark-sealed-globals! (expand-root-env-compilation-unit env))
             (for-each (lambda (forms)
                         (let ((varnum (compile-expanded-forms func forms)))
                           (when (and (!= varnum -1) (program-is-test-suite program))
@@ -1807,6 +1819,7 @@
           (begin
             (raise-if-undefined
              (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
+            (mark-sealed-globals! cu)
             (for-each (lambda (f) (compile-form func 1 f #f))
                       (reverse forms))
             (let ((exports (map (lambda (spec)
