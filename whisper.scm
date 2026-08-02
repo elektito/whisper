@@ -745,6 +745,7 @@
                       (boolean? "boolean_q" 1 1)
                       (box "box" 1 1)
                       (box? "box_q" 1 1)
+                      (call-with-values "call_with_values" 2 2)
                       (car "car" 1 1)
                       (caar "caar" 1 1)
                       (cadr "cadr" 1 1)
@@ -846,6 +847,7 @@
                       (urandom "urandom" 1 1)
                       (unbox "unbox" 1 1)
                       (unwrap "unwrap" 1 1)
+                      (values "values" 0 -1)
                       (vector-length "vector_length" 1 1)
                       (vector-ref "vector_ref" 2 2)
                       (vector-set! "vector_set_b" 3 3)
@@ -1044,7 +1046,7 @@
                     "value x~a = primcall_~a(NULL, ~a, ~a~a~a);\n"
                     varnum
                     c-name
-                    (if tail? "IN_TAIL_POSITION" "NO_CALL_FLAGS")
+                    (if tail? "IN_TAIL_POSITION | (flags & ACCEPTS_MVALUES)" "NO_CALL_FLAGS")
                     (length arg-varnums)
                     (if (null? arg-varnums) "" ", ")
                     (string-join (map (lambda (n) (format "x~a" n)) arg-varnums) ", "))))
@@ -1485,7 +1487,7 @@
         (let ((func-varnum (compile-form func indent (car form) #f)))
           (let ((arg-varnums (compile-list-of-forms func indent (cdr form)))
                 (ret-varnum (func-next-varnum func)))
-            (gen-code func indent "value x~a = ~a(x~a, ~a, ~a);\n"
+            (gen-code func indent "value x~a = ~a(x~a, flags & ACCEPTS_MVALUES, ~a, ~a);\n"
                       ret-varnum
                       (if tail? "tail_call_with_args" "call_with_args")
                       func-varnum
@@ -1609,6 +1611,7 @@
                                  (identifier 'primcall 'boolean? 'boolean?)
                                  (identifier 'primcall 'box? 'box?)
                                  (identifier 'primcall 'box 'box)
+                                 (identifier 'primcall 'call-with-values 'call-with-values)
                                  (identifier 'primcall 'car 'car)
                                  (identifier 'primcall 'caar 'caar)
                                  (identifier 'primcall 'cadr 'cadr)
@@ -1709,6 +1712,7 @@
                                  (identifier 'primcall 'urandom 'urandom)
                                  (identifier 'primcall 'unbox 'unbox)
                                  (identifier 'primcall 'unwrap 'unwrap)
+                                 (identifier 'primcall 'values 'values)
                                  (identifier 'primcall 'vector-length 'vector-length)
                                  (identifier 'primcall 'vector-ref 'vector-ref)
                                  (identifier 'primcall 'vector-set! 'vector-set!)

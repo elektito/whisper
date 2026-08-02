@@ -245,6 +245,18 @@
                 ls
                 (loop (- n 1) (cons x ls)))))))
 
+(define iota
+  (case-lambda
+   ((count) (iota count 0 1))
+   ((count start) (iota count start 1))
+   ((count start step)
+    (let loop ((i (- count 1))
+               (val (+ start (* (- count 1) step)))
+               (ls '()))
+      (if (< i 0)
+          ls
+          (loop (- i 1) (- val step) (cons val ls)))))))
+
 (define (any? values)
   (if (null? values)
       #f

@@ -17,6 +17,7 @@
           any?
           all?
           filter
+          iota
           pairwise
           !=
           string-join

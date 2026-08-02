@@ -21,6 +21,7 @@
         boolean?
         caar
         cadr
+        call-with-values
         car
         case
         cdar
@@ -126,6 +127,7 @@
         unless
         unquote
         unquote-splicing
+        values
         vector
         vector->list
         vector->string

@@ -1491,3 +1491,46 @@
 (let ((ht (make-hash-table my-eq? my-hash)))
   (hash-table-set! ht "FoO" 1000)
   (= 1000 (hash-table-ref ht "foo")))
+
+;; multiple values: the r7rs examples.
+(= 5 (call-with-values (lambda () (values 4 5)) (lambda (a b) b)))
+(= -1 (call-with-values * -))
+
+;; a lone value passes through unwrapped: values of one argument is the
+;; identity, so it works in an ordinary single-value context.
+(= 6 (+ 1 (values 5)))
+(= 5 (call-with-values (lambda () (values 5)) (lambda (x) x)))
+
+;; zero values consumed by a thunk consumer.
+(eq? 'ok (call-with-values (lambda () (values)) (lambda () 'ok)))
+
+;; the consumer's continuation is call-with-values's continuation, so a
+;; call-with-values in the tail of a producer forwards its consumer's
+;; multiple values outward (nested case).
+(equal? '(2 1)
+        (call-with-values
+          (lambda () (call-with-values (lambda () (values 1 2)) (lambda (a b) (values b a))))
+          (lambda (x y) (list x y))))
+
+;; multiple values threaded out of a self-tail-recursive named let: the
+;; goto path preserves flags, so ACCEPTS_MVALUES survives the loop and
+;; the tail (values 'a 'b) is still legal at the base case.
+(equal? '(a b)
+        (call-with-values
+          (lambda ()
+            (let loop ((i 1000000))
+              (if (= i 0) (values 'a 'b) (loop (- i 1)))))
+          (lambda (x y) (list x y))))
+
+;; (apply values ...) in tail position of the producer, past the inline
+;; tail-call arg limit.
+(= 45 (call-with-values (lambda () (apply values '(1 2 3 4 5 6 7 8 9)))
+                        (lambda args (apply + args))))
+
+;; produce 5000 values and count them in a variadic consumer
+(= 5000 (call-with-values (lambda () (apply values (iota 5000)))
+                          (lambda args (length args))))
+
+;; sum 1..1000 delivered as 1000 separate values.
+(= 500500 (call-with-values (lambda () (apply values (iota 1000 1)))
+                            (lambda args (apply + args))))
