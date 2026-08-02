@@ -720,7 +720,7 @@ static value lookup_freevars_closure(struct freevars_closure_mapping *map, int l
 
 /* see gc_mark() function's comment to see why no_sanitize */
 __attribute__((no_sanitize("address")))
-static void gc_scan_stack(void *cur_stack, struct pool **heaps, int n_heaps) {
+static void gc_scan_stack(void *cur_stack) {
     int freevars_map_len;
     struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
 
@@ -905,7 +905,7 @@ static void gc_mark(void) {
     gc_recurse(pending_tail_call.overflow);
 
 
-    gc_scan_stack(cur_stack, heaps, n_heaps);
+    gc_scan_stack(cur_stack);
 
     if (gc_threshold_multiplier == 0) {
         char *env = getenv("GC_THRESHOLD_MULTIPLIER");
