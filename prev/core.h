@@ -14,6 +14,7 @@ enum call_flags {
     NO_CALL_FLAGS = 0,
     CALL_HAS_ARG_ARRAY = 1, /* first vararg is a value* of all args; see primcall_apply */
     IN_TAIL_POSITION = 2, /* used specifically to let apply primcall know it's in tail position */
+    ACCEPTS_MVALUES = 4, /* return context accepts multiple values */
 };
 
 typedef void *value;
@@ -180,6 +181,7 @@ enum object_type {
     OBJ_BOX,
     OBJ_HASH_TABLE,
     OBJ_ENVIRONMENT,
+    OBJ_MVALUES,
 };
 
 enum port_direction {
@@ -232,6 +234,9 @@ struct object {
             /* maps a symbol to a struct binding (kind + value) */
             struct hash_table *hash_table; /* NULL = global sentinel, hash table = local env */
         } environment;
+        struct {
+            value vec; /* a vector containing the values */
+        } mvalues;
     };
 };
 
@@ -264,6 +269,7 @@ struct object {
 #define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
 #define IS_HASH_TABLE(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_HASH_TABLE)
 #define IS_ENVIRONMENT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ENVIRONMENT)
+#define IS_MVALUES(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_MVALUES)
 
 /************ globals and helpers ***********/
 
@@ -276,6 +282,10 @@ struct object {
  * return, so callers that end in one need no trailing return. */
 __attribute__((noreturn, cold)) void raise_error(const char *fmt, ...);
 __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
+
+/* used by -t test-suite mode: prints "." if result is TRUE, otherwise
+ * "F(n)" where n is a 1-based count of assertions seen so far. */
+void test_assert(value result);
 
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
@@ -291,6 +301,7 @@ struct kind_proc {
 
 struct tail_call {
     value closure;
+    int accepts_mvalues;
     int nargs;
     value args[TAILCALL_MAX_INLINE]; /* used when nargs <= TAILCALL_MAX_INLINE */
     value overflow; /* a GC vector when nargs > TAILCALL_MAX_INLINE */
@@ -303,9 +314,9 @@ struct tail_call {
  * that. */
 extern struct tail_call pending_tail_call;
 
-extern value call_with_args(value closure, int nargs, value *args);
+extern value call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
 extern value call(value closure, int nargs, ...);
-extern value tail_call_with_args(value closure, int nargs, value *args);
+extern value tail_call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
 
 /************ memory management ***********/
 
@@ -545,6 +556,8 @@ extern value primcall_run_so(environment env, enum call_flags flags, int nargs, 
 extern value primcall_gc(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_gc_stats(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_call_with_values(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_values(environment env, enum call_flags flags, int nargs, ...);
 
 /************ static library registration ***********/
 

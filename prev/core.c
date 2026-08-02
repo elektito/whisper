@@ -171,6 +171,16 @@ void panic(const char *fmt, ...) {
     exit(1);
 }
 
+void test_assert(value result) {
+    static int test_counter = 0;
+    test_counter++;
+    if (result == TRUE) {
+        printf(".");
+    } else {
+        printf("F(%d)", test_counter);
+    }
+}
+
 const char *find_func_name(funcptr func) {
     char *buf;
     struct symbol_ht_ctx ctx;
@@ -194,10 +204,13 @@ const char *find_func_name(funcptr func) {
 /************ trampoline ***********/
 
 /* call a closure with arguments passed as an array (trampoline) */
-value call_with_args(value closure, int nargs, value *args) {
+value call_with_args(value closure, int accepts_mvalues, int nargs, value *args) {
     for (;;) {
+        if (!IS_CLOSURE(closure)) { raise_error("called object not a procedure"); }
         struct closure *c = GET_CLOSURE(closure);
-        value r = c->func(c->freevars, CALL_HAS_ARG_ARRAY, nargs, args);
+        int flags = CALL_HAS_ARG_ARRAY;
+        if (accepts_mvalues) { flags |= ACCEPTS_MVALUES; }
+        value r = c->func(c->freevars, flags, nargs, args);
         if (r != TAILCALL) {
             return r;
         }
@@ -225,12 +238,13 @@ value call(value closure, int nargs, ...) {
     }
 
     va_end(ap);
-    return call_with_args(closure, nargs, args);
+    return call_with_args(closure, 0, nargs, args);
 }
 
 /* helper function to perform a tail call */
-value tail_call_with_args(value closure, int nargs, value *args) {
+value tail_call_with_args(value closure, int accepts_mvalues, int nargs, value *args) {
     pending_tail_call.closure = closure;
+    pending_tail_call.accepts_mvalues = accepts_mvalues;
     pending_tail_call.nargs = nargs;
     if (nargs <= TAILCALL_MAX_INLINE) {
         pending_tail_call.overflow = VOID;
@@ -574,6 +588,8 @@ static void gc_recurse(value v) {
         } else if (GET_OBJECT(v)->type == OBJ_ENVIRONMENT) {
             if (GET_OBJECT(v)->environment.hash_table != NULL)
                 hash_table_each(GET_OBJECT(v)->environment.hash_table, gc_recurse_env_ht_each, NULL);
+        } else if (GET_OBJECT(v)->type == OBJ_MVALUES) {
+            gc_recurse(GET_OBJECT(v)->mvalues.vec);
         }
     } else if (IS_STRING(v)) {
         gc_marked_count++;
@@ -1725,6 +1741,7 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
 
     if (flags & IN_TAIL_POSITION) {
         pending_tail_call.closure = func;
+        pending_tail_call.accepts_mvalues = flags & ACCEPTS_MVALUES;
         pending_tail_call.nargs = func_nargs;
         pending_tail_call.overflow = func_nargs <= TAILCALL_MAX_INLINE ? VOID : argvec;
         if (func_nargs <= TAILCALL_MAX_INLINE) {
@@ -1745,7 +1762,7 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
      * which would let the sweep free the buffer out from under the
      * callee. nothing allocates between here and the call, so there is
      * no earlier window to guard. */
-    value ret = call_with_args(func, func_nargs, args);
+    value ret = call_with_args(func, 0, func_nargs, args);
     volatile value keep_alive = argvec;
     (void) keep_alive;
 
@@ -2563,8 +2580,8 @@ value primcall_substring(environment env, enum call_flags flags, int nargs, ...)
     if (!IS_STRING(str)) { raise_error("substring first argument is not a string"); }
     if (!IS_FIXNUM(start)) { raise_error("substring second argument is not a number"); }
     if (!IS_FIXNUM(end)) { raise_error("substring third argument is not a number"); }
-    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
-    if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
+    if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) > GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
+    if (GET_FIXNUM(end) < GET_FIXNUM(start) || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
     memcpy(result->s, GET_STRING(str)->s + GET_FIXNUM(start), result->len);
     return STRING(result);
@@ -3598,4 +3615,65 @@ value primcall_percent_gc_stats(environment env, enum call_flags flags, int narg
     GET_OBJECT(result)->vector.data[5] = FIXNUM(pools);
 
     return result;
+}
+
+value primcall_call_with_values(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("call-with-values needs two arguments"); }
+    init_args();
+    value producer = next_arg();
+    value consumer = next_arg();
+    free_args();
+
+    if (!IS_CLOSURE(producer)) { raise_error("call-with-values first argument is not a procedure"); }
+    if (!CLOSURE_ACCEPTS(GET_CLOSURE(producer), 0)) { raise_error("call-with-values producer (first argument) does not accept zero arguments"); }
+    if (!IS_CLOSURE(consumer)) { raise_error("call-with-values second argument is not a procedure"); }
+
+    value ret = call_with_args(producer, 1, 0, NULL);
+    if (IS_MVALUES(ret)) {
+        value vec = GET_OBJECT(ret)->mvalues.vec;
+        int64_t n = GET_OBJECT(vec)->vector.len;
+        if (!CLOSURE_ACCEPTS(GET_CLOSURE(consumer), n)) { raise_error("call-with-values consumer (second argument) does not accept ~a arguments", (int) n); }
+
+        value *args = GET_OBJECT(vec)->vector.data;
+        ret = call_with_args(consumer, flags & ACCEPTS_MVALUES, n, args);
+
+        /* args is an interior pointer into vec's buffer, invisible to
+         * the conservative scan. the consumer can allocate and trigger
+         * GC, so vec must stay findable on this frame until the call
+         * returns. */
+        volatile value keep_alive = vec;
+        (void) keep_alive;
+    } else {
+        /* a single return value */
+        value one = ret;
+        ret = call_with_args(consumer, flags & ACCEPTS_MVALUES, 1, &one);
+    }
+
+    return ret;
+}
+
+value primcall_values(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && !(flags & ACCEPTS_MVALUES)) {
+        raise_error("return context does not support multiple values");
+    }
+
+    init_args();
+    if (nargs == 1) {
+        value arg = next_arg();
+        free_args();
+        return arg;
+    }
+
+    value vec = make_vector(nargs, VOID);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_MVALUES;
+    obj->mvalues.vec = vec;
+
+    for (int i = 0; i < nargs; ++i) {
+        value arg = next_arg();
+        GET_OBJECT(vec)->vector.data[i] = arg;
+    }
+
+    free_args();
+    return OBJECT(obj);
 }
