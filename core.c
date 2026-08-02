@@ -262,6 +262,23 @@ value tail_call_with_args(value closure, int accepts_mvalues, int nargs, value *
     return TAILCALL;
 }
 
+/* finish a tail call left pending by a function invoked directly rather
+ * than through call_with_args (e.g. an eval init func called straight
+ * from whisper_main). if r is not the TAILCALL sentinel it is already
+ * the final result and passes through untouched. */
+value resume_tail_call(value r) {
+    if (r != TAILCALL) {
+        return r;
+    }
+
+    int nargs = pending_tail_call.nargs;
+    value *args = nargs <= TAILCALL_MAX_INLINE
+        ? pending_tail_call.args
+        : GET_OBJECT(pending_tail_call.overflow)->vector.data;
+    return call_with_args(pending_tail_call.closure,
+                          pending_tail_call.accepts_mvalues, nargs, args);
+}
+
 /************ hash table ***********/
 
 /* A good hash function for direct use with tagged pointers, which are

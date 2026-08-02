@@ -317,6 +317,7 @@ extern struct tail_call pending_tail_call;
 extern value call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
 extern value call(value closure, int nargs, ...);
 extern value tail_call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
+extern value resume_tail_call(value r);
 
 /************ memory management ***********/
 

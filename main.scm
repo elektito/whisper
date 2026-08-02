@@ -164,10 +164,14 @@
   (display "> ")
   (let ((expr (read (current-input-port))))
     (unless (eof-object? expr)
-      (let ((result (eval expr env)))
-        (unless (void? result)
-          (write result)
-          (newline)))
+      (call-with-values (lambda () (eval expr env))
+        (lambda v
+          (let loop ((v v))
+            (unless (null? v)
+              (unless (void? (car v))
+                (write (car v))
+                (newline))
+              (loop (cdr v))))))
       (repl env))))
 
 ;;;;;; main ;;;;;;

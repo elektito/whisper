@@ -622,7 +622,7 @@
           (display "value whisper_main(value env) {\n" port)
           (display "    global_env = env;\n" port)
           (display "    register_globals();\n" port)
-          (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
+          (format port "    return ~a(NULL, ACCEPTS_MVALUES, 0);\n" (func-name (program-init-func program)))
           (display "}\n" port)
           (display "#else\n" port)
           (display "static value _lib_init(value env) {\n" port)
@@ -1755,14 +1755,17 @@
 ;; codegens an already-expanded list of top-level forms (the output of
 ;; one call to expand-top-level-form), in order, returning the last
 ;; one's varnum, or -1 if the list is empty.
-(define (compile-expanded-forms func forms)
+(define (compile-expanded-forms func forms tail?)
   (let loop ((forms forms) (varnum -1))
     (if (null? forms)
         varnum
-        (loop (cdr forms) (compile-form func 1 (car forms) #f)))))
+        (loop (cdr forms) (compile-form func 1 (car forms) (and tail? (null? (cdr forms))))))))
 
 (define (compile-top-level-form func env form filename)
-  (compile-expanded-forms func (expand-top-level-form form env filename)))
+  ;; eval returns the last form's value (see the resume_tail_call in
+  ;; compile-expr-to-so), so that form is in tail position. hence
+  ;; passing #t as the tail? argument.
+  (compile-expanded-forms func (expand-top-level-form form env filename) #t))
 
 (define (compile-program program)
   (let ((func (add-function program #f)))
@@ -1785,7 +1788,7 @@
           (begin
             (mark-sealed-globals! program (expand-root-env-compilation-unit env))
             (for-each (lambda (forms)
-                        (let ((varnum (compile-expanded-forms func forms)))
+                        (let ((varnum (compile-expanded-forms func forms #f)))
                           (when (and (!= varnum -1) (program-is-test-suite program))
                             (gen-code func 1 "test_assert(x~a);\n" varnum))))
                       (reverse groups))
@@ -2063,7 +2066,7 @@
     (let ((varnum (compile-top-level-form func root-env expr (program-filename program))))
       (if (negative? varnum)
           (gen-code func 1 "return VOID;\n")
-          (gen-code func 1 "return x~a;\n" varnum)))
+          (gen-code func 1 "return resume_tail_call(x~a);\n" varnum)))
     (raise-if-undefined
      (compilation-unit-undefined-refs
       (expand-root-env-compilation-unit root-env) env 'eval))
