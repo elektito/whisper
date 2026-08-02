@@ -1352,21 +1352,24 @@
     letrec-varnum))
 
 (define (compile-define func indent form)
-  (let ((name (cadr form))
-        (init-form (caddr form)))
+  (let* ((name (cadr form))
+         (b (identifier-binding (cadr form)))
+         (init-form (caddr form)))
     ;; top-level variable names are all interned, since the values of
     ;; global variables are stored in the symbol table. intern the
     ;; binding's meaning (not the source name), since a macro-introduced
     ;; global's meaning is a hygienic gensym distinct from its source
     ;; name, and that is the symbol mangle-unique-name below actually
     ;; emits.
-    (intern (func-program func) (binding-meaning (identifier-binding name)))
+    (intern (func-program func) (binding-meaning b))
 
     ;; compile init form and either set it as a global variable (if in
     ;; the top-level), or declare it as a variable.
-    (let ((init-varnum (compile-form func indent init-form #f)))
+    (let ((init-varnum (if (and (binding-sealed? b) (lambda-form? init-form))
+                           (compile-lambda func indent init-form b)
+                           (compile-form func indent init-form #f))))
       (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name name) init-varnum)
-      (when (binding-sealed? (identifier-binding name))
+      (when (binding-sealed? b)
         (gen-code func indent "sealed~a = x~a;\n" (mangle-unique-name name) init-varnum))
 
       ;; define returns no meaningful value (unspecified in Scheme)
@@ -1448,7 +1451,7 @@
 (define (self-tail-call-target func form tail?)
   (and tail?
        (identifier? (car form))
-       (eq? 'lexical (binding-kind (identifier-binding (car form))))
+       (memq (binding-kind (identifier-binding (car form))) '(lexical global))
        (let ((self-func (binding-self-func (identifier-binding (car form)))))
          (and self-func
               (eq? (car self-func) func)
