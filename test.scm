@@ -1638,7 +1638,14 @@
         (let loop ((n 2000))
           (if (= n 0) (k 'done) (+ n (loop (- n 1))))))))
 
+;; call/cc should pass multiple-values normally
+(equal? '(1 2 3)
+        (call-with-values (lambda ()
+                            (call/cc (lambda (k) (values 1 2 3))))
+          list))
+
 ;;
+
 (let* ((ls '())
        (r (do ((i 0 (+ i 1))
                (j 3 (- j 1))

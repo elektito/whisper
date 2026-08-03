@@ -1857,6 +1857,10 @@ value resume_continuation(environment env, enum call_flags flags, int nargs, ...
     if (nargs == 1) {
         ret = next_arg();
     } else {
+        if (!(flags & ACCEPTS_MVALUES)) {
+            raise_error("return context does not support multiple values");
+        }
+
         value vec = make_vector(nargs, VOID);
         struct object *obj = alloc_object();
         obj->type = OBJ_MVALUES;
@@ -1901,9 +1905,15 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
          * the user given procedure and pass that procedure to it. */
         value cont = make_closure(resume_continuation, 0, MAX_ARGS, 1);
         GET_CLOSURE(cont)->freevars[0] = OBJECT(obj);
-        return call(proc, 1, cont);
+
+        value cont_arg = cont;
+        return call_with_args(proc, flags & ACCEPTS_MVALUES, 1, &cont_arg);
     } else {
         /* after longjmp */
+        if (IS_MVALUES(obj->continuation.ret) && !(flags & ACCEPTS_MVALUES)) {
+            raise_error("return context does not support multiple values");
+        }
+
         return obj->continuation.ret;
     }
 }
