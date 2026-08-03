@@ -1899,7 +1899,7 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 
         /* create a procedure that activates the continuation, then call
          * the user given procedure and pass that procedure to it. */
-        value cont = make_closure(resume_continuation, 0, -1, 1);
+        value cont = make_closure(resume_continuation, 0, MAX_ARGS, 1);
         GET_CLOSURE(cont)->freevars[0] = OBJECT(obj);
         return call(proc, 1, cont);
     } else {
