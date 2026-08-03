@@ -11,23 +11,23 @@ LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
                    lib/scheme-process-context-exports.scm \
                    lib/scheme-write-exports.scm
 
-all: whisper-v22
+all: whisper-v23
 
 stage0: $(SRC_FILES)
-	./whisper-v21 main.scm -o stage0 -C prev
+	./whisper-v22 main.scm -o stage0 -C prev
 
 stage1: stage0 core.h core.c $(SRC_FILES)
 	./stage0 main.scm -o stage1 -f "-Wl,-s $(CFLAGS)"
 
-whisper-v22: stage1 core.h core.c $(SRC_FILES)
-	./stage1 main.scm -o whisper-v22 -f "-Wl,-s $(CFLAGS)"
-	diff stage1 whisper-v22
+whisper-v23: stage1 core.h core.c $(SRC_FILES)
+	./stage1 main.scm -o whisper-v23 -f "-Wl,-s $(CFLAGS)"
+	diff stage1 whisper-v23
 
-test: whisper-v22 lib/whisper.manifest
-	./whisper-v22 test.scm -t -r -L lib
+test: whisper-v23 lib/whisper.manifest
+	./whisper-v23 test.scm -t -r -L lib
 
-matrix: whisper-v22 lib/whisper.manifest
-	./whisper-v22 main.scm -c -o /tmp/b.c
+matrix: whisper-v23 lib/whisper.manifest
+	./whisper-v23 main.scm -c -o /tmp/b.c
 	@for o in 0 1 2 3; do \
 		echo "--- O$$o ---"; \
 		gcc -O$$o -Wl,-s -I. -o /tmp/b.$$o /tmp/b.c core.c \
@@ -35,19 +35,19 @@ matrix: whisper-v22 lib/whisper.manifest
 		&& /tmp/b.$$o test.scm -t -r -L lib || exit 1; \
 	done
 
-lib/whisper.manifest lib/whisper.so lib/whisper.a &: whisper-v22 lib/whisper.sld utils.scm format.scm $(LIB_EXPORT_FILES)
-	./whisper-v22 lib/whisper.sld -l -o lib/whisper
+lib/whisper.manifest lib/whisper.so lib/whisper.a &: whisper-v23 lib/whisper.sld utils.scm format.scm $(LIB_EXPORT_FILES)
+	./whisper-v23 lib/whisper.sld -l -o lib/whisper
 
-lib/scheme.manifest lib/scheme.so lib/scheme.a &: whisper-v22 lib/scheme.sld lib/whisper.manifest $(LIB_EXPORT_FILES)
-	./whisper-v22 lib/scheme.sld -l -o lib/scheme -L lib
+lib/scheme.manifest lib/scheme.so lib/scheme.a &: whisper-v23 lib/scheme.sld lib/whisper.manifest $(LIB_EXPORT_FILES)
+	./whisper-v23 lib/scheme.sld -l -o lib/scheme -L lib
 
-lib/eval.manifest lib/eval.so lib/eval.a &: whisper-v22 lib/scheme-eval.sld $(COMPILER_SRC)
-	./whisper-v22 lib/scheme-eval.sld -l -o lib/eval -L lib
+lib/eval.manifest lib/eval.so lib/eval.a &: whisper-v23 lib/scheme-eval.sld $(COMPILER_SRC)
+	./whisper-v23 lib/scheme-eval.sld -l -o lib/eval -L lib
 
 libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest
 
 clean:
-	rm -f whisper-v22 stage0 stage1 libwhisper.a
+	rm -f whisper-v23 stage0 stage1 libwhisper.a
 	rm -f lib/whisper.manifest lib/whisper.so lib/whisper.a
 	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
 	rm -f lib/eval.manifest lib/eval.so lib/eval.a
