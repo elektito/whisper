@@ -1637,3 +1637,54 @@
       (lambda (k)
         (let loop ((n 2000))
           (if (= n 0) (k 'done) (+ n (loop (- n 1))))))))
+
+;;
+(let* ((ls '())
+       (r (do ((i 0 (+ i 1))
+               (j 3 (- j 1))
+               (x 100))
+              ((>= i 3)
+               (set! ls (cons 'foo ls))
+               (set! ls (cons 'bar ls))
+               1000)
+            (set! ls (cons (list i j x) ls)))))
+  (and (= r 1000)
+       (equal? ls '(bar foo (2 1 100) (1 2 100) (0 3 100)))))
+
+(= 100 (do () (#t 100)))
+
+;;
+
+(let ()
+  (define (foo)
+    (values 100 200))
+  (define-values (x y) (foo))
+  (and (= x 100)
+       (= y 200)))
+
+(let*-values (((a b) (values 1 2))
+              ((x y) (values a b)))
+  (equal? '(1 2 1 2) (list a b x y)))
+
+(let*-values (((a b) (values 1 2))
+              (x (values a b)))
+  (equal? '(1 2 (1 2)) (list a b x)))
+
+(let-values (((x y) (values 1 2)))
+  (and (= x 1)
+       (= y 2)))
+
+(let-values (((x y) (values 1 2))
+             (foo (values 10 20))
+             ((a b c) (values 3 4 5)))
+  (and (= x 1)
+       (= y 2)
+       (= a 3)
+       (= b 4)
+       (equal? foo '(10 20))))
+
+(let-values ((x (values 1 2)))
+  (equal? x '(1 2)))
+
+(let-values ((() (values)))
+  #t)

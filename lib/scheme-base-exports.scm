@@ -46,6 +46,8 @@
         define
         define-record-type
         define-syntax
+        define-values
+        do
         else
         eof-object?
         eq?
@@ -66,6 +68,8 @@
         let
         let*
         let-syntax
+        let-values
+        let*-values
         letrec
         letrec*
         letrec-syntax
