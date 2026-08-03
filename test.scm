@@ -1534,3 +1534,106 @@
 ;; sum 1..1000 delivered as 1000 separate values.
 (= 500500 (call-with-values (lambda () (apply values (iota 1000 1)))
                             (lambda args (apply + args))))
+
+;; invoking the continuation abandons the pending (+ 10 ...)
+(= 30 (+ 10 (call/cc (lambda (k) (k 20)))))
+
+;; invoking the continuation abandons a pending (+ 2 5 ...)
+(= 3 (call/cc (lambda (k) (+ 2 5 (k 3)))))
+
+;; the thunk returns normally when the continuation is never invoked
+(= 100 (call/cc (lambda (k) 100)))
+
+;; the reified continuation is a procedure
+(procedure? (call/cc (lambda (k) k)))
+
+;; try the longer alias for call/cc
+(= 42 (call-with-current-continuation (lambda (k) (+ 5 (k 42)))))
+
+;; early exit out of a map
+(= -3 (call/cc
+       (lambda (exit)
+         (map (lambda (x) (if (negative? x) (exit x) x))
+              '(54 0 37 -3 245 19))
+         #t)))
+
+;; the inner continuation escapes all the way out to the outer one, so
+;; the outer (+ 10 ...) never runs
+(= 35 (+ 3 (call/cc
+            (lambda (k1)
+              (+ 10 (call/cc (lambda (k2) (k1 32))))))))
+
+;; escaping only to the inner continuation, so the outer add still applies
+(= 45 (+ 3 (call/cc
+            (lambda (k1)
+              (+ 10 (call/cc (lambda (k2) (k2 32))))))))
+
+;; a continuation delivering several values to call-with-values
+(equal? '(4 5)
+        (call-with-values (lambda () (call/cc (lambda (k) (k 4 5))))
+                          list))
+(equal? '()
+        (call-with-values (lambda () (call/cc (lambda (k) (k))))
+                          list))
+(= 6 (call-with-values (lambda () (call/cc (lambda (k) (k 1 2 3))))
+                       (lambda (a b c) (+ a b c))))
+
+;; short circuit a product on the first zero, so nothing past it multiplies
+(= 0 (call/cc
+      (lambda (k)
+        (let loop ((l '(1 2 3 0 4 5)))
+          (cond ((null? l) 1)
+                ((= (car l) 0) (k 0))
+                (else (* (car l) (loop (cdr l)))))))))
+(= 120 (call/cc
+        (lambda (k)
+          (let loop ((l '(1 2 3 4 5)))
+            (cond ((null? l) 1)
+                  ((= (car l) 0) (k 0))
+                  (else (* (car l) (loop (cdr l)))))))))
+
+;; a saved continuation used as a backward goto to count to 5. the counter
+;; is a boxed variable on the heap, so it survives each re-entry while the
+;; stack image is reinstated.
+(let ((k #f) (n 0))
+  (call/cc (lambda (c) (set! k c)))
+  (set! n (+ n 1))
+  (if (< n 5) (k #f))
+  (= n 5))
+
+;; invoke a continuation many times, stressing repeated save and restore
+;; of the stack image
+(let ((k #f) (n 0))
+  (call/cc (lambda (c) (set! k c)))
+  (set! n (+ n 1))
+  (if (< n 1000) (k #f))
+  (= n 1000))
+
+;; capture deep in a recursion and re-invoke from the shallower let body,
+;; which forces the stack image to be reinstated above the current frame
+(let ((k #f) (n 0))
+  (define (deep m)
+    (if (= m 0)
+        (begin (call/cc (lambda (c) (set! k c))) 0)
+        (+ 1 (deep (- m 1)))))
+  (deep 300)
+  (set! n (+ n 1))
+  (if (< n 4) (k #f))
+  (= n 4))
+
+;; churn allocation between re-entries so a collection runs while a
+;; captured continuation is live, exercising the scan of its saved stack
+(let ((k #f) (n 0) (payload (list 1 2 3 4 5)))
+  (call/cc (lambda (c) (set! k c)))
+  (set! n (+ n 1))
+  (let loop ((i 0))
+    (if (< i 5000) (begin (cons i i) (loop (+ i 1)))))
+  (if (< n 20) (k #f))
+  (equal? payload '(1 2 3 4 5)))
+
+;; escape out of a deep non-tail recursion in a single longjmp
+(eq? 'done
+     (call/cc
+      (lambda (k)
+        (let loop ((n 2000))
+          (if (= n 0) (k 'done) (+ n (loop (- n 1))))))))

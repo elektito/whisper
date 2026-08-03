@@ -21,7 +21,9 @@
         boolean?
         caar
         cadr
+        call-with-current-continuation
         call-with-values
+        call/cc
         car
         case
         cdar

@@ -545,6 +545,7 @@ static void gc_recurse_env_ht_each(value k, value v, void *ctx) {
     gc_recurse(binding->value);
 }
 
+static void gc_scan_stack(void *cur_stack, void *stack_start);
 static void gc_recurse(value v) {
     if (!IS_SYMBOL(v) && !IS_PAIR(v) && !IS_OBJECT(v) && !IS_STRING(v) && !IS_CLOSURE(v)) {
         return;
@@ -607,6 +608,9 @@ static void gc_recurse(value v) {
                 hash_table_each(GET_OBJECT(v)->environment.hash_table, gc_recurse_env_ht_each, NULL);
         } else if (GET_OBJECT(v)->type == OBJ_MVALUES) {
             gc_recurse(GET_OBJECT(v)->mvalues.vec);
+        } else if (GET_OBJECT(v)->type == OBJ_CONTINUATION) {
+            gc_scan_stack(GET_OBJECT(v)->continuation.stack,
+                          GET_OBJECT(v)->continuation.stack + GET_OBJECT(v)->continuation.stack_size);
         }
     } else if (IS_STRING(v)) {
         gc_marked_count++;
@@ -720,7 +724,7 @@ static value lookup_freevars_closure(struct freevars_closure_mapping *map, int l
 
 /* see gc_mark() function's comment to see why no_sanitize */
 __attribute__((no_sanitize("address")))
-static void gc_scan_stack(void *cur_stack) {
+static void gc_scan_stack(void *cur_stack, void *stack_start) {
     int freevars_map_len;
     struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
 
@@ -832,6 +836,9 @@ static void gc_free_block(void *p, struct pool *heap) {
                 free(obj->environment.hash_table);
             }
             break;
+        case OBJ_CONTINUATION:
+            free(obj->continuation.stack);
+            break;
         default:
             /* do nothing */
             break;
@@ -904,8 +911,7 @@ static void gc_mark(void) {
     }
     gc_recurse(pending_tail_call.overflow);
 
-
-    gc_scan_stack(cur_stack);
+    gc_scan_stack(cur_stack, stack_start);
 
     if (gc_threshold_multiplier == 0) {
         char *env = getenv("GC_THRESHOLD_MULTIPLIER");
@@ -1812,6 +1818,94 @@ value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
     value v = next_arg();
     free_args();
     return BOOL(IS_BOX(v));
+}
+
+/* Copy a captured stack image back to the exact addresses it came from and
+ * longjmp into it. The memcpy overwrites [base, stack_start], so this frame
+ * must sit entirely below base first, otherwise the copy corrupts the very
+ * variables (base, cont) that the following longjmp still reads. When the
+ * continuation is invoked from a shallower frame than the capture point,
+ * recurse to push the stack pointer down until it clears base. */
+__attribute__((noinline))
+static void reinstate_stack(value cont) {
+    char *base = (char *) stack_start - GET_OBJECT(cont)->continuation.stack_size;
+    char probe;
+
+    /* need &probe below base with margin covering the memcpy and longjmp
+     * frames we are about to push. 4096 is that margin: any value comfortably
+     * larger than the stack those two calls use works, and matching it to the
+     * pad size means each recursion drops &probe by about one margin, so the
+     * loop clears base in a bounded number of steps. */
+    if (&probe >= base - 4096) {
+        volatile char pad[4096];
+        pad[0] = 0;
+        reinstate_stack(cont);
+    }
+
+    memcpy(base,
+           GET_OBJECT(cont)->continuation.stack,
+           GET_OBJECT(cont)->continuation.stack_size);
+    longjmp(GET_OBJECT(cont)->continuation.jmp_buf, 1);
+}
+
+value resume_continuation(environment env, enum call_flags flags, int nargs, ...) {
+    /* the continuation object is passed as the first and only freevar */
+    value cont = envget(env, 0);
+    value ret;
+
+    init_args();
+    if (nargs == 1) {
+        ret = next_arg();
+    } else {
+        value vec = make_vector(nargs, VOID);
+        struct object *obj = alloc_object();
+        obj->type = OBJ_MVALUES;
+        obj->mvalues.vec = vec;
+
+        for (int i = 0; i < nargs; ++i) {
+            value arg = next_arg();
+            GET_OBJECT(vec)->vector.data[i] = arg;
+        }
+
+        ret = OBJECT(obj);
+    }
+
+    free_args();
+    GET_OBJECT(cont)->continuation.ret = ret;
+
+    reinstate_stack(cont);
+    return VOID; /* not reached; reinstate_stack longjmps away */
+}
+
+value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("call/cc needs a single argument"); }
+    init_args();
+    value proc = next_arg();
+    free_args();
+
+    if (!IS_CLOSURE(proc)) { raise_error("call/cc argument is not a procedure"); }
+    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 1)) { raise_error("call/cc argument procedure does not accept a single argument"); }
+
+    struct object *obj = alloc_object();
+    obj->type = OBJ_CONTINUATION;
+
+    void *cur_stack = &obj;
+    size_t stack_size = stack_start - cur_stack;
+    GET_OBJECT(obj)->continuation.stack = malloc(stack_size);
+    memcpy(GET_OBJECT(obj)->continuation.stack, cur_stack, stack_size);
+    GET_OBJECT(obj)->continuation.stack_size = stack_size;
+    if (setjmp(GET_OBJECT(obj)->continuation.jmp_buf) == 0) {
+        /* direct return */
+
+        /* create a procedure that activates the continuation, then call
+         * the user given procedure and pass that procedure to it. */
+        value cont = make_closure(resume_continuation, 0, -1, 1);
+        GET_CLOSURE(cont)->freevars[0] = OBJECT(obj);
+        return call(proc, 1, cont);
+    } else {
+        /* after longjmp */
+        return obj->continuation.ret;
+    }
 }
 
 value primcall_car(environment env, enum call_flags flags, int nargs, ...) {

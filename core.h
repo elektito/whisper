@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <limits.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -182,6 +183,7 @@ enum object_type {
     OBJ_HASH_TABLE,
     OBJ_ENVIRONMENT,
     OBJ_MVALUES,
+    OBJ_CONTINUATION,
 };
 
 enum port_direction {
@@ -237,6 +239,12 @@ struct object {
         struct {
             value vec; /* a vector containing the values */
         } mvalues;
+        struct {
+            char *stack;
+            size_t stack_size;
+            jmp_buf jmp_buf;
+            value ret;
+        } continuation;
     };
 };
 
@@ -434,6 +442,7 @@ extern value primcall_apply(environment env, enum call_flags flags, int nargs, .
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_callcc(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_car(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cdr(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_caar(environment env, enum call_flags flags, int nargs, ...);
