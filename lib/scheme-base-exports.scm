@@ -48,6 +48,7 @@
         define-syntax
         define-values
         do
+        dynamic-wind
         else
         eof-object?
         eq?

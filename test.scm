@@ -1688,3 +1688,143 @@
 
 (let-values ((() (values)))
   #t)
+
+;; dynamic-wind
+
+(equal?
+ '(connect talk1 disconnect
+   connect talk2 disconnect)
+ (let ((path '())
+       (c #f))
+   (let ((add (lambda (s)
+                (set! path (cons s path)))))
+     (dynamic-wind
+         (lambda () (add 'connect))
+         (lambda ()
+           (add (call/cc
+                 (lambda (c0)
+                   (set! c c0)
+                   'talk1))))
+         (lambda () (add 'disconnect)))
+     (if (< (length path) 4)
+         (c 'talk2)
+         (reverse path)))))
+
+;; dynamic-wind: before, during, after run in that order
+(equal? '(in body out)
+        (let ((log '()))
+          (dynamic-wind
+              (lambda () (set! log (cons 'in log)))
+              (lambda () (set! log (cons 'body log)))
+              (lambda () (set! log (cons 'out log))))
+          (reverse log)))
+
+;; dynamic-wind: the body's value is the value of the whole dynamic-wind
+(= 42 (dynamic-wind (lambda () #f) (lambda () 42) (lambda () #f)))
+
+;; dynamic-wind: multiple values from the body pass through unchanged
+(equal? '(1 2 3)
+        (call-with-values
+         (lambda () (dynamic-wind (lambda () #f)
+                                  (lambda () (values 1 2 3))
+                                  (lambda () #f)))
+         list))
+
+;; dynamic-wind: zero values from the body pass through unchanged
+(equal? '()
+        (call-with-values
+         (lambda () (dynamic-wind (lambda () #f)
+                                  (lambda () (values))
+                                  (lambda () #f)))
+         list))
+
+;; dynamic-wind: the after thunk runs when the body escapes through a
+;; continuation
+(equal? '(in out)
+        (let ((log '()))
+          (call/cc
+           (lambda (k)
+             (dynamic-wind
+                 (lambda () (set! log (cons 'in log)))
+                 (lambda () (k #f))
+                 (lambda () (set! log (cons 'out log))))))
+          (reverse log)))
+
+;; dynamic-wind: escaping past two nested extents runs both after thunks
+;; inside out
+(equal? '(in1 in2 out2 out1)
+        (let ((log '()))
+          (call/cc
+           (lambda (k)
+             (dynamic-wind
+                 (lambda () (set! log (cons 'in1 log)))
+                 (lambda ()
+                   (dynamic-wind
+                       (lambda () (set! log (cons 'in2 log)))
+                       (lambda () (k #f))
+                       (lambda () (set! log (cons 'out2 log)))))
+                 (lambda () (set! log (cons 'out1 log))))))
+          (reverse log)))
+
+;; dynamic-wind: re-entering the extent through a saved continuation
+;; re-runs the before thunk, and each normal exit runs the after thunk
+(let ((log '()) (k #f) (count 0))
+  (dynamic-wind
+      (lambda () (set! log (cons 'in log)))
+      (lambda () (call/cc (lambda (c) (set! k c))))
+      (lambda () (set! log (cons 'out log))))
+  (set! count (+ count 1))
+  (if (< count 3) (k #f))
+  (equal? (reverse log) '(in out in out in out)))
+
+;; dynamic-wind: jumping to a continuation captured between two extents
+;; unwinds only the inner one, then the outer completes normally
+(equal? '(in-outer in-inner out-inner out-outer)
+        (let ((log '()) (k #f))
+          (dynamic-wind
+              (lambda () (set! log (cons 'in-outer log)))
+              (lambda ()
+                (call/cc (lambda (c) (set! k c)))
+                (when k
+                  (let ((saved k))
+                    (set! k #f)
+                    (dynamic-wind
+                        (lambda () (set! log (cons 'in-inner log)))
+                        (lambda () (saved #f))
+                        (lambda () (set! log (cons 'out-inner log)))))))
+              (lambda () (set! log (cons 'out-outer log))))
+          (reverse log)))
+
+;; dynamic-wind: on a plain non-escaping run each guard fires exactly
+;; once
+(= 1 (let ((ins 0) (outs 0))
+       (dynamic-wind
+           (lambda () (set! ins (+ ins 1)))
+           (lambda () #t)
+           (lambda () (set! outs (+ outs 1))))
+       (if (and (= ins 1) (= outs 1)) 1 0)))
+
+;; dynamic-wind: a generator built from call/cc and dynamic-wind: the
+;; after thunk runs on every yield out of the extent, the before thunk
+;; on every resume back in
+(equal? '(enter leave 1 enter leave 2 enter leave 3)
+        (let ((log '()) (resume #f) (return #f))
+          (define (yield v)
+            (call/cc
+             (lambda (k)
+               (set! resume k)
+               (return v))))
+          (define (driver)
+            (dynamic-wind
+                (lambda () (set! log (cons 'enter log)))
+                (lambda () (yield 1) (yield 2) (yield 3))
+                (lambda () (set! log (cons 'leave log)))))
+          (define (step)
+            (call/cc
+             (lambda (k)
+               (set! return k)
+               (if resume (resume #f) (driver)))))
+          (set! log (cons (step) log))
+          (set! log (cons (step) log))
+          (set! log (cons (step) log))
+          (reverse log)))
