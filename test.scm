@@ -1535,10 +1535,6 @@
 (= 500500 (call-with-values (lambda () (apply values (iota 1000 1)))
                             (lambda args (apply + args))))
 
-;; temporary helpers until call/cc wrapper is in stdlib
-(define (call/cc proc) (%call/cc proc))
-(define (call-with-current-continuation proc) (%call/cc proc))
-
 ;; invoking the continuation abandons the pending (+ 10 ...)
 (= 30 (+ 10 (call/cc (lambda (k) (k 20)))))
 

@@ -829,3 +829,9 @@
           (cons 'live-objects (vector-ref stats 3))
           (cons 'manual-mode (vector-ref stats 4))
           (cons 'pools (vector-ref stats 5)))))
+
+(define (call/cc proc)
+  (%call/cc proc))
+
+(define (call-with-current-continuation proc)
+  (call/cc proc))
