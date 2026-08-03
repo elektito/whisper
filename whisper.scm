@@ -1488,10 +1488,11 @@
         (let ((func-varnum (compile-form func indent (car form) #f)))
           (let ((arg-varnums (compile-list-of-forms func indent (cdr form)))
                 (ret-varnum (func-next-varnum func)))
-            (gen-code func indent "value x~a = ~a(x~a, flags & ACCEPTS_MVALUES, ~a, ~a);\n"
+            (gen-code func indent "value x~a = ~a(x~a, ~a, ~a, ~a);\n"
                       ret-varnum
                       (if tail? "tail_call_with_args" "call_with_args")
                       func-varnum
+                      (if tail? "flags & ACCEPTS_MVALUES" "NO_CALL_FLAGS")
                       (length arg-varnums)
                       (if (null? arg-varnums)
                           "NULL"
