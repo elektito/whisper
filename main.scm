@@ -1,3 +1,4 @@
+(import (whisper))
 (import (whisper core))
 
 (include "whisper.scm")

@@ -1,5 +1,3 @@
-(include "utils.scm")
-(include "format.scm")
 (include "qq.scm")
 (include "expand.scm")
 (include "syntax-rules.scm")

@@ -1,5 +1,5 @@
 (define-library (scheme eval)
-  (import (whisper core))
+  (import (whisper core) (whisper))
   (include "../whisper.scm")
   (begin
     ;; the compiler's required runtime globals: the library provider and

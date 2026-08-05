@@ -6,7 +6,7 @@ PREV = whisper-v$(PREV_V)
 
 CFLAGS ?=
 
-COMPILER_SRC = whisper.scm utils.scm format.scm qq.scm expand.scm syntax-rules.scm
+COMPILER_SRC = whisper.scm qq.scm expand.scm syntax-rules.scm
 SRC_FILES = $(COMPILER_SRC) main.scm
 
 LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
@@ -17,16 +17,33 @@ LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
                    lib/scheme-process-context-exports.scm \
                    lib/scheme-write-exports.scm
 
+WHISPER_LIB_SRC = utils.scm format.scm lib/whisper.sld $(LIB_EXPORT_FILES)
+
 all: $(CURRENT)
 
-stage0: $(SRC_FILES)
-	./$(PREV) main.scm -o stage0 -C prev
+# each bootstrap stage needs its own (whisper) library built by the
+# previous stage before it can compile main.scm. stageN-lib is the
+# library used to build stageN's compiler.
+stage0-lib/whisper.manifest stage0-lib/whisper.so stage0-lib/whisper.a &: $(WHISPER_LIB_SRC)
+	mkdir -p stage0-lib
+	./$(PREV) lib/whisper.sld -l -o stage0-lib/whisper -C prev
 
-stage1: stage0 core.h core.c $(SRC_FILES)
-	./stage0 main.scm -o stage1 -f "-Wl,-s $(CFLAGS)"
+stage0: stage0-lib/whisper.manifest $(SRC_FILES)
+	./$(PREV) main.scm -o stage0 -C prev -L stage0-lib
 
-$(CURRENT): stage1 core.h core.c $(SRC_FILES)
-	./stage1 main.scm -o $(CURRENT) -f "-Wl,-s $(CFLAGS)"
+stage1-lib/whisper.manifest stage1-lib/whisper.so stage1-lib/whisper.a &: stage0 $(WHISPER_LIB_SRC)
+	mkdir -p stage1-lib
+	./stage0 lib/whisper.sld -l -o stage1-lib/whisper
+
+stage1: stage0 stage1-lib/whisper.manifest core.h core.c $(SRC_FILES)
+	./stage0 main.scm -o stage1 -f "-Wl,-s $(CFLAGS)" -L stage1-lib
+
+stage2-lib/whisper.manifest stage2-lib/whisper.so stage2-lib/whisper.a &: stage1 $(WHISPER_LIB_SRC)
+	mkdir -p stage2-lib
+	./stage1 lib/whisper.sld -l -o stage2-lib/whisper
+
+$(CURRENT): stage1 stage2-lib/whisper.manifest core.h core.c $(SRC_FILES)
+	./stage1 main.scm -o $(CURRENT) -f "-Wl,-s $(CFLAGS)" -L stage2-lib
 	diff stage1 $(CURRENT)
 
 test: $(CURRENT) libs

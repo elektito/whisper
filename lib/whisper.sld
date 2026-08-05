@@ -75,6 +75,7 @@
           wrapped?
           wrapped-kind
           wrapped-set-print
+          record-set-print
 
           void
           void?
