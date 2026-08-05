@@ -1016,6 +1016,12 @@
 
 (equal? 3 (eval '(+ 1 2) (environment '(scheme base))))
 
+;; (scheme eval) is statically linked into this program (imported at the
+;; top of this file) and also dynamically loaded here via
+;; environment/eval. those two should hold the same exact reference to
+;; the environment function.
+(eq? environment (eval 'environment (environment '(scheme eval))))
+
 ;; eval should pass on multiple values
 (call-with-values (lambda () (eval '(values 1 2) (environment '(scheme base))))
                   (lambda (a b) (and (equal? 1 a) (equal? 2 b))))

@@ -639,8 +639,8 @@
     (gen-func-bodies program port)
     (if (program-library-mode program)
         (begin
-          (display "#ifdef SO_MODE\n" port)
           (gen-provided-libs program port)
+          (display "#ifdef SO_MODE\n" port)
           (gen-provided-globals program port)
           (newline port)
           (display "value whisper_main(value env) {\n" port)
@@ -664,6 +664,7 @@
           (display "static value _lib_init(value env) {\n" port)
           (display "    global_env = env;\n" port)
           (display "    register_globals();\n" port)
+          (display "    register_library_env(provided_libs, env);\n" port)
           (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
           (display "}\n\n" port)
           (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
