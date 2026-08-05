@@ -4,6 +4,9 @@
 ;; in (whisper), like environment-bind!
 (import (whisper core))
 
+;; needed for the environment/eval tests below
+(import (scheme eval))
+
 ;; defines
 
 (eq? 1 1) ; also test datum comment at the end of a list
@@ -992,6 +995,35 @@
   (environment-bind! e 'x 'macro '(a transformer))
   (environment-bind! e 'x 'value 42)
   (equal? (environment-lookup e 'x) '(value . 42)))
+
+;; regression test. this used to fail with a confusing runtime error
+;; about record types, caused by the fact that we instantiated the
+;; (scheme eval) library more than once and corrupted the record type
+;; ids. the nesting matters: e imports (scheme eval), and the inner
+;; environment call runs inside e, re-entering the same running .so
+;; that the outer eval is already executing. a non-reentrant program
+;; (just calling environment once) never hits this.
+(let* ((e  (environment '(whisper) '(scheme eval)))
+       (e2 (eval '(environment '(scheme eval)) e)))
+  (environment? e2))
+
+;; assoc is a library defined value (not a primcall), so it should be
+;; the same in any environment that imports it, because per r7rs each
+;; library should only be instantiated once.
+(let ((e1 (environment '(scheme base)))
+      (e2 (environment '(scheme base))))
+  (eq? (eval 'assoc e1) (eval 'assoc e2)))
+
+(equal? 3 (eval '(+ 1 2) (environment '(scheme base))))
+
+;; eval should pass on multiple values
+(call-with-values (lambda () (eval '(values 1 2) (environment '(scheme base))))
+                  (lambda (a b) (and (equal? 1 a) (equal? 2 b))))
+
+;; eval should pass on multiple values, this time created by a captured
+;; continuation
+(call-with-values (lambda () (eval '(call/cc (lambda (k) (k 1 2))) (environment '(scheme base))))
+                  (lambda (a b) (and (equal? 1 a) (equal? 2 b))))
 
 ;; quoted data containing binding-form-shaped lists must not be
 ;; interpreted as code by the preprocessor

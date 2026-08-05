@@ -457,6 +457,7 @@
     ;; kept distinct from global (not reused, not tracked as a possible
     ;; forward reference), even though codegen treats them the same.
     ((alias) (new-binding 'alias value))
+    ((env-alias) (new-binding 'global name)) ;; should not be reachable normally
     (else (compile-error "internal error: unknown environment-lookup kind ~s" kind))))
 
 ;; resolves a name at the root: first the compilation unit's own defines

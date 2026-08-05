@@ -1575,6 +1575,14 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
 
 /************ environment functions ***********/
 
+value make_environment(void) {
+    struct object *obj = alloc_object();
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = malloc(sizeof(struct hash_table));
+    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
+    return OBJECT(obj);
+}
+
 void env_define(value e, value sym, value val, enum sym_kind kind) {
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
     if (ht == NULL) {
@@ -1616,6 +1624,12 @@ value env_ref(value e, value sym) {
         return binding->value;
     case sym_alias:
         return env_ref(e, binding->value);
+    case sym_env_alias:
+        if (binding->value == e) {
+            raise_error("environment delegates to itself: %.*s",
+                        (int) s->name_len, s->name);
+        }
+        return env_ref(binding->value, sym);
     case sym_primcall:
         /* same trick as the sentinel case above: binding->value is the
          * canonical primcall name symbol, whose own ->value already holds
@@ -1624,6 +1638,63 @@ value env_ref(value e, value sym) {
     default:
         panic("internal error: unhandled sym_kind case");
     }
+}
+
+static const char lib_env_prefix[] = "##lib-env-";
+
+static struct symbol *lib_env_registry_symbol(const char *name) {
+    size_t prefix_len = sizeof(lib_env_prefix) - 1;
+    size_t name_len = strlen(name);
+    char *key = malloc(prefix_len + name_len);
+    memcpy(key, lib_env_prefix, prefix_len);
+    memcpy(key + prefix_len, name, name_len);
+    value sym = extend_global_env(key, prefix_len + name_len, sym_unbound);
+    free(key);
+    return GET_SYMBOL(sym);
+}
+
+value find_library_env(const char **provided) {
+    /* lookup for the canonical environment for each provided library
+     * name, by looking at a symbol with the ##lib-env- prefix, so the
+     * (foo bar) library is looked up in symbol "##lib-env-(foo bar)"
+     * value slot. */
+    value home = NULL;
+    for (const char **p = provided; *p; ++p) {
+        struct symbol *s = lib_env_registry_symbol(*p);
+        if (s->kind == sym_unbound) {
+            if (home) {
+                panic("internal error: library partially registered: %s", *p);
+            }
+            continue;
+        }
+
+        if (home && home != s->value) {
+            panic("internal error: inconsistent library registration: %s", *p);
+        }
+        home = s->value;
+    }
+    return home;
+}
+
+void register_library_env(const char **provided, value home) {
+    /* check every name before writing any of them, so a conflict on a
+     * later name never leaves earlier names */
+    for (const char **p = provided; *p; ++p) {
+        struct symbol *s = lib_env_registry_symbol(*p);
+        if (s->kind != sym_unbound) {
+            raise_error("library already registered: %s", *p);
+        }
+    }
+
+    for (const char **p = provided; *p; ++p) {
+        struct symbol *s = lib_env_registry_symbol(*p);
+        s->kind = sym_value;
+        s->value = home;
+    }
+}
+
+void env_delegate(value env, value sym, value target) {
+    env_define(env, sym, target, sym_env_alias);
 }
 
 /************ global environment functions ***********/
@@ -3601,11 +3672,7 @@ value primcall_hash_table_hash_function(environment env, enum call_flags flags, 
 
 value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("make-empty-environment takes no arguments"); }
-    struct object *obj = alloc_object();
-    obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = malloc(sizeof(struct hash_table));
-    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
-    return OBJECT(obj);
+    return make_environment();
 }
 
 /* maps a sym_kind to the Scheme symbol that represents it in the
@@ -3615,12 +3682,13 @@ value primcall_make_empty_environment(environment env, enum call_flags flags, in
 static value sym_kind_to_symbol(enum sym_kind kind) {
     /* extend_global_env with sym_unbound is just interning here */
     switch (kind) {
-    case sym_value:    return extend_global_env("value", 5, sym_unbound);
-    case sym_macro:    return extend_global_env("macro", 5, sym_unbound);
-    case sym_special:  return extend_global_env("special", 7, sym_unbound);
-    case sym_aux:      return extend_global_env("aux", 3, sym_unbound);
-    case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
-    case sym_alias:    return extend_global_env("alias", 5, sym_unbound);
+    case sym_value:     return extend_global_env("value", 5, sym_unbound);
+    case sym_macro:     return extend_global_env("macro", 5, sym_unbound);
+    case sym_special:   return extend_global_env("special", 7, sym_unbound);
+    case sym_aux:       return extend_global_env("aux", 3, sym_unbound);
+    case sym_primcall:  return extend_global_env("primcall", 8, sym_unbound);
+    case sym_alias:     return extend_global_env("alias", 5, sym_unbound);
+    case sym_env_alias: return extend_global_env("env-alias", 9, sym_unbound);
     default:
         panic("internal error: unhandled sym_kind case");
     }
@@ -3628,12 +3696,13 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
 
 /* the reverse of sym_kind_to_symbol */
 static enum sym_kind symbol_to_sym_kind(value sym) {
-    if (sym == extend_global_env("value", 5, sym_unbound))    return sym_value;
-    if (sym == extend_global_env("macro", 5, sym_unbound))    return sym_macro;
-    if (sym == extend_global_env("special", 7, sym_unbound))  return sym_special;
-    if (sym == extend_global_env("aux", 3, sym_unbound))      return sym_aux;
-    if (sym == extend_global_env("primcall", 8, sym_unbound)) return sym_primcall;
-    if (sym == extend_global_env("alias", 5, sym_unbound))    return sym_alias;
+    if (sym == extend_global_env("value", 5, sym_unbound))     return sym_value;
+    if (sym == extend_global_env("macro", 5, sym_unbound))     return sym_macro;
+    if (sym == extend_global_env("special", 7, sym_unbound))   return sym_special;
+    if (sym == extend_global_env("aux", 3, sym_unbound))       return sym_aux;
+    if (sym == extend_global_env("primcall", 8, sym_unbound))  return sym_primcall;
+    if (sym == extend_global_env("alias", 5, sym_unbound))     return sym_alias;
+    if (sym == extend_global_env("env-alias", 9, sym_unbound)) return sym_env_alias;
     struct symbol *s = GET_SYMBOL(sym);
     raise_error("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }

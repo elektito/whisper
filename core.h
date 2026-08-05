@@ -146,13 +146,14 @@ struct string {
 };
 
 enum sym_kind {
-    sym_unbound,  /* default (0 from calloc): no binding */
-    sym_special,  /* built-in syntax; value = canonical special form symbol */
-    sym_aux,      /* aux keyword, like else, =>, etc. */
-    sym_value,    /* runtime value: primcall closure or user-defined variable */
-    sym_macro,    /* macro transformer (future) */
-    sym_primcall, /* the same as sym_value at run-time, makes a difference at compile-time */
-    sym_alias,    /* for compile-time only; maps an unmangled name to a library mangled name */
+    sym_unbound,   /* default (0 from calloc): no binding */
+    sym_special,   /* built-in syntax; value = canonical special form symbol */
+    sym_aux,       /* aux keyword, like else, =>, etc. */
+    sym_value,     /* runtime value: primcall closure or user-defined variable */
+    sym_macro,     /* macro transformer (future) */
+    sym_primcall,  /* the same as sym_value at run-time, makes a difference at compile-time */
+    sym_alias,     /* for compile-time only; maps an unmangled name to a library mangled name */
+    sym_env_alias, /* same symbol looked up in a different environment */
 };
 
 /* used as a key into the symbols hash table */
@@ -404,6 +405,19 @@ extern void  print_stacktrace(void);
 extern const char *find_func_name(funcptr func);
 extern void env_define(value e, value sym, value val, enum sym_kind kind);
 extern value env_ref(value e, value sym);
+extern value make_environment(void);
+
+/* find the canonical environment for an artifact, by the library names
+ * it provides */
+extern value find_library_env(const char **provided);
+
+/* register home environment under every name in provided. raises if a
+ * name is already registered, which means two artifacts (.so/.a) claim
+ * to provide it. */
+extern void register_library_env(const char **provided, value home);
+
+/* bind sym, in env, to an entry that delegates lookups to target */
+extern void env_delegate(value env, value sym, value target);
 
 /* env_ref's ht == NULL branch, factored out so generated executable
  * code (which always has a NULL-hash-table global_env, see
@@ -435,6 +449,9 @@ static value global_env_ref(value sym) {
         return GET_SYMBOL(s->value)->value;
     case sym_alias:
         return global_env_ref(s->value);
+    case sym_env_alias:
+        /* this should be unreachable */
+        raise_error("library environment alias in global environment");
     default:
         panic("internal error: unhandled sym_kind case");
     }
