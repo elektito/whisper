@@ -465,6 +465,7 @@ extern value make_global_env(void);
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
 
+extern value primcall_abort(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_append(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_apply(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
@@ -524,6 +525,7 @@ extern value primcall_read_line(environment env, enum call_flags flags, int narg
 extern value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_car_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_set_system_exception_handler(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_to_number(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_to_symbol(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_symbol_to_string(environment env, enum call_flags flags, int nargs, ...);

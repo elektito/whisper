@@ -19,6 +19,8 @@ static struct object current_input_port;
 static struct object current_output_port;
 static struct object current_error_port;
 
+static value system_exception_handler = NULL;
+
 /* both in units of allocations (object count), not bytes */
 static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
@@ -146,16 +148,34 @@ void print_stacktrace(void) {}
 #endif /* DEBUG */
 
 __attribute__((noreturn, cold))
-void raise_error(const char *fmt, ...) {
+static void terminate_with_message(const char *msg, size_t len) {
     print_stacktrace();
-    fprintf(stderr, "exception: ");
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "\n");
+    fprintf(stderr, "exception: %.*s\n", (int) len, msg);
     cleanup();
     exit(1);
+}
+
+__attribute__((noreturn, cold))
+void raise_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int len = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+
+    char *buf = malloc(len + 1);
+    va_start(ap, fmt);
+    vsnprintf(buf, len + 1, fmt, ap);
+    va_end(ap);
+
+    if (system_exception_handler) {
+        value msg = make_string(buf, len);
+        free(buf);
+        call(system_exception_handler, 1, msg);
+
+        panic("system exception handler returned");
+    }
+
+    terminate_with_message(buf, len);
 }
 
 __attribute__((noreturn, cold))
@@ -907,6 +927,8 @@ static void gc_mark(void) {
 
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
+
+    gc_recurse(system_exception_handler);
 
     gc_recurse(pending_tail_call.closure);
     for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
@@ -1811,6 +1833,19 @@ void run_static_libs(value env) {
 
 /************ primcall functions ***********/
 
+value primcall_abort(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("abort needs a single argument"); }
+    init_args();
+    value msg = next_arg();
+    free_args();
+
+    if (!IS_STRING(msg)) { raise_error("abort argument must be a string"); }
+
+    terminate_with_message(GET_STRING(msg)->s, GET_STRING(msg)->len);
+
+    return VOID;
+}
+
 value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs == 0) { return NIL; }
     init_args();
@@ -2687,6 +2722,19 @@ value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...)
 
     if (!IS_PAIR(pair)) { raise_error("set-cdr! first argument is not a pair"); }
     GET_PAIR(pair)->cdr = obj;
+    return VOID;
+}
+
+value primcall_set_system_exception_handler(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("set-system-exception-handler needs a single argument"); }
+    init_args();
+    value proc = next_arg();
+    free_args();
+
+    if (!IS_CLOSURE(proc)) { raise_error("set-system-exception-handler argument must be a procedure"); }
+    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 1)) { raise_error("set-system-exception-handler: passed procedure must accept one argument"); }
+    system_exception_handler = proc;
+
     return VOID;
 }
 
