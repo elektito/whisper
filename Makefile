@@ -17,7 +17,7 @@ LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
                    lib/scheme-process-context-exports.scm \
                    lib/scheme-write-exports.scm
 
-WHISPER_LIB_SRC = utils.scm format.scm lib/whisper.sld $(LIB_EXPORT_FILES)
+WHISPER_LIB_SRC = lib/stdlib.scm lib/format.scm lib/whisper.sld $(LIB_EXPORT_FILES)
 
 all: $(CURRENT)
 
@@ -58,7 +58,7 @@ matrix: $(CURRENT) libs
 		&& WHISPER_LIBRARY_PATH=lib /tmp/b.$$o test.scm -t -r -L lib || exit 1; \
 	done
 
-lib/whisper.manifest lib/whisper.so lib/whisper.a &: $(CURRENT) lib/whisper.sld utils.scm format.scm $(LIB_EXPORT_FILES)
+lib/whisper.manifest lib/whisper.so lib/whisper.a &: $(CURRENT) lib/whisper.sld lib/stdlib.scm lib/format.scm $(LIB_EXPORT_FILES)
 	./$(CURRENT) lib/whisper.sld -l -o lib/whisper
 
 lib/scheme.manifest lib/scheme.so lib/scheme.a &: $(CURRENT) lib/scheme.sld lib/whisper.manifest $(LIB_EXPORT_FILES)

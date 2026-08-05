@@ -1,7 +1,7 @@
 (define-library (whisper)
   (import (whisper core))
-  (include "../utils.scm")
-  (include "../format.scm")
+  (include "stdlib.scm")
+  (include "format.scm")
 
   (include-library-declarations "scheme-base-exports.scm")
   (include-library-declarations "scheme-cxr-exports.scm")
