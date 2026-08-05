@@ -631,16 +631,18 @@
      (let* ((primcall-info (hash-table-ref/default *primcalls-table* sym #f))
             (sym-name (symbol->string sym))
             (sym-len (string-length sym-name)))
-       (format output "    symb~a = extend_global_env(\"~a\", ~a, ~a);\n"
-               (mangle-name sym) sym sym-len
-               (if primcall-info "sym_value" "sym_unbound"))
+       (format output "    symb~a = extend_global_env(\"~a\", ~a, sym_unbound);\n"
+               (mangle-name sym) sym sym-len)
        (when primcall-info
          (let* ((c-name (cadr primcall-info))
                 (min-args (caddr primcall-info))
                 (max-args (cadddr primcall-info))
                 (c-max-args (if (= max-args -1) "MAX_ARGS" max-args)))
-           (format output "    GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
-                   (mangle-name sym) c-name min-args c-max-args)))))
+           (format output "    if (GET_SYMBOL(symb~a)->kind == sym_unbound) {\n" (mangle-name sym))
+           (format output "        GET_SYMBOL(symb~a)->kind = sym_value;\n" (mangle-name sym))
+           (format output "        GET_SYMBOL(symb~a)->value = make_closure(primcall_~a, ~a, ~a, 0);\n"
+                   (mangle-name sym) c-name min-args c-max-args)
+           (format output "    }\n")))))
    symbols)
   (display "}\n" output))
 

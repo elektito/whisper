@@ -1031,6 +1031,13 @@
 (call-with-values (lambda () (eval '(call/cc (lambda (k) (k 1 2))) (environment '(scheme base))))
                   (lambda (a b) (and (equal? 1 a) (equal? 2 b))))
 
+;; a primcall closure's identity must survive a runtime library load,
+;; not just be re-created fresh as we used to do. this is probably not
+;; required by r7rs but it's still nice so we check for it.
+(let ((f car))
+  (eval '1 (environment '(scheme base)))
+  (eq? f car))
+
 ;; quoted data containing binding-form-shaped lists must not be
 ;; interpreted as code by the preprocessor
 (equal? '(lambda 5 6) '(lambda 5 6))
