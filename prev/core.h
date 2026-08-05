@@ -146,13 +146,14 @@ struct string {
 };
 
 enum sym_kind {
-    sym_unbound,  /* default (0 from calloc): no binding */
-    sym_special,  /* built-in syntax; value = canonical special form symbol */
-    sym_aux,      /* aux keyword, like else, =>, etc. */
-    sym_value,    /* runtime value: primcall closure or user-defined variable */
-    sym_macro,    /* macro transformer (future) */
-    sym_primcall, /* the same as sym_value at run-time, makes a difference at compile-time */
-    sym_alias,    /* for compile-time only; maps an unmangled name to a library mangled name */
+    sym_unbound,   /* default (0 from calloc): no binding */
+    sym_special,   /* built-in syntax; value = canonical special form symbol */
+    sym_aux,       /* aux keyword, like else, =>, etc. */
+    sym_value,     /* runtime value: primcall closure or user-defined variable */
+    sym_macro,     /* macro transformer (future) */
+    sym_primcall,  /* the same as sym_value at run-time, makes a difference at compile-time */
+    sym_alias,     /* for compile-time only; maps an unmangled name to a library mangled name */
+    sym_env_alias, /* same symbol looked up in a different environment */
 };
 
 /* used as a key into the symbols hash table */
@@ -244,6 +245,17 @@ struct object {
             size_t stack_size;
             jmp_buf jmp_buf;
             value ret;
+
+#ifdef DEBUG
+            /* the shadow stack at capture time. a longjmp past N frames
+             * skips their leave_proc calls, so without restoring this
+             * the trace keeps corpses of abandoned escapes, and
+             * re-entering deeper than the current depth drives the
+             * global stacktrace_size negative and writes at
+             * stacktrace[-1]. */
+            funcptr *stacktrace;
+            int stacktrace_size;
+#endif
         } continuation;
     };
 };
@@ -393,6 +405,19 @@ extern void  print_stacktrace(void);
 extern const char *find_func_name(funcptr func);
 extern void env_define(value e, value sym, value val, enum sym_kind kind);
 extern value env_ref(value e, value sym);
+extern value make_environment(void);
+
+/* find the canonical environment for an artifact, by the library names
+ * it provides */
+extern value find_library_env(const char **provided);
+
+/* register home environment under every name in provided. raises if a
+ * name is already registered, which means two artifacts (.so/.a) claim
+ * to provide it. */
+extern void register_library_env(const char **provided, value home);
+
+/* bind sym, in env, to an entry that delegates lookups to target */
+extern void env_delegate(value env, value sym, value target);
 
 /* env_ref's ht == NULL branch, factored out so generated executable
  * code (which always has a NULL-hash-table global_env, see
@@ -424,6 +449,9 @@ static value global_env_ref(value sym) {
         return GET_SYMBOL(s->value)->value;
     case sym_alias:
         return global_env_ref(s->value);
+    case sym_env_alias:
+        /* this should be unreachable */
+        raise_error("library environment alias in global environment");
     default:
         panic("internal error: unhandled sym_kind case");
     }
@@ -437,6 +465,7 @@ extern value make_global_env(void);
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);
 
+extern value primcall_abort(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_append(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_apply(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
@@ -496,6 +525,7 @@ extern value primcall_read_line(environment env, enum call_flags flags, int narg
 extern value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_car_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_set_system_exception_handler(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_to_number(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_to_symbol(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_symbol_to_string(environment env, enum call_flags flags, int nargs, ...);
@@ -574,8 +604,17 @@ extern value primcall_values(environment env, enum call_flags flags, int nargs, 
 #define STATIC_LIB_CONSTRUCTOR(fn) \
     __attribute__((constructor)) static void fn(void)
 
+enum static_lib_load_state {
+    STATIC_LIB_NOT_LOADED = 0,
+    STATIC_LIB_LOADING = 1,
+    STATIC_LIB_LOADED = 2,
+};
+
 struct static_lib {
+    const char **provided_libs;
+    const char **required_libs;
     value (*init)(value env);
+    enum static_lib_load_state state;
     struct static_lib *next;
 };
 

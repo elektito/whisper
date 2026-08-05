@@ -19,6 +19,8 @@ static struct object current_input_port;
 static struct object current_output_port;
 static struct object current_error_port;
 
+static value system_exception_handler = NULL;
+
 /* both in units of allocations (object count), not bytes */
 static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
@@ -146,16 +148,35 @@ void print_stacktrace(void) {}
 #endif /* DEBUG */
 
 __attribute__((noreturn, cold))
-void raise_error(const char *fmt, ...) {
+static void terminate_with_message(const char *msg, size_t len) {
     print_stacktrace();
-    fprintf(stderr, "exception: ");
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "\n");
+    fprintf(stderr, "exception: %.*s\n", (int) len, msg);
     cleanup();
     exit(1);
+}
+
+__attribute__((noreturn, cold))
+void raise_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int len = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+
+    char *buf = malloc(len + 1);
+    if (buf == NULL) { panic("out of memory formatting exception message"); }
+    va_start(ap, fmt);
+    vsnprintf(buf, len + 1, fmt, ap);
+    va_end(ap);
+
+    if (system_exception_handler) {
+        value msg = make_string(buf, len);
+        free(buf);
+        call(system_exception_handler, 1, msg);
+
+        panic("system exception handler returned");
+    }
+
+    terminate_with_message(buf, len);
 }
 
 __attribute__((noreturn, cold))
@@ -838,6 +859,9 @@ static void gc_free_block(void *p, struct pool *heap) {
             break;
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
+#ifdef DEBUG
+            free(obj->continuation.stacktrace);
+#endif
             break;
         default:
             /* do nothing */
@@ -1572,6 +1596,14 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
 
 /************ environment functions ***********/
 
+value make_environment(void) {
+    struct object *obj = alloc_object();
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = malloc(sizeof(struct hash_table));
+    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
+    return OBJECT(obj);
+}
+
 void env_define(value e, value sym, value val, enum sym_kind kind) {
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
     if (ht == NULL) {
@@ -1613,6 +1645,12 @@ value env_ref(value e, value sym) {
         return binding->value;
     case sym_alias:
         return env_ref(e, binding->value);
+    case sym_env_alias:
+        if (binding->value == e) {
+            raise_error("environment delegates to itself: %.*s",
+                        (int) s->name_len, s->name);
+        }
+        return env_ref(binding->value, sym);
     case sym_primcall:
         /* same trick as the sentinel case above: binding->value is the
          * canonical primcall name symbol, whose own ->value already holds
@@ -1621,6 +1659,63 @@ value env_ref(value e, value sym) {
     default:
         panic("internal error: unhandled sym_kind case");
     }
+}
+
+static const char lib_env_prefix[] = "##lib-env-";
+
+static struct symbol *lib_env_registry_symbol(const char *name) {
+    size_t prefix_len = sizeof(lib_env_prefix) - 1;
+    size_t name_len = strlen(name);
+    char *key = malloc(prefix_len + name_len);
+    memcpy(key, lib_env_prefix, prefix_len);
+    memcpy(key + prefix_len, name, name_len);
+    value sym = extend_global_env(key, prefix_len + name_len, sym_unbound);
+    free(key);
+    return GET_SYMBOL(sym);
+}
+
+value find_library_env(const char **provided) {
+    /* lookup for the canonical environment for each provided library
+     * name, by looking at a symbol with the ##lib-env- prefix, so the
+     * (foo bar) library is looked up in symbol "##lib-env-(foo bar)"
+     * value slot. */
+    value home = NULL;
+    for (const char **p = provided; *p; ++p) {
+        struct symbol *s = lib_env_registry_symbol(*p);
+        if (s->kind == sym_unbound) {
+            if (home) {
+                panic("internal error: library partially registered: %s", *p);
+            }
+            continue;
+        }
+
+        if (home && home != s->value) {
+            panic("internal error: inconsistent library registration: %s", *p);
+        }
+        home = s->value;
+    }
+    return home;
+}
+
+void register_library_env(const char **provided, value home) {
+    /* check every name before writing any of them, so a conflict on a
+     * later name never leaves earlier names */
+    for (const char **p = provided; *p; ++p) {
+        struct symbol *s = lib_env_registry_symbol(*p);
+        if (s->kind != sym_unbound) {
+            raise_error("library already registered: %s", *p);
+        }
+    }
+
+    for (const char **p = provided; *p; ++p) {
+        struct symbol *s = lib_env_registry_symbol(*p);
+        s->kind = sym_value;
+        s->value = home;
+    }
+}
+
+void env_delegate(value env, value sym, value target) {
+    env_define(env, sym, target, sym_env_alias);
 }
 
 /************ global environment functions ***********/
@@ -1683,12 +1778,72 @@ void register_static_lib(struct static_lib *lib) {
     lib_list = lib;
 }
 
+/* first static lib node whose provided_libs list contains name,
+ * otherwise return NULL */
+static struct static_lib *find_static_lib(const char *name) {
+    for (struct static_lib *p = lib_list; p; p = p->next) {
+        for (const char **prov = p->provided_libs; *prov; ++prov) {
+            if (strcmp(*prov, name) == 0) {
+                return p;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+
+static void run_static_lib(struct static_lib *node, value env) {
+    if (node->state == STATIC_LIB_LOADED) {
+        return;
+    }
+
+    if (node->state == STATIC_LIB_LOADING) {
+        raise_error("circular library dependency during init: %s", node->provided_libs[0]);
+    }
+
+    node->state = STATIC_LIB_LOADING;
+    for (const char **r = node->required_libs; *r; ++r) {
+        struct static_lib *dep = find_static_lib(*r);
+
+        /* required_libs holds only names already confirmed to have an
+         * artifact (so for example (whisper core) is not there, or if
+         * in the future we have codeless libraries those will also be
+         * absent), so a miss here means a required library was not
+         * statically linked when it should have been. */
+        if (!dep) {
+            raise_error("static library dependency not linked: %s (required by %s)",
+                        *r, node->provided_libs[0]);
+        }
+
+        run_static_lib(dep, env);
+    }
+
+    register_library_env(node->provided_libs, env);
+    node->init(env);
+    node->state = STATIC_LIB_LOADED;
+}
+
 void run_static_libs(value env) {
-    for (struct static_lib *p = lib_list; p; p = p->next)
-        p->init(env);
+    for (struct static_lib *p = lib_list; p; p = p->next) {
+        run_static_lib(p, env);
+    }
 }
 
 /************ primcall functions ***********/
+
+value primcall_abort(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("abort needs a single argument"); }
+    init_args();
+    value msg = next_arg();
+    free_args();
+
+    if (!IS_STRING(msg)) { raise_error("abort argument must be a string"); }
+
+    terminate_with_message(GET_STRING(msg)->s, GET_STRING(msg)->len);
+
+    return VOID;
+}
 
 value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs == 0) { return NIL; }
@@ -1845,6 +2000,25 @@ static void reinstate_stack(value cont) {
     memcpy(base,
            GET_OBJECT(cont)->continuation.stack,
            GET_OBJECT(cont)->continuation.stack_size);
+
+#ifdef DEBUG
+    /* restore the shadow stack to the depth and contents it had at capture.
+     * these are plain globals, so the memcpy above does not touch them.
+     *
+     * stacktrace_cap must not be restored. it describes how big the
+     * array currently is, which is a fact about the live allocation and
+     * not about the captured state. we never change the pointer itself
+     * so whatever we memcpy over the buffer is lower than or equal to
+     * cap. */
+    if (GET_OBJECT(cont)->continuation.stacktrace_size > 0) {
+        memcpy(stacktrace,
+               GET_OBJECT(cont)->continuation.stacktrace,
+               GET_OBJECT(cont)->continuation.stacktrace_size * sizeof(funcptr));
+    }
+
+    stacktrace_size = GET_OBJECT(cont)->continuation.stacktrace_size;
+#endif
+
     longjmp(GET_OBJECT(cont)->continuation.jmp_buf, 1);
 }
 
@@ -1857,6 +2031,10 @@ value resume_continuation(environment env, enum call_flags flags, int nargs, ...
     if (nargs == 1) {
         ret = next_arg();
     } else {
+        if (!(flags & ACCEPTS_MVALUES)) {
+            raise_error("return context does not support multiple values");
+        }
+
         value vec = make_vector(nargs, VOID);
         struct object *obj = alloc_object();
         obj->type = OBJ_MVALUES;
@@ -1888,22 +2066,47 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 
     struct object *obj = alloc_object();
     obj->type = OBJ_CONTINUATION;
+#ifdef DEBUG
+    /* before any allocation point, so a collection can never see the field
+     * holding the previous occupant's pointer and free() it twice. */
+    obj->continuation.stacktrace = NULL;
+    obj->continuation.stacktrace_size = 0;
+#endif
 
     void *cur_stack = &obj;
     size_t stack_size = stack_start - cur_stack;
     GET_OBJECT(obj)->continuation.stack = malloc(stack_size);
     memcpy(GET_OBJECT(obj)->continuation.stack, cur_stack, stack_size);
     GET_OBJECT(obj)->continuation.stack_size = stack_size;
+#ifdef DEBUG
+    if (stacktrace_size > 0) {
+        size_t trace_bytes = stacktrace_size * sizeof(funcptr);
+        GET_OBJECT(obj)->continuation.stacktrace = malloc(trace_bytes);
+        if (GET_OBJECT(obj)->continuation.stacktrace == NULL) {
+            panic("out of memory saving stack trace for continuation");
+        }
+
+        memcpy(GET_OBJECT(obj)->continuation.stacktrace, stacktrace, trace_bytes);
+    }
+
+    GET_OBJECT(obj)->continuation.stacktrace_size = stacktrace_size;
+#endif
     if (setjmp(GET_OBJECT(obj)->continuation.jmp_buf) == 0) {
         /* direct return */
 
         /* create a procedure that activates the continuation, then call
          * the user given procedure and pass that procedure to it. */
-        value cont = make_closure(resume_continuation, 0, -1, 1);
+        value cont = make_closure(resume_continuation, 0, MAX_ARGS, 1);
         GET_CLOSURE(cont)->freevars[0] = OBJECT(obj);
-        return call(proc, 1, cont);
+
+        value cont_arg = cont;
+        return call_with_args(proc, flags & ACCEPTS_MVALUES, 1, &cont_arg);
     } else {
         /* after longjmp */
+        if (IS_MVALUES(obj->continuation.ret) && !(flags & ACCEPTS_MVALUES)) {
+            raise_error("return context does not support multiple values");
+        }
+
         return obj->continuation.ret;
     }
 }
@@ -2518,6 +2721,19 @@ value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...)
 
     if (!IS_PAIR(pair)) { raise_error("set-cdr! first argument is not a pair"); }
     GET_PAIR(pair)->cdr = obj;
+    return VOID;
+}
+
+value primcall_set_system_exception_handler(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("set-system-exception-handler needs a single argument"); }
+    init_args();
+    value proc = next_arg();
+    free_args();
+
+    if (!IS_CLOSURE(proc)) { raise_error("set-system-exception-handler argument must be a procedure"); }
+    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 1)) { raise_error("set-system-exception-handler: passed procedure must accept one argument"); }
+    system_exception_handler = proc;
+
     return VOID;
 }
 
@@ -3550,11 +3766,7 @@ value primcall_hash_table_hash_function(environment env, enum call_flags flags, 
 
 value primcall_make_empty_environment(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("make-empty-environment takes no arguments"); }
-    struct object *obj = alloc_object();
-    obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = malloc(sizeof(struct hash_table));
-    hash_table_init(obj->environment.hash_table, 8, NULL, NULL);
-    return OBJECT(obj);
+    return make_environment();
 }
 
 /* maps a sym_kind to the Scheme symbol that represents it in the
@@ -3564,12 +3776,13 @@ value primcall_make_empty_environment(environment env, enum call_flags flags, in
 static value sym_kind_to_symbol(enum sym_kind kind) {
     /* extend_global_env with sym_unbound is just interning here */
     switch (kind) {
-    case sym_value:    return extend_global_env("value", 5, sym_unbound);
-    case sym_macro:    return extend_global_env("macro", 5, sym_unbound);
-    case sym_special:  return extend_global_env("special", 7, sym_unbound);
-    case sym_aux:      return extend_global_env("aux", 3, sym_unbound);
-    case sym_primcall: return extend_global_env("primcall", 8, sym_unbound);
-    case sym_alias:    return extend_global_env("alias", 5, sym_unbound);
+    case sym_value:     return extend_global_env("value", 5, sym_unbound);
+    case sym_macro:     return extend_global_env("macro", 5, sym_unbound);
+    case sym_special:   return extend_global_env("special", 7, sym_unbound);
+    case sym_aux:       return extend_global_env("aux", 3, sym_unbound);
+    case sym_primcall:  return extend_global_env("primcall", 8, sym_unbound);
+    case sym_alias:     return extend_global_env("alias", 5, sym_unbound);
+    case sym_env_alias: return extend_global_env("env-alias", 9, sym_unbound);
     default:
         panic("internal error: unhandled sym_kind case");
     }
@@ -3577,12 +3790,13 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
 
 /* the reverse of sym_kind_to_symbol */
 static enum sym_kind symbol_to_sym_kind(value sym) {
-    if (sym == extend_global_env("value", 5, sym_unbound))    return sym_value;
-    if (sym == extend_global_env("macro", 5, sym_unbound))    return sym_macro;
-    if (sym == extend_global_env("special", 7, sym_unbound))  return sym_special;
-    if (sym == extend_global_env("aux", 3, sym_unbound))      return sym_aux;
-    if (sym == extend_global_env("primcall", 8, sym_unbound)) return sym_primcall;
-    if (sym == extend_global_env("alias", 5, sym_unbound))    return sym_alias;
+    if (sym == extend_global_env("value", 5, sym_unbound))     return sym_value;
+    if (sym == extend_global_env("macro", 5, sym_unbound))     return sym_macro;
+    if (sym == extend_global_env("special", 7, sym_unbound))   return sym_special;
+    if (sym == extend_global_env("aux", 3, sym_unbound))       return sym_aux;
+    if (sym == extend_global_env("primcall", 8, sym_unbound))  return sym_primcall;
+    if (sym == extend_global_env("alias", 5, sym_unbound))     return sym_alias;
+    if (sym == extend_global_env("env-alias", 9, sym_unbound)) return sym_env_alias;
     struct symbol *s = GET_SYMBOL(sym);
     raise_error("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }

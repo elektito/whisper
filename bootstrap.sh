@@ -2,7 +2,7 @@
 
 set -e
 
-CURRENT_V=23
+CURRENT_V=24
 LAST_V=$((CURRENT_V - 1))
 
 mkdir -p bootstrap
