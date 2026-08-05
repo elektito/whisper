@@ -2024,50 +2024,39 @@
       ""
       (string-append "-Wl,--whole-archive " (string-join archives " ") " -Wl,--no-whole-archive")))
 
-;; maps a runtime environment to the list of library names whose code
-;; has been loaded into it, so re-importing a library into the same
-;; environment does not re-run its init and reset its state. Entries
-;; are never removed, so every environment that ever imports a
-;; library stays alive for the rest of the process. That is fine
-;; while environments are few and long-lived (the repl makes one per
-;; session), but becomes a leak if code ever churns through many
-;; short-lived environments with eval.
-(define *loaded-libraries* '())
-
 ;; the libraries imported by root-env's compilation unit, plus their
 ;; transitive dependencies, in dependency order.
 (define (imported-libraries root-env)
   (let ((cu (expand-root-env-compilation-unit root-env)))
     (libraries-in-dependency-order (reverse (compilation-unit-imports cu)))))
 
-;; dlopen the .so of every library imported by root-env's compilation
-;; unit that is not already live in env, dependencies first. called
-;; after an eval's compilation succeeds and before the compiled
-;; expression runs, so the expression finds the library globals in
-;; env.
-(define (load-imported-libraries! root-env env)
-  (for-each
-   (lambda (lib)
-     (let ((handle (library-code-handle lib)))
-       (when handle
-         (let* ((entry (assq env *loaded-libraries*))
-                (loaded (if entry (cdr entry) '())))
-           (unless (member (library-name lib) loaded)
-             (run-so (string-append handle ".so") env)
-             ;; record only after run-so succeeds, so a failed load is
-             ;; not remembered as loaded and can be retried.
-             (if entry
-                 (set-cdr! entry (cons (library-name lib) (cdr entry)))
-                 (set! *loaded-libraries*
-                       (cons (cons env (list (library-name lib)))
-                             *loaded-libraries*))))))))
-   (imported-libraries root-env)))
+;; the code handles of root-env's imported artifacts, dependency order,
+;; deduped: lib/scheme.sld holds seven define-library forms sharing
+;; one handle, and each should only be linked/loaded once.
+(define (imported-artifacts root-env)
+  (let loop ((libs (imported-libraries root-env)) (seen '()) (acc '()))
+    (if (null? libs)
+        (reverse acc)
+        (let ((handle (library-code-handle (car libs))))
+          (cond ((not handle) (loop (cdr libs) seen acc))
+                ((member handle seen) (loop (cdr libs) seen acc))
+                (else (loop (cdr libs) (cons handle seen) (cons handle acc))))))))
 
-;; the .a files to link into the program, one per imported library
-;; that has a code artifact, in dependency order.
+;; dlopen the .so of every artifact imported by root-env's compilation
+;; unit, dependencies first. called after an eval's compilation
+;; succeeds and before the compiled expression runs, so the expression
+;; finds the library globals in env. run-so on an artifact that is
+;; already instantiated elsewhere is cheap: it delegates the
+;; artifact's globals into env instead of re-running its body.
+(define (load-imported-libraries! root-env env)
+  (for-each (lambda (handle) (run-so (string-append handle ".so") env))
+            (imported-artifacts root-env)))
+
+;; the .a files to link into the program, one per imported artifact,
+;; in dependency order.
 (define (program-import-archives program)
-  (map (lambda (lib) (string-append (library-code-handle lib) ".a"))
-       (filter library-code-handle (imported-libraries (program-env program)))))
+  (map (lambda (handle) (string-append handle ".a"))
+       (imported-artifacts (program-env program))))
 
 (define (build-compile-cmd cc library-mode cflags c-file out-file core-path archives)
   (let ((archive-flags (all-archive-flags archives)))
