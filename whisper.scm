@@ -590,6 +590,28 @@
   (format output "    NULL,\n")
   (format output "};\n"))
 
+;; the library names this artifact's bodies import, minus its own names
+;; and minus any name with no artifact (e.g. (whisper core)), deduped.
+;; run_static_lib waits on each of these before running this artifact's
+;; body; a name filtered out here has nothing to wait on.
+(define (gen-required-libs program output)
+  (format output "static const char *required_libs[] = {\n")
+  (let ((own-names (map library-name (program-libraries program)))
+        (imports (apply append
+                         (map cdr ;; library-imports are in the form (import ...)
+                              (apply append (map library-imports (program-libraries program)))))))
+    (let loop ((imports imports) (seen own-names))
+      (unless (null? imports)
+        (let ((name (import-set-library-name (car imports))))
+          (if (member name seen)
+              (loop (cdr imports) seen)
+              (let ((lib (*find-library* name)))
+                (when (and lib (library-code-handle lib))
+                  (format output "    \"~a\",\n" name))
+                (loop (cdr imports) (cons name seen))))))))
+  (format output "    NULL,\n")
+  (format output "};\n"))
+
 (define (gen-provided-globals program output)
   (format output "static value *provided_globals[] = {\n")
   (for-each
@@ -661,13 +683,16 @@
           (display "    return result;\n" port)
           (display "}\n" port)
           (display "#else\n" port)
+          (gen-required-libs program port)
+          (newline port)
           (display "static value _lib_init(value env) {\n" port)
           (display "    global_env = env;\n" port)
           (display "    register_globals();\n" port)
-          (display "    register_library_env(provided_libs, env);\n" port)
           (format port "    return ~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name (program-init-func program)))
           (display "}\n\n" port)
-          (display "static struct static_lib _lib_node = { _lib_init, NULL };\n\n" port)
+          (display "static struct static_lib _lib_node = {\n" port)
+          (display "    provided_libs, required_libs, _lib_init, STATIC_LIB_NOT_LOADED, NULL\n" port)
+          (display "};\n\n" port)
           (display "STATIC_LIB_CONSTRUCTOR(_lib_ctor) {\n" port)
           (display "    register_static_lib(&_lib_node);\n" port)
           (display "}\n" port)

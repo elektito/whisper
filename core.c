@@ -1757,9 +1757,56 @@ void register_static_lib(struct static_lib *lib) {
     lib_list = lib;
 }
 
+/* first static lib node whose provided_libs list contains name,
+ * otherwise return NULL */
+static struct static_lib *find_static_lib(const char *name) {
+    for (struct static_lib *p = lib_list; p; p = p->next) {
+        for (const char **prov = p->provided_libs; *prov; ++prov) {
+            if (strcmp(*prov, name) == 0) {
+                return p;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+
+static void run_static_lib(struct static_lib *node, value env) {
+    if (node->state == STATIC_LIB_LOADED) {
+        return;
+    }
+
+    if (node->state == STATIC_LIB_LOADING) {
+        raise_error("circular library dependency during init: %s", node->provided_libs[0]);
+    }
+
+    node->state = STATIC_LIB_LOADING;
+    for (const char **r = node->required_libs; *r; ++r) {
+        struct static_lib *dep = find_static_lib(*r);
+
+        /* required_libs holds only names already confirmed to have an
+         * artifact (so for example (whisper core) is not there, or if
+         * in the future we have codeless libraries those will also be
+         * absent), so a miss here means a required library was not
+         * statically linked when it should have been. */
+        if (!dep) {
+            raise_error("static library dependency not linked: %s (required by %s)",
+                        *r, node->provided_libs[0]);
+        }
+
+        run_static_lib(dep, env);
+    }
+
+    register_library_env(node->provided_libs, env);
+    node->init(env);
+    node->state = STATIC_LIB_LOADED;
+}
+
 void run_static_libs(value env) {
-    for (struct static_lib *p = lib_list; p; p = p->next)
-        p->init(env);
+    for (struct static_lib *p = lib_list; p; p = p->next) {
+        run_static_lib(p, env);
+    }
 }
 
 /************ primcall functions ***********/

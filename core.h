@@ -602,8 +602,17 @@ extern value primcall_values(environment env, enum call_flags flags, int nargs, 
 #define STATIC_LIB_CONSTRUCTOR(fn) \
     __attribute__((constructor)) static void fn(void)
 
+enum static_lib_load_state {
+    STATIC_LIB_NOT_LOADED = 0,
+    STATIC_LIB_LOADING = 1,
+    STATIC_LIB_LOADED = 2,
+};
+
 struct static_lib {
+    const char **provided_libs;
+    const char **required_libs;
     value (*init)(value env);
+    enum static_lib_load_state state;
     struct static_lib *next;
 };
 
