@@ -244,6 +244,17 @@ struct object {
             size_t stack_size;
             jmp_buf jmp_buf;
             value ret;
+
+#ifdef DEBUG
+            /* the shadow stack at capture time. a longjmp past N frames
+             * skips their leave_proc calls, so without restoring this
+             * the trace keeps corpses of abandoned escapes, and
+             * re-entering deeper than the current depth drives the
+             * global stacktrace_size negative and writes at
+             * stacktrace[-1]. */
+            funcptr *stacktrace;
+            int stacktrace_size;
+#endif
         } continuation;
     };
 };

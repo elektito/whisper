@@ -838,6 +838,9 @@ static void gc_free_block(void *p, struct pool *heap) {
             break;
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
+#ifdef DEBUG
+            free(obj->continuation.stacktrace);
+#endif
             break;
         default:
             /* do nothing */
@@ -1845,6 +1848,25 @@ static void reinstate_stack(value cont) {
     memcpy(base,
            GET_OBJECT(cont)->continuation.stack,
            GET_OBJECT(cont)->continuation.stack_size);
+
+#ifdef DEBUG
+    /* restore the shadow stack to the depth and contents it had at capture.
+     * these are plain globals, so the memcpy above does not touch them.
+     *
+     * stacktrace_cap must not be restored. it describes how big the
+     * array currently is, which is a fact about the live allocation and
+     * not about the captured state. we never change the pointer itself
+     * so whatever we memcpy over the buffer is lower than or equal to
+     * cap. */
+    if (GET_OBJECT(cont)->continuation.stacktrace_size > 0) {
+        memcpy(stacktrace,
+               GET_OBJECT(cont)->continuation.stacktrace,
+               GET_OBJECT(cont)->continuation.stacktrace_size * sizeof(funcptr));
+    }
+
+    stacktrace_size = GET_OBJECT(cont)->continuation.stacktrace_size;
+#endif
+
     longjmp(GET_OBJECT(cont)->continuation.jmp_buf, 1);
 }
 
@@ -1892,12 +1914,31 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 
     struct object *obj = alloc_object();
     obj->type = OBJ_CONTINUATION;
+#ifdef DEBUG
+    /* before any allocation point, so a collection can never see the field
+     * holding the previous occupant's pointer and free() it twice. */
+    obj->continuation.stacktrace = NULL;
+    obj->continuation.stacktrace_size = 0;
+#endif
 
     void *cur_stack = &obj;
     size_t stack_size = stack_start - cur_stack;
     GET_OBJECT(obj)->continuation.stack = malloc(stack_size);
     memcpy(GET_OBJECT(obj)->continuation.stack, cur_stack, stack_size);
     GET_OBJECT(obj)->continuation.stack_size = stack_size;
+#ifdef DEBUG
+    if (stacktrace_size > 0) {
+        size_t trace_bytes = stacktrace_size * sizeof(funcptr);
+        GET_OBJECT(obj)->continuation.stacktrace = malloc(trace_bytes);
+        if (GET_OBJECT(obj)->continuation.stacktrace == NULL) {
+            panic("out of memory saving stack trace for continuation");
+        }
+
+        memcpy(GET_OBJECT(obj)->continuation.stacktrace, stacktrace, trace_bytes);
+    }
+
+    GET_OBJECT(obj)->continuation.stacktrace_size = stacktrace_size;
+#endif
     if (setjmp(GET_OBJECT(obj)->continuation.jmp_buf) == 0) {
         /* direct return */
 
