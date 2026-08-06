@@ -984,3 +984,155 @@
     (set! winders (cdr winders))
     (out)
     (apply values ans*)))
+
+;; exceptions
+
+(define exception-handlers '())
+
+;; error and error-object? shadow existing primcalls of the same name.
+;; whisper resolves identifiers in one top-to-bottom pass, so this
+;; define-record-type must come before anything below that calls
+;; error or error-object?, or those call sites bake in the old
+;; primcalls instead.
+(define-record-type <error>
+  (make-error message irritants kind)
+  error-object?
+  (message error-object-message)
+  (irritants error-object-irritants)
+  (kind error-object-kind))
+
+(record-set-print
+ <error>
+ (lambda (obj port)
+   (display "#<" port)
+   (unless (eq? (error-object-kind obj) 'normal)
+     (write (error-object-kind obj) port)
+     (display "-" port))
+   (display "error " port)
+   (write (error-object-message obj) port)
+   (for-each (lambda (irritant)
+               (display " " port)
+               (write irritant port))
+             (error-object-irritants obj))
+   (display ">" port)))
+
+(define (error msg . irritants)
+  (raise (make-error msg irritants 'normal)))
+
+(define (terminate-with-exception e)
+  (if (error-object? e)
+      (abort (error-object-message e))
+      (abort (format "~s" e))))
+
+(define (raise e)
+  (when (null? exception-handlers)
+    (terminate-with-exception e))
+
+  (let ((old-handlers exception-handlers)
+        (cur-handler #f))
+    (dynamic-wind
+        (lambda ()
+          (set! old-handlers exception-handlers)
+          (set! cur-handler (car exception-handlers))
+          (set! exception-handlers (cdr exception-handlers)))
+        (lambda ()
+          (cur-handler e)
+          (raise (error "an exception handler returned" 'wrapped-exception e)))
+        (lambda ()
+          (set! exception-handlers old-handlers)))))
+
+(define (raise-continuable e)
+  (when (null? exception-handlers)
+    (raise
+     (error "a continuable exception happened, but there was no error handler"
+            'wrapped-exception e)))
+
+  (let ((old-handlers exception-handlers)
+        (cur-handler #f))
+    (dynamic-wind
+        (lambda ()
+          (set! old-handlers exception-handlers)
+          (set! cur-handler (car exception-handlers))
+          (set! exception-handlers (cdr exception-handlers)))
+        (lambda ()
+          (cur-handler e))
+        (lambda ()
+          (set! exception-handlers old-handlers)))))
+
+(define (with-exception-handler handler thunk)
+  (dynamic-wind
+      (lambda ()
+        (set! exception-handlers
+              (cons handler exception-handlers)))
+      (lambda () (thunk))
+      (lambda ()
+        (set! exception-handlers (cdr exception-handlers)))))
+
+(define (file-error? obj)
+  (and (error-object? obj)
+       (eq? 'file (error-object-kind obj))))
+
+(define (file-error msg . irritants)
+  (raise (make-error msg irritants 'file)))
+
+(define-syntax guard
+  (syntax-rules ()
+    ((guard (var clause ...) e1 e2 ...)
+     ((call/cc
+       (lambda (guard-k)
+         (with-exception-handler
+          (lambda (condition)
+            ((call/cc
+              (lambda (handler-k)
+                (guard-k
+                 (lambda ()
+                   (let ((var condition))
+                     (guard-aux
+                      (handler-k
+                       (lambda ()
+                         (raise-continuable condition)))
+                      clause ...))))))))
+          (lambda ()
+            (call-with-values
+                (lambda () e1 e2 ...)
+              (lambda args
+                (guard-k
+                 (lambda ()
+                   (apply values args)))))))))))))
+
+(define-syntax guard-aux
+  (syntax-rules (else =>)
+    ((guard-aux reraise (else result1 result2 ...))
+     (begin result1 result2 ...))
+    ((guard-aux reraise (test => result))
+     (let ((temp test))
+       (if temp
+           (result temp)
+           reraise)))
+    ((guard-aux reraise (test => result)
+                clause1 clause2 ...)
+     (let ((temp test))
+       (if temp
+           (result temp)
+           (guard-aux reraise clause1 clause2 ...))))
+    ((guard-aux reraise (test))
+     (or test reraise))
+    ((guard-aux reraise (test) clause1 clause2 ...)
+     (let ((temp test))
+       (if temp
+           temp
+           (guard-aux reraise clause1 clause2 ...))))
+    ((guard-aux reraise (test result1 result2 ...))
+     (if test
+         (begin result1 result2 ...)
+         reraise))
+    ((guard-aux reraise
+                (test result1 result2 ...)
+                clause1 clause2 ...)
+     (if test
+         (begin result1 result2 ...)
+         (guard-aux reraise clause1 clause2 ...)))))
+
+(set-system-exception-handler
+ (lambda (msg)
+   (raise (make-error msg '() 'system))))

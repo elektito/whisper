@@ -161,18 +161,26 @@
 
 ;;;;;; repl ;;;;;;
 
+(define (report-repl-error e)
+  (display "error: " (current-error-port))
+  (if (error-object? e)
+      (display (error-object-message e) (current-error-port))
+      (write e (current-error-port)))
+  (newline (current-error-port)))
+
 (define (repl env)
   (display "> ")
   (let ((expr (read (current-input-port))))
     (unless (eof-object? expr)
-      (call-with-values (lambda () (eval expr env))
-        (lambda v
-          (let loop ((v v))
-            (unless (null? v)
-              (unless (void? (car v))
-                (write (car v))
-                (newline))
-              (loop (cdr v))))))
+      (guard (e (#t (report-repl-error e)))
+        (call-with-values (lambda () (eval expr env))
+          (lambda v
+            (let loop ((v v))
+              (unless (null? v)
+                (unless (void? (car v))
+                  (write (car v))
+                  (newline))
+                (loop (cdr v)))))))
       (repl env))))
 
 ;;;;;; main ;;;;;;

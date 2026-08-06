@@ -56,9 +56,12 @@
         eqv?
         error
         error-object?
+        error-object-irritants
+        error-object-message
         file-error?
         for-each
         get-output-string
+        guard
         if
         include
         input-port?
@@ -104,6 +107,8 @@
         procedure?
         quasiquote
         quote
+        raise
+        raise-continuable
         read-char
         read-line
         reverse
@@ -148,5 +153,6 @@
         vector-set!
         vector?
         when
+        with-exception-handler
         write-char
         zero?)

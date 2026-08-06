@@ -1880,3 +1880,119 @@
           (set! log (cons (step) log))
           (set! log (cons (step) log))
           (reverse log)))
+
+;; exceptions
+
+;; with-exception-handler's handler escapes via a call/cc captured
+;; before with-exception-handler was entered
+(equal? '(handled foo)
+        (call/cc (lambda (k)
+                   (with-exception-handler
+                    (lambda (e)
+                      (k (list 'handled e)))
+                    (lambda ()
+                      (raise 'foo))))))
+
+;; raise-continuable's handler returns normally, and its value becomes
+;; the value of the raise-continuable call
+(equal? '(back handled foo)
+        (with-exception-handler
+         (lambda (e)
+           (list 'handled e))
+         (lambda ()
+           (cons 'back (raise-continuable 'foo)))))
+
+;; nested with-exception-handler: raise dispatches to the innermost
+;; handler, which itself is called with the outer handler still
+;; installed (the outer handler is not active while the inner one runs)
+(let* ((results '())
+       (add (lambda (x)
+              (set! results (cons x results)))))
+  (add (call/cc
+        (lambda (k)
+          (with-exception-handler
+           (lambda (e)
+             (add 'd)
+             (k 'handled))
+           (lambda ()
+             (with-exception-handler
+              (lambda (e)
+                (add 'c))
+              (lambda ()
+                (add 'a)
+                (raise 'foo)
+                (add 'b))))))))
+  (equal? '(handled d c a) results))
+
+;; a handler that itself raises dispatches to the next handler out,
+;; not back to itself
+(let* ((results '())
+       (add (lambda (x)
+              (set! results (cons x results)))))
+  (add (call/cc
+        (lambda (k)
+          (with-exception-handler
+           (lambda (e)
+             (add 'd)
+             (add e)
+             (k 'handled))
+           (lambda ()
+             (with-exception-handler
+              (lambda (e)
+                (add 'c)
+                (add e)
+                (raise 'bar))
+              (lambda ()
+                (add 'a)
+                (raise 'foo)
+                (add 'b))))))))
+  (equal? '(handled bar d foo c a) results))
+
+;; a native runtime error (car of non-pair) reaches an installed
+;; with-exception-handler the same way a user raise does
+(call/cc (lambda (k)
+           (with-exception-handler
+            (lambda (e)
+              (k #t))
+            (lambda ()
+              (car '())
+              #f))))
+
+;; with-exception-handler's handler is only consulted if the body
+;; actually raises
+(= 200 (with-exception-handler
+        (lambda (e) 100)
+        (lambda () 200)))
+
+;; guard: the matching clause's => result becomes guard's value
+(= 42
+   (guard (condition
+           ((assq 'a condition) => cdr)
+           ((assq 'b condition)))
+          (raise (list (cons 'a 42)))))
+
+(equal? '(b . 23)
+        (guard (condition
+                ((assq 'a condition) => cdr)
+                ((assq 'b condition)))
+               (raise (list (cons 'b 23)))))
+
+;; guard: no clause matches, else fires
+(equal? 'foo
+        (guard (condition
+                ((assq 'a condition) => cdr)
+                ((assq 'b condition))
+                (else 'foo))
+               (raise (list (cons 'c 100)))))
+
+;; guard: no clause matches and there is no else, so guard re-raises to
+;; the next handler out
+(= 200
+   (call/cc (lambda (k)
+     (with-exception-handler
+      (lambda (e) (k (+ 100 (cdar e))))
+      (lambda ()
+        (guard (condition
+                ((assq 'a condition) => cdr)
+                ((assq 'b condition)))
+               (raise (list (cons 'c 100)))))))))

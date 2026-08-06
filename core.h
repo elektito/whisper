@@ -492,10 +492,7 @@ extern value primcall_display(environment env, enum call_flags flags, int nargs,
 extern value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_error(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_error_object_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_exit(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_file_error_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gensym(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_get_environment_variable(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...);

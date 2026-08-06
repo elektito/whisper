@@ -2326,29 +2326,6 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
-value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("error needs a single argument"); }
-    init_args();
-    value msg = next_arg();
-    free_args();
-    if (!IS_STRING(msg)) { raise_error("error argument is not a string"); }
-    fprintf(stderr, "error: ");
-    _display(msg, current_error_port);
-    fprintf(stderr, "\n");
-    print_stacktrace();
-    cleanup();
-    exit(1);
-    return VOID;
-}
-
-value primcall_error_object_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("error-object? needs a single argument"); }
-    init_args();
-    value v = next_arg();
-    free_args();
-    return BOOL(IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR);
-}
-
 value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
     init_args();
@@ -2368,14 +2345,6 @@ value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     }
 
     return VOID;
-}
-
-value primcall_file_error_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("file-error? needs a single argument"); }
-    init_args();
-    value v = next_arg();
-    free_args();
-    return BOOL(IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR && GET_OBJECT(v)->error.type == ERR_FILE);
 }
 
 value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
