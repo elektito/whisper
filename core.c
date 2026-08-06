@@ -1992,7 +1992,7 @@ value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
  * variables (base, cont) that the following longjmp still reads. When the
  * continuation is invoked from a shallower frame than the capture point,
  * recurse to push the stack pointer down until it clears base. */
-__attribute__((noinline))
+__attribute__((noinline, no_sanitize("address")))
 static void reinstate_stack(value cont) {
     char *base = (char *) stack_start - GET_OBJECT(cont)->continuation.stack_size;
     char probe;
@@ -2066,6 +2066,7 @@ value resume_continuation(environment env, enum call_flags flags, int nargs, ...
     return VOID; /* not reached; reinstate_stack longjmps away */
 }
 
+__attribute__((no_sanitize("address")))
 value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("call/cc needs a single argument"); }
     init_args();
