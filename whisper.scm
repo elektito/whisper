@@ -704,7 +704,7 @@
           (display "    stack_start = &ss;\n" port)
           (display "    init_memory();\n" port)
           (display "    init_symbols();\n" port)
-          (display "    global_env = make_global_env();\n" port)
+          (display "    global_env = get_global_env();\n" port)
           (display "    register_globals();\n" port)
           (display "    init_ports();\n" port)
           (display "    run_static_libs(global_env);\n" port)

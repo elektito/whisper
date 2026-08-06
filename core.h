@@ -420,14 +420,14 @@ extern void register_library_env(const char **provided, value home);
 extern void env_delegate(value env, value sym, value target);
 
 /* env_ref's ht == NULL branch, factored out so generated executable
- * code (which always has a NULL-hash-table global_env, see
- * make_global_env) can call it directly instead of through env_ref. GCC
- * does not inline this at its call sites (it's too big once raise_error is
- * expanded), but being static still lets it be called directly instead
- * of through the PLT indirection a plain extern core.c function needs
- * in a PIE binary (which our binary seems to be by default, at least on
- * a modern Linux system this was tested on), which is where the win
- * actually comes from.
+ * code (which always has a NULL-hash-table global_env can call it
+ * directly instead of through env_ref. GCC does not inline this at its
+ * call sites (it's too big once raise_error is expanded), but being
+ * static still lets it be called directly instead of through the PLT
+ * indirection a plain extern core.c function needs in a PIE binary
+ * (which our binary seems to be by default, at least on a modern Linux
+ * system this was tested on), which is where the win actually comes
+ * from.
  *
  * Only valid when the environment is known to never have a hash table
  * attached, which does not hold for a library's global_env, since that
@@ -460,7 +460,7 @@ static value global_env_ref(value sym) {
 extern void init_symbols(void);
 extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
-extern value make_global_env(void);
+extern value get_global_env(void);
 
 extern void enter_proc(funcptr func);
 extern void leave_proc(void);

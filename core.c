@@ -21,6 +21,8 @@ static struct object current_error_port;
 
 static value system_exception_handler = NULL;
 
+static value global_env_singleton = NULL;
+
 /* both in units of allocations (object count), not bytes */
 static size_t allocations_since_gc = 0;
 static size_t gc_threshold = POOL_SIZE;
@@ -929,6 +931,7 @@ static void gc_mark(void) {
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
     gc_recurse(system_exception_handler);
+    gc_recurse(global_env_singleton);
 
     gc_recurse(pending_tail_call.closure);
     for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
@@ -1739,11 +1742,15 @@ value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
     return sym;
 }
 
-value make_global_env(void) {
-    struct object *obj = malloc(sizeof(struct object));
-    obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = NULL;
-    return OBJECT(obj);
+value get_global_env(void) {
+    if (!global_env_singleton) {
+        struct object *obj = alloc_object();
+        obj->type = OBJ_ENVIRONMENT;
+        obj->environment.hash_table = NULL;
+        global_env_singleton = OBJECT(obj);
+    }
+
+    return global_env_singleton;
 }
 
 /************ port init functions ***********/
