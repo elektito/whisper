@@ -407,14 +407,13 @@ extern void env_define(value e, value sym, value val, enum sym_kind kind);
 extern value env_ref(value e, value sym);
 extern value make_environment(void);
 
-/* find the canonical environment for an artifact, by the library names
- * it provides */
-extern value find_library_env(const char **provided);
+/* returns 1 when the library is already registered, otherwise 0 */
+extern int is_library_registered(const char **provided);
 
-/* register home environment under every name in provided. raises if a
- * name is already registered, which means two artifacts (.so/.a) claim
- * to provide it. */
-extern void register_library_env(const char **provided, value home);
+/* register the given libraries as already loaded. raises if a name is
+ * already registered, which means two artifacts (.so/.a) claim to
+ * provide it. */
+extern void register_library(const char **provided);
 
 /* bind sym, in env, to an entry that delegates lookups to target */
 extern void env_delegate(value env, value sym, value target);

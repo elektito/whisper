@@ -1665,56 +1665,50 @@ value env_ref(value e, value sym) {
     }
 }
 
-static const char lib_env_prefix[] = "##lib-env-";
+static const char lib_registry_prefix[] = "##lib-loaded-";
 
-static struct symbol *lib_env_registry_symbol(const char *name) {
-    size_t prefix_len = sizeof(lib_env_prefix) - 1;
+static struct symbol *lib_registry_symbol(const char *name) {
+    size_t prefix_len = sizeof(lib_registry_prefix) - 1;
     size_t name_len = strlen(name);
     char *key = malloc(prefix_len + name_len);
-    memcpy(key, lib_env_prefix, prefix_len);
+    memcpy(key, lib_registry_prefix, prefix_len);
     memcpy(key + prefix_len, name, name_len);
     value sym = extend_global_env(key, prefix_len + name_len, sym_unbound);
     free(key);
     return GET_SYMBOL(sym);
 }
 
-value find_library_env(const char **provided) {
-    /* lookup for the canonical environment for each provided library
-     * name, by looking at a symbol with the ##lib-env- prefix, so the
-     * (foo bar) library is looked up in symbol "##lib-env-(foo bar)"
-     * value slot. */
-    value home = NULL;
+int is_library_registered(const char **provided) {
+    /* looks up a symbol with the ##lib-loaded- prefix for each provided
+     * library name, so the (foo bar) library is checked at symbol
+     * "##lib-loaded-(foo bar)". */
+    int registered = -1;
     for (const char **p = provided; *p; ++p) {
-        struct symbol *s = lib_env_registry_symbol(*p);
-        if (s->kind == sym_unbound) {
-            if (home) {
-                panic("internal error: library partially registered: %s", *p);
-            }
-            continue;
+        struct symbol *s = lib_registry_symbol(*p);
+        int result = s->kind != sym_unbound;
+        if (registered != -1 && registered != result) {
+            panic("internal error: library partially registered: %s", *p);
         }
-
-        if (home && home != s->value) {
-            panic("internal error: inconsistent library registration: %s", *p);
-        }
-        home = s->value;
+        registered = result;
     }
-    return home;
+
+    return registered == 1;
 }
 
-void register_library_env(const char **provided, value home) {
+void register_library(const char **provided) {
     /* check every name before writing any of them, so a conflict on a
      * later name never leaves earlier names */
     for (const char **p = provided; *p; ++p) {
-        struct symbol *s = lib_env_registry_symbol(*p);
+        struct symbol *s = lib_registry_symbol(*p);
         if (s->kind != sym_unbound) {
             raise_error("library already registered: %s", *p);
         }
     }
 
     for (const char **p = provided; *p; ++p) {
-        struct symbol *s = lib_env_registry_symbol(*p);
+        struct symbol *s = lib_registry_symbol(*p);
         s->kind = sym_value;
-        s->value = home;
+        s->value = TRUE;
     }
 }
 
@@ -1827,7 +1821,7 @@ static void run_static_lib(struct static_lib *node, value env) {
         run_static_lib(dep, env);
     }
 
-    register_library_env(node->provided_libs, env);
+    register_library(node->provided_libs);
     node->init(env);
     node->state = STATIC_LIB_LOADED;
 }
