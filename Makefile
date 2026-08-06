@@ -50,11 +50,11 @@ test: $(CURRENT) libs
 	WHISPER_LIBRARY_PATH=lib ./$(CURRENT) test.scm -t -r -L lib
 
 matrix: $(CURRENT) libs
-	./$(CURRENT) main.scm -c -o /tmp/b.c
+	./$(CURRENT) main.scm -c -o /tmp/b.c -L lib
 	@for o in 0 1 2 3; do \
 		echo "--- O$$o ---"; \
-		gcc -O$$o -Wl,-s -I. -o /tmp/b.$$o /tmp/b.c core.c \
-		&& /tmp/b.$$o main.scm -o /tmp/out.$$o \
+		gcc -O$$o -Wl,-s -I. -ldl -Wl,--export-dynamic -o /tmp/b.$$o /tmp/b.c -Wl,--whole-archive lib/whisper.a -Wl,--no-whole-archive core.c \
+		&& /tmp/b.$$o main.scm -o /tmp/out.$$o -L lib \
 		&& WHISPER_LIBRARY_PATH=lib /tmp/b.$$o test.scm -t -r -L lib || exit 1; \
 	done
 
