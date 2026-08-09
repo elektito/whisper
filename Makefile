@@ -70,7 +70,7 @@ lib/eval.manifest lib/eval.so lib/eval.a &: $(CURRENT) lib/scheme-eval.sld $(COM
 libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest
 
 clean:
-	rm -f $(CURRENT) stage0 stage1 libwhisper.a
+	rm -rf $(CURRENT) stage0 stage1 libwhisper.a stage0-lib stage1-lib stage2-lib
 	rm -f lib/whisper.manifest lib/whisper.so lib/whisper.a
 	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
 	rm -f lib/eval.manifest lib/eval.so lib/eval.a
