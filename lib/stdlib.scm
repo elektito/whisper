@@ -1156,3 +1156,49 @@
        ()
        ((param value) ...)
        body))))
+
+;; io
+
+(define current-input-port (make-parameter (stdin)))
+(define current-output-port (make-parameter (stdout)))
+(define current-error-port (make-parameter (stderr)))
+
+(define display
+  (case-lambda
+   ((obj) (%display obj (current-output-port)))
+   ((obj port) (%display obj port))))
+
+(define newline
+  (case-lambda
+   (() (%newline (current-output-port)))
+   ((port) (%newline port))))
+
+(define peek-char
+  (case-lambda
+   (() (%peek-char (current-input-port)))
+   ((port) (%peek-char port))))
+
+(define read-char
+  (case-lambda
+   (() (%read-char (current-input-port)))
+   ((port) (%read-char port))))
+
+(define read-line
+  (case-lambda
+   (() (%read-line (current-input-port)))
+   ((port) (%read-line port))))
+
+(define unread-char
+  (case-lambda
+   ((ch) (%unread-char ch (current-input-port)))
+   ((ch port) (%unread-char ch port))))
+
+(define write
+  (case-lambda
+   ((obj) (%write obj (current-output-port)))
+   ((obj port) (%write obj port))))
+
+(define write-char
+  (case-lambda
+   ((ch) (%write-char ch (current-output-port)))
+   ((ch port) (%write-char ch port))))
