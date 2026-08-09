@@ -974,11 +974,6 @@
 
 (define exception-handlers '())
 
-;; error and error-object? shadow existing primcalls of the same name.
-;; whisper resolves identifiers in one top-to-bottom pass, so this
-;; define-record-type must come before anything below that calls
-;; error or error-object?, or those call sites bake in the old
-;; primcalls instead.
 (define-record-type <error>
   (make-error message irritants kind)
   error-object?
