@@ -757,21 +757,6 @@
    ((v fill start) (%vector-fill! v fill start (vector-length v)))
    ((v fill start end) (%vector-fill! v fill start end))))
 
-(define (typeof x)
-  (cond ((number? x) 'number)
-        ((string? x) 'string)
-        ((pair? x) 'pair)
-        ((vector? x) 'vector)
-        ((symbol? x) 'symbol)
-        ((procedure? x) 'procedure?)
-        ((port? x) 'port)
-        ((boolean? x) 'boolean)
-        ((char? x) 'char)
-        ((eof-object? x) 'eof-object)
-        ((error-object? x) 'error-object)
-        ((wrapped? x) 'wrapped)
-        (else 'other)))
-
 ;; record types
 
 ;; adapted from SRFI 9
