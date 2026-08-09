@@ -85,6 +85,7 @@
         list-tail
         list?
         make-list
+        make-parameter
         make-string
         make-vector
         map
@@ -101,6 +102,7 @@
         open-output-string
         or
         pair?
+        parameterize
         peek-char
         port?
         positive?

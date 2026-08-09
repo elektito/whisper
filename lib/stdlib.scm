@@ -1136,3 +1136,43 @@
 (set-system-exception-handler
  (lambda (msg)
    (raise (make-error msg '() 'system))))
+
+;; parameters
+
+(define make-parameter
+  (case-lambda
+   ((init) (make-parameter init (lambda (x) x)))
+   ((init converter) (let ((value (converter init)))
+                       (case-lambda
+                        (() value)
+                        ((new-value) (set! value (converter new-value)))
+                        ((new-value dont-convert) (if dont-convert
+                                                      (set! value new-value)
+                                                      (set! value (converter new-value)))))))))
+
+(define-syntax parameterize
+  (syntax-rules ()
+    ((parameterize ("step")
+       ((param value p old new) ...)
+       ()
+       body)
+     (let ((p param) ...)
+       (let ((old (p)) ...
+             (new value) ...)
+         (dynamic-wind
+             (lambda () (p new) ...)
+             (lambda () . body)
+             (lambda () (p old #t) ...)))))
+    ((parameterize ("step")
+       args
+       ((param value) . rest)
+       body)
+     (parameterize ("step")
+       ((param value p old new) . args)
+       rest
+       body))
+    ((parameterize ((param value) ...) . body)
+     (parameterize ("step")
+       ()
+       ((param value) ...)
+       body))))
