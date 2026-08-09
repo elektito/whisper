@@ -15,11 +15,13 @@ static uint64_t gensym_counter;
 static int n_wrapped_print_procs = 0;
 static struct kind_proc *wrapped_print_procs = NULL;
 
-static struct object current_input_port;
-static struct object current_output_port;
-static struct object current_error_port;
+static value stdin_port;
+static value stdout_port;
+static value stderr_port;
 
 static value system_exception_handler = NULL;
+
+static value global_env_singleton = NULL;
 
 /* both in units of allocations (object count), not bytes */
 static size_t allocations_since_gc = 0;
@@ -163,7 +165,6 @@ void raise_error(const char *fmt, ...) {
     va_end(ap);
 
     char *buf = malloc(len + 1);
-    if (buf == NULL) { panic("out of memory formatting exception message"); }
     va_start(ap, fmt);
     vsnprintf(buf, len + 1, fmt, ap);
     va_end(ap);
@@ -929,6 +930,12 @@ static void gc_mark(void) {
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
+    gc_recurse(system_exception_handler);
+    gc_recurse(global_env_singleton);
+    gc_recurse(stdin_port);
+    gc_recurse(stdout_port);
+    gc_recurse(stderr_port);
+
     gc_recurse(pending_tail_call.closure);
     for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
       gc_recurse(pending_tail_call.args[i]);
@@ -1661,56 +1668,50 @@ value env_ref(value e, value sym) {
     }
 }
 
-static const char lib_env_prefix[] = "##lib-env-";
+static const char lib_registry_prefix[] = "##lib-loaded-";
 
-static struct symbol *lib_env_registry_symbol(const char *name) {
-    size_t prefix_len = sizeof(lib_env_prefix) - 1;
+static struct symbol *lib_registry_symbol(const char *name) {
+    size_t prefix_len = sizeof(lib_registry_prefix) - 1;
     size_t name_len = strlen(name);
     char *key = malloc(prefix_len + name_len);
-    memcpy(key, lib_env_prefix, prefix_len);
+    memcpy(key, lib_registry_prefix, prefix_len);
     memcpy(key + prefix_len, name, name_len);
     value sym = extend_global_env(key, prefix_len + name_len, sym_unbound);
     free(key);
     return GET_SYMBOL(sym);
 }
 
-value find_library_env(const char **provided) {
-    /* lookup for the canonical environment for each provided library
-     * name, by looking at a symbol with the ##lib-env- prefix, so the
-     * (foo bar) library is looked up in symbol "##lib-env-(foo bar)"
-     * value slot. */
-    value home = NULL;
+int is_library_registered(const char **provided) {
+    /* looks up a symbol with the ##lib-loaded- prefix for each provided
+     * library name, so the (foo bar) library is checked at symbol
+     * "##lib-loaded-(foo bar)". */
+    int registered = -1;
     for (const char **p = provided; *p; ++p) {
-        struct symbol *s = lib_env_registry_symbol(*p);
-        if (s->kind == sym_unbound) {
-            if (home) {
-                panic("internal error: library partially registered: %s", *p);
-            }
-            continue;
+        struct symbol *s = lib_registry_symbol(*p);
+        int result = s->kind != sym_unbound;
+        if (registered != -1 && registered != result) {
+            panic("internal error: library partially registered: %s", *p);
         }
-
-        if (home && home != s->value) {
-            panic("internal error: inconsistent library registration: %s", *p);
-        }
-        home = s->value;
+        registered = result;
     }
-    return home;
+
+    return registered == 1;
 }
 
-void register_library_env(const char **provided, value home) {
+void register_library(const char **provided) {
     /* check every name before writing any of them, so a conflict on a
      * later name never leaves earlier names */
     for (const char **p = provided; *p; ++p) {
-        struct symbol *s = lib_env_registry_symbol(*p);
+        struct symbol *s = lib_registry_symbol(*p);
         if (s->kind != sym_unbound) {
             raise_error("library already registered: %s", *p);
         }
     }
 
     for (const char **p = provided; *p; ++p) {
-        struct symbol *s = lib_env_registry_symbol(*p);
+        struct symbol *s = lib_registry_symbol(*p);
         s->kind = sym_value;
-        s->value = home;
+        s->value = TRUE;
     }
 }
 
@@ -1738,35 +1739,45 @@ value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
     return sym;
 }
 
-value make_global_env(void) {
-    struct object *obj = malloc(sizeof(struct object));
-    obj->type = OBJ_ENVIRONMENT;
-    obj->environment.hash_table = NULL;
-    return OBJECT(obj);
+value get_global_env(void) {
+    if (!global_env_singleton) {
+        struct object *obj = alloc_object();
+        obj->type = OBJ_ENVIRONMENT;
+        obj->environment.hash_table = NULL;
+        global_env_singleton = OBJECT(obj);
+    }
+
+    return global_env_singleton;
 }
 
 /************ port init functions ***********/
 
 void init_ports() {
-    current_input_port.type = OBJ_PORT;
-    current_input_port.port.direction = PORT_DIR_READ;
-    current_input_port.port.fp = stdin;
-    current_input_port.port.read_char = file_read_char;
-    current_input_port.port.peek_char = file_peek_char;
-    current_input_port.port.read_line = file_read_line;
-    current_input_port.port.unread_char = file_unread_char;
+    struct object *in = alloc_object();
+    in->type = OBJ_PORT;
+    in->port.direction = PORT_DIR_READ;
+    in->port.fp = stdin;
+    in->port.read_char = file_read_char;
+    in->port.peek_char = file_peek_char;
+    in->port.read_line = file_read_line;
+    in->port.unread_char = file_unread_char;
+    stdin_port = OBJECT(in);
 
-    current_output_port.type = OBJ_PORT;
-    current_output_port.port.direction = PORT_DIR_WRITE;
-    current_output_port.port.fp = stdout;
-    current_output_port.port.printf = file_printf;
-    current_output_port.port.write_char = file_write_char;
+    struct object *out = alloc_object();
+    out->type = OBJ_PORT;
+    out->port.direction = PORT_DIR_WRITE;
+    out->port.fp = stdout;
+    out->port.printf = file_printf;
+    out->port.write_char = file_write_char;
+    stdout_port = OBJECT(out);
 
-    current_error_port.type = OBJ_PORT;
-    current_error_port.port.direction = PORT_DIR_WRITE;
-    current_error_port.port.fp = stderr;
-    current_error_port.port.printf = file_printf;
-    current_error_port.port.write_char = file_write_char;
+    struct object *err = alloc_object();
+    err->type = OBJ_PORT;
+    err->port.direction = PORT_DIR_WRITE;
+    err->port.fp = stderr;
+    err->port.printf = file_printf;
+    err->port.write_char = file_write_char;
+    stderr_port = OBJECT(err);
 }
 
 /************ static library registration ***********/
@@ -1819,7 +1830,7 @@ static void run_static_lib(struct static_lib *node, value env) {
         run_static_lib(dep, env);
     }
 
-    register_library_env(node->provided_libs, env);
+    register_library(node->provided_libs);
     node->init(env);
     node->state = STATIC_LIB_LOADED;
 }
@@ -1981,7 +1992,7 @@ value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
  * variables (base, cont) that the following longjmp still reads. When the
  * continuation is invoked from a shallower frame than the capture point,
  * recurse to push the stack pointer down until it clears base. */
-__attribute__((noinline))
+__attribute__((noinline, no_sanitize("address")))
 static void reinstate_stack(value cont) {
     char *base = (char *) stack_start - GET_OBJECT(cont)->continuation.stack_size;
     char probe;
@@ -2055,6 +2066,7 @@ value resume_continuation(environment env, enum call_flags flags, int nargs, ...
     return VOID; /* not reached; reinstate_stack longjmps away */
 }
 
+__attribute__((no_sanitize("address")))
 value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("call/cc needs a single argument"); }
     init_args();
@@ -2239,17 +2251,17 @@ value primcall_command_line(environment env, enum call_flags flags, int nargs, .
 
 value primcall_current_error_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("current-error-port needs no arguments"); }
-    return OBJECT(&current_error_port);
+    return stderr_port;
 }
 
 value primcall_current_input_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("current-input-port needs no arguments"); }
-    return OBJECT(&current_input_port);
+    return stdin_port;
 }
 
 value primcall_current_output_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("current-output-port needs no arguments"); }
-    return OBJECT(&current_output_port);
+    return stdout_port;
 }
 
 value primcall_delete_file(environment env, enum call_flags flags, int nargs, ...) {
@@ -2274,11 +2286,23 @@ value primcall_delete_file(environment env, enum call_flags flags, int nargs, ..
     return VOID;
 }
 
+value primcall_percent_display(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%display needs two arguments"); }
+    init_args();
+    value v = next_arg();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port)) { raise_error("writing to non-port"); }
+    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("writing to non-output port"); }
+    _display(v, port);
+    return VOID;
+}
+
 value primcall_display(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { raise_error("display needs one or two arguments"); }
     init_args();
     value v = next_arg();
-    value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
+    value port = nargs == 1 ? stdout_port : next_arg();
     free_args();
     if (!IS_PORT(port)) { raise_error("writing to non-port"); }
     if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("writing to non-output port"); }
@@ -2315,29 +2339,6 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
-value primcall_error(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("error needs a single argument"); }
-    init_args();
-    value msg = next_arg();
-    free_args();
-    if (!IS_STRING(msg)) { raise_error("error argument is not a string"); }
-    fprintf(stderr, "error: ");
-    _display(msg, OBJECT(&current_error_port));
-    fprintf(stderr, "\n");
-    print_stacktrace();
-    cleanup();
-    exit(1);
-    return VOID;
-}
-
-value primcall_error_object_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("error-object? needs a single argument"); }
-    init_args();
-    value v = next_arg();
-    free_args();
-    return BOOL(IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR);
-}
-
 value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
     init_args();
@@ -2357,14 +2358,6 @@ value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     }
 
     return VOID;
-}
-
-value primcall_file_error_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("file-error? needs a single argument"); }
-    init_args();
-    value v = next_arg();
-    free_args();
-    return BOOL(IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR && GET_OBJECT(v)->error.type == ERR_FILE);
 }
 
 value primcall_gensym(environment env, enum call_flags flags, int nargs, ...) {
@@ -2519,10 +2512,20 @@ value primcall_make_vector(environment env, enum call_flags flags, int nargs, ..
     return make_vector(GET_FIXNUM(n), fill);
 }
 
+value primcall_percent_newline(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%newline needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("%newline argument is not an output port"); }
+    GET_OBJECT(port)->port.write_char(port, CHAR('\n'));
+    return VOID;
+}
+
 value primcall_newline(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("newline needs zero or one argument"); }
     init_args();
-    value port = nargs == 1 ? next_arg() : OBJECT(&current_output_port);
+    value port = nargs == 1 ? next_arg() : stdout_port;
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("newline argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, CHAR('\n'));
@@ -2645,10 +2648,19 @@ value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(IS_PAIR(x));
 }
 
+value primcall_percent_peek_char(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%peek-char needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%peek-char argument is not an input port"); }
+    return GET_OBJECT(port)->port.peek_char(port);
+}
+
 value primcall_peek_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("peek-char needs zero or one argument"); }
     init_args();
-    value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
+    value port = nargs == 1 ? next_arg() : stdin_port;
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("peek-char argument is not an input port"); }
     return GET_OBJECT(port)->port.peek_char(port);
@@ -2670,19 +2682,37 @@ value primcall_procedure_q(environment env, enum call_flags flags, int nargs, ..
     return BOOL(IS_CLOSURE(v));
 }
 
+value primcall_percent_read_char(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%read-char needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%read-char argument is not an input port"); }
+    return GET_OBJECT(port)->port.read_char(port);
+}
+
 value primcall_read_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("read-char needs zero or one argument"); }
     init_args();
-    value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
+    value port = nargs == 1 ? next_arg() : stdin_port;
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("read-char argument is not an input port"); }
     return GET_OBJECT(port)->port.read_char(port);
 }
 
+value primcall_percent_read_line(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%read-line needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%read-line argument is not an input port"); }
+    return GET_OBJECT(port)->port.read_line(port);
+}
+
 value primcall_read_line(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("read-line needs zero or one argument"); }
     init_args();
-    value port = nargs == 1 ? next_arg() : OBJECT(&current_input_port);
+    value port = nargs == 1 ? next_arg() : stdin_port;
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("read-line argument is not an input port"); }
     return GET_OBJECT(port)->port.read_line(port);
@@ -2735,6 +2765,21 @@ value primcall_set_system_exception_handler(environment env, enum call_flags fla
     system_exception_handler = proc;
 
     return VOID;
+}
+
+value primcall_stderr(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("stderr needs no arguments"); }
+    return stderr_port;
+}
+
+value primcall_stdin(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("stdin needs no arguments"); }
+    return stdin_port;
+}
+
+value primcall_stdout(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("stdout needs no arguments"); }
+    return stdout_port;
 }
 
 value primcall_string_to_number(environment env, enum call_flags flags, int nargs, ...) {
@@ -2934,12 +2979,25 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     return FIXNUM(ret);
 }
 
+value primcall_percent_unread_char(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%unread-char needs two arguments"); }
+    init_args();
+    value ch = next_arg();
+    if (!IS_CHAR(ch)) { raise_error("%unread-char first argument is not a character"); }
+    value port = next_arg();
+    if (!IS_PORT(port)) { raise_error("%unread-char second argument is not a port"); }
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%unread-char argument is not an input port"); }
+    GET_OBJECT(port)->port.unread_char(port, ch);
+    return VOID;
+}
+
 value primcall_unread_char(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { raise_error("unread-char needs one or two arguments"); }
     init_args();
     value ch = next_arg();
     if (!IS_CHAR(ch)) { raise_error("unread-char first argument is not a character"); }
-    value port = nargs == 2 ? next_arg() : OBJECT(&current_input_port);
+    value port = nargs == 2 ? next_arg() : stdin_port;
     if (!IS_PORT(port)) { raise_error("unread-char second argument is not a port"); }
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("unread-char argument is not an input port"); }
@@ -3087,14 +3145,37 @@ value primcall_wrapped_set_print(environment env, enum call_flags flags, int nar
     return VOID;
 }
 
+value primcall_percent_write(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%write needs one or two arguments"); }
+    init_args();
+    value v = next_arg();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("%write second argument is not an output port"); }
+    _write(v, port);
+    return VOID;
+}
+
 value primcall_write(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { raise_error("write needs one or two arguments"); }
     init_args();
     value v = next_arg();
-    value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
+    value port = nargs == 1 ? stdout_port : next_arg();
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("write second argument is not an output port"); }
     _write(v, port);
+    return VOID;
+}
+
+value primcall_percent_write_char(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%write-char needs two arguments"); }
+    init_args();
+    value ch = next_arg();
+    value port = next_arg();
+    free_args();
+    if (!IS_CHAR(ch)) { raise_error("%write-char first argument is not a char"); }
+    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("%write-char second argument is not an output port"); }
+    GET_OBJECT(port)->port.write_char(port, ch);
     return VOID;
 }
 
@@ -3102,7 +3183,7 @@ value primcall_write_char(environment env, enum call_flags flags, int nargs, ...
     if (nargs != 1 && nargs != 2) { raise_error("write-char needs one or two arguments"); }
     init_args();
     value ch = next_arg();
-    value port = nargs == 1 ? OBJECT(&current_output_port) : next_arg();
+    value port = nargs == 1 ? stdout_port : next_arg();
     free_args();
     if (!IS_CHAR(ch)) { raise_error("write-char first argument is not a char"); }
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("write-char second argument is not an output port"); }
