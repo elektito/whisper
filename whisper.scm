@@ -1362,7 +1362,7 @@
       ;; assign results
       (let loop ((bindings (cadr form)) (varnums init-varnums))
         (unless (null? bindings)
-          (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n"
+          (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n"
                     (mangle-name (caar bindings)) (car varnums))
           (loop (cdr bindings) (cdr varnums))))
 
@@ -1406,7 +1406,7 @@
       (unless (null? bindings)
         (let ((varnum (compile-letrec-init func (+ 1 indent) (identifier-binding (caar bindings))
                                             (cadar bindings) eligible-bindings)))
-          (gen-code func (+ 1 indent) "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-unique-name (caar bindings)) varnum))
+          (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n" (mangle-unique-name (caar bindings)) varnum))
         (loop (cdr bindings))))
 
     ;; compile the body
@@ -1484,10 +1484,10 @@
        (gen-code func indent "env_define(global_env, symb~a, x~a, sym_value);\n" (mangle-unique-name (cadr form)) value-varnum))
       ((lexical)
        (if (eq? (binding-owner b) func)
-           (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, ~a, x~a);\n" (mangle-unique-name (cadr form)) value-varnum)
+           (gen-code func indent "GET_OBJECT(~a)->box.value = x~a;\n" (mangle-unique-name (cadr form)) value-varnum)
            (let ((idx (or (func-find-freevar func b)
                           (func-add-freevar func b))))
-             (gen-code func indent "primcall_set_box_b(NULL, NO_CALL_FLAGS, 2, envget(env, ~a), x~a);\n" idx value-varnum))))
+             (gen-code func indent "GET_OBJECT(envget(env, ~a))->box.value = x~a;\n" idx value-varnum))))
       ((alias primcall)
        ;; imported names should not be mutable. this is important for
        ;; certain optimizations, like eliminating environment lookups
@@ -1593,12 +1593,12 @@
       ((lexical)
        (if (eq? (binding-owner b) func)
            (if (binding-mutated? b)
-               (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, ~a);\n" varnum (mangle-unique-name form))
+               (gen-code func indent "value x~a = GET_OBJECT(~a)->box.value;\n" varnum (mangle-unique-name form))
                (gen-code func indent "value x~a = ~a;\n" varnum (mangle-unique-name form)))
            (let ((idx (or (func-find-freevar func b)
                           (func-add-freevar func b))))
              (if (binding-mutated? b)
-                 (gen-code func indent "value x~a = primcall_unbox(NULL, NO_CALL_FLAGS, 1, envget(env, ~a));\n" varnum idx)
+                 (gen-code func indent "value x~a = GET_OBJECT(envget(env, ~a))->box.value;\n" varnum idx)
                  (gen-code func indent "value x~a = envget(env, ~a);\n" varnum idx)))))
       ((global alias)
        (intern (func-program func) (binding-meaning b))
