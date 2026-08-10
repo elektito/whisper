@@ -1453,6 +1453,41 @@
   (getx))
 (= 42 (mixf))
 
+;; an inner ellipsis consumes the depth of the variable it repeats, so
+;; the outer ellipsis must not slice that variable as well. here the
+;; outer ellipsis iterates over x alone while y stays whole.
+(let ()
+  (define-syntax foo
+    (syntax-rules ()
+      ((_ "A" (x y) ...)
+       '(AAA (x y) ...))
+      ((_ "B" (x y) ...)
+       '(BBB (x y ...) ...))))
+  (and (equal? '(AAA (a 10) (b 20) (c 30))
+               (foo "A" (a 10) (b 20) (c 30)))
+       (equal? '(BBB (a 10 20 30) (b 10 20 30) (c 10 20 30))
+               (foo "B" (a 10) (b 20) (c 30)))))
+
+;; z has depth 2 and the inner ellipsis consumes only one level, so
+;; unlike y above, the outer ellipsis does still expand it
+(let ()
+  (define-syntax bar
+    (syntax-rules ()
+      ((_ (x y z ...) ...)
+       '(AA (100 200 z ...) ...))))
+  (equal? '(AA (100 200 3) (100 200) (100 200 c))
+          (bar (1 2 3) (10 20) (a b c))))
+
+;; two ellipses in a row flatten a depth 2 variable onto a vector
+;; subtemplate
+(let ()
+  (define-syntax foo
+    (syntax-rules (xx)
+      ((_ xx (x ...) ...)
+       '(XX #(x) ... ...))))
+  (equal? (foo xx (1 2 3) (a b))
+          '(XX #(1) #(2) #(3) #(a) #(b))))
+
 ;; tco: self tail calls compile to a goto. capture of an unmutated loop
 ;; var must see that iteration's own value, not the final one.
 (equal? '(0 1 2)

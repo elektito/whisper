@@ -33,6 +33,21 @@
 (define (sequence-ref seq idx)
   (vector-ref (sequence-items seq) idx))
 
+;; how many <sequence> levels wrap a matched value: a pattern variable
+;; appearing under N ellipses in the pattern is stored at depth N. an
+;; empty sequence counts only its own level, since there is no element
+;; to look into, which is safe because the callers only compare the
+;; depth against the ellipses that would consume it and an empty
+;; sequence has no slice to expand anyway.
+(define (sequence-depth value)
+  (if (sequence? value)
+      (+ 1 (let loop ((i 0) (deepest 0))
+             (if (= i (sequence-length value))
+                 deepest
+                 (let ((d (sequence-depth (sequence-ref value i))))
+                   (loop (+ i 1) (if (> d deepest) d deepest))))))
+      0))
+
 (define-record-type <store>
   (make-store)
   store?
@@ -317,29 +332,45 @@
   ;; zip the sequences: (1 [2 3] [a b]) => (1 2 a) (1 3 b)
   (let ((seqs (find-all-seqs item)))
     (when (null? seqs)
-      (compile-error "no sequences in expanded element"))
+      (compile-error "nothing left to flatten for an extra ellipsis in template"))
     (unless (or (< (length seqs) 2)
                 (apply = (map sequence-length seqs)))
-      (compile-error "sequences do not have the same sizes"))
+      (compile-error "sequences flattened by an extra ellipsis have different sizes"))
     (let ((len (sequence-length (car seqs))))
       (let loop ((i 0) (result '()))
         (if (= i len)
             (reverse result)
             (loop (+ i 1) (cons (index-seqs item i) result)))))))
 
-;; returns the pattern variables of `template` that are bound to a
-;; <sequence> in `store`, by walking `template` and collecting any
-;; symbol or identifier found in `store` whose value is a <sequence>.
-(define (template-seq-vars template store)
-  (cond ((and (symbol-or-identifier? template) (store-has-var store template))
-         (if (sequence? (store-get-var store template)) (list template) '()))
-        ((pair? template)
-         (append (template-seq-vars (car template) store)
-                 (template-seq-vars (cdr template) store)))
-        ((vector? template)
-         (apply append (map (lambda (x) (template-seq-vars x store))
-                             (vector->list template))))
-        (else '())))
+;; returns the pattern variables that the ellipsis directly following
+;; `template` iterates over: those bound in `store` to a <sequence>
+;; deeper than the ellipses nested inside `template` will themselves
+;; consume. a variable whose depth is already used up by an inner
+;; ellipsis, like `y` in the template `(x y ...) ...`, must be left
+;; whole here so the inner ellipsis still sees the entire sequence;
+;; slicing it would leave that inner ellipsis with a scalar and no
+;; sequence to repeat.
+(define (template-seq-vars template store is-ellipsis?)
+  (let walk ((template template) (depth 0) (ellipsis? is-ellipsis?) (acc '()))
+    (cond ((and (symbol-or-identifier? template) (store-has-var store template))
+           (if (> (sequence-depth (store-get-var store template)) depth)
+               (cons template acc)
+               acc))
+          ((is-ellipsis-escape? template ellipsis?)
+           ;; inside (<ellipsis> <template>) the ellipses are ordinary
+           ;; identifiers, so nothing in there consumes a level
+           (walk (cadr template) depth (lambda (x) #f) acc))
+          ((pair? template)
+           ;; every ellipsis directly following the head consumes one
+           ;; level of each sequence variable inside that head
+           (let count ((rest (cdr template)) (n 0))
+             (if (and (pair? rest) (ellipsis? (car rest)))
+                 (count (cdr rest) (+ n 1))
+                 (walk rest depth ellipsis?
+                       (walk (car template) (+ depth n) ellipsis? acc)))))
+          ((vector? template)
+           (walk (vector->list template) depth ellipsis? acc))
+          (else acc))))
 
 ;; expand `template` once per repetition of the ellipsis that follows
 ;; it. For each repetition i, build a copy of `store` where every
@@ -350,12 +381,12 @@
 ;; inside `template` from seeing (and consuming) a dimension that
 ;; belongs to this outer ellipsis instead.
 (define (expand-ellipsis template store is-ellipsis? rename)
-  (let ((vars (template-seq-vars template store)))
+  (let ((vars (template-seq-vars template store is-ellipsis?)))
     (when (null? vars)
-      (compile-error "no sequences in expanded element"))
+      (compile-error "no pattern variable to repeat in template followed by ellipsis"))
     (let ((lengths (map (lambda (v) (sequence-length (store-get-var store v))) vars)))
       (unless (apply = lengths)
-        (compile-error "sequences do not have the same sizes"))
+        (compile-error "pattern variables repeated by the same ellipsis have different sizes"))
       (let ((len (car lengths)))
         (let loop ((i 0) (result '()))
           (if (= i len)
