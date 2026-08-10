@@ -638,8 +638,8 @@
      (let* ((primcall-info (hash-table-ref/default *primcalls-table* sym #f))
             (sym-name (symbol->string sym))
             (sym-len (string-length sym-name)))
-       (format output "    symb~a = extend_global_env(\"~a\", ~a, sym_unbound);\n"
-               (mangle-name sym) sym sym-len)
+       (format output "    symb~a = extend_global_env(~s, ~a, sym_unbound);\n"
+               (mangle-name sym) sym-name sym-len)
        (when primcall-info
          (let* ((c-name (cadr primcall-info))
                 (min-args (caddr primcall-info))
