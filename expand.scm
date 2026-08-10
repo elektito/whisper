@@ -1098,6 +1098,8 @@
                         (cadr form)))
                  ((binding-is-special head-binding 'quasiquote)
                   (expand-quasiquote form env filename))
+                 ((binding-is-special head-binding 'if)
+                  (expand-if form env filename))
                  ((binding-is-special head-binding 'set!)
                   (process-set! head-binding form env filename))
                  ((binding-is-special head-binding 'define)
@@ -1128,6 +1130,17 @@
     ,@(map (lambda (form+filename)
              (expand-form (car form+filename) env (cdr form+filename)))
            (read-include-form form filename))))
+
+;; expands an if form, always returning a two-legged if.
+(define (expand-if form env filename)
+  (let ((len (length form)))
+    (unless (or (= len 3) (= len 4))
+      (compile-error "invalid if form"))
+    (expand-other (if (= len 3)
+                      (append form (list (list (identifier 'primcall 'void 'void))))
+                      form)
+                  env
+                  filename)))
 
 ;; expands a list which can be a procedure application or a special form
 ;; that does not introduce new bindings or otherwise need special

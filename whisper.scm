@@ -1444,20 +1444,16 @@
       -1)))
 
 (define (compile-if func indent form tail?)
-  (let ((cond-varnum (compile-form func indent (cadr form) #f))
-        (one-legged (= (length form) 3)))
+  (let ((cond-varnum (compile-form func indent (cadr form) #f)))
     (let ((ret-varnum (func-next-varnum func)))
       (gen-code func indent "value x~a = VOID;\n" ret-varnum)
       (gen-code func indent "if (x~a != FALSE) {\n" cond-varnum)
       (let ((then-varnum (compile-form func (+ indent 1) (caddr form) tail?)))
         (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum then-varnum)
-        (if one-legged
-            (gen-code func indent "}\n")
-            (begin
-              (gen-code func indent "} else {\n")
-              (let ((else-varnum (compile-form func (+ indent 1) (cadddr form) tail?)))
-                (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum else-varnum)
-                (gen-code func indent "}\n")))))
+        (gen-code func indent "} else {\n")
+        (let ((else-varnum (compile-form func (+ indent 1) (cadddr form) tail?)))
+          (gen-code func (+ indent 1) "x~a = x~a;\n" ret-varnum else-varnum)
+          (gen-code func indent "}\n")))
       ret-varnum)))
 
 (define (compile-begin func indent form tail?)
