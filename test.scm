@@ -1633,6 +1633,51 @@ and still a comment
 (= 500500 (call-with-values (lambda () (apply values (iota 1000 1)))
                             (lambda args (apply + args))))
 
+;; r7rs requires that: the continuations of all non-final expressions in
+;; a sequence (lambda, case-lambda, begin, let, let*, letrec, letrec*,
+;; let-values, let*-values, let-syntax, letrec-syntax, parameterize,
+;; guard, case, cond, when, and unless) accept any number of values,
+;; since they discard whatever they're given regardless. begin, let,
+;; letrec, letrec*, and lambda are the primitives; everything else on
+;; that list is a macro that bottoms out in one of them.
+(begin (values 1 2 3) #t)
+(begin (values) #t)
+(let () (values 1 2 3) #t)
+(letrec () (values 1 2 3) #t)
+(letrec* () (values 1 2 3) #t)
+(= 1 ((lambda () (values 1 2 3) 1)))
+(guard (e (#t #f)) (values 1 2 3) #t)
+(let-values (((a b) (values 1 2))) (values 3 4 5) #t)
+(= 99 ((case-lambda ((x) (values 1 2 3) x)) 99))
+
+;; an if's branches are exactly as discarded (or not) as the if itself,
+;; so both arms may return multiple values here regardless of which one
+;; runs.
+(begin (if #t (values 1 2 3) (values 4 5 6)) #t)
+(begin (if #f (values 1 2 3) (values 4 5 6)) #t)
+
+;; a discarded position stays discarded through further nested discarded
+;; positions.
+(= 1 ((lambda ()
+        (let ()
+          (begin (values 1 2) (values 3 4 5))
+          1))))
+
+;; cond, when, and unless are on the same r7rs list, via their bodies
+;; lowering to begin.
+(cond (#t (values 1 2 3) #t))
+(when #t (values 1 2 3) #t)
+(unless #f (values 1 2 3) #t)
+
+;; "and" and "or" are not on that list: their non-final operands are
+;; real test expressions whose value is used (to decide whether to keep
+;; going), not unconditionally discarded, so they still require exactly
+;; one value even outside tail position. some scheme implementations
+;; allow this, but chez scheme (correctly) disallows it.
+(guard (e (#t #t))
+  (and (values 1 2 3) #t)
+  #f)
+
 ;; invoking the continuation abandons the pending (+ 10 ...)
 (= 30 (+ 10 (call/cc (lambda (k) (k 20)))))
 
