@@ -446,64 +446,25 @@
           ((zero? i) "/")
           (else (substring path 0 i)))))
 
-;; collapses "." and ".." components in a path. a ".." above the root
-;; of an absolute path is dropped (there's nowhere higher to go); a
-;; ".." that runs off the top of a relative path is kept literally,
-;; since it may still resolve once combined with more of the path.
-(define (path-normalize path)
-  (let* ((absolute? (path-absolute? path))
-         (parts (filter (lambda (p) (and (> (string-length p) 0)
-                                         (not (string=? p "."))))
-                        (string-split path #\/)))
-         (collapsed (let loop ((parts parts) (stack '()))
-                      (cond ((null? parts) (reverse stack))
-                            ((string=? (car parts) "..")
-                             (cond ((and (pair? stack) (not (string=? (car stack) "..")))
-                                    (loop (cdr parts) (cdr stack)))
-                                   (absolute? (loop (cdr parts) stack))
-                                   (else (loop (cdr parts) (cons ".." stack)))))
-                            (else (loop (cdr parts) (cons (car parts) stack)))))))
-    (if (null? collapsed)
-        (if absolute? "/" ".")
-        (string-append (if absolute? "/" "") (string-join collapsed "/")))))
-
-;; the last path component. "a/b/c" -> "c", "a" -> "a", "a/" -> "".
-(define (path-basename path)
-  (let loop ((i (- (string-length path) 1)))
-    (cond ((negative? i) path)
-          ((char=? (string-ref path i) #\/)
-           (substring path (+ i 1) (string-length path)))
-          (else (loop (- i 1))))))
-
-;; we have no file-exists? primcall for now, so we ask the containing
-;; directory for its listing instead. list-directory gives #f for a
-;; directory that doesn't exist or can't be opened.
-(define (file-exists? path)
-  (if (member (path-basename path)
-              (or (list-directory (path-dirname path)) '()))
-      #t
-      #f))
-
-;; finds the file an include names and returns its normalized path, or
-;; #f if no candidate exists. an absolute filename is taken as-is. a
-;; relative one is looked for next to the file containing the include
-;; first and then in each of search-dirs in turn. parent-filename is #f
-;; when there is no containing file, as in the repl, and the current
-;; directory stands in for it there.
+;; finds the file an include names and returns its canonical absolute
+;; path, or #f if no candidate exists. an absolute filename is taken
+;; as-is. a relative one is looked for next to the file containing the
+;; include first and then in each of search-dirs in turn.
+;; parent-filename is #f when there is no containing file, as in the
+;; repl, and the current directory stands in for it there. realpath
+;; returns #f for a path that doesn't exist, so it doubles as the
+;; existence test that picks the winning candidate.
 (define (find-include-file filename parent-filename search-dirs)
   (if (path-absolute? filename)
-      (let ((path (path-normalize filename)))
-        (and (file-exists? path) path))
+      (realpath filename)
       (let loop ((dirs (cons (if parent-filename
                                  (path-dirname parent-filename)
                                  ".")
                              search-dirs)))
         (if (null? dirs)
             #f
-            (let ((path (path-normalize (string-append (car dirs) "/" filename))))
-              (if (file-exists? path)
-                  path
-                  (loop (cdr dirs))))))))
+            (or (realpath (string-append (car dirs) "/" filename))
+                (loop (cdr dirs)))))))
 
 ;; resolve filename against parent-filename and the include search path,
 ;; read all the forms in the file, and return a pair (resolved-filename

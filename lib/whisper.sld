@@ -69,6 +69,7 @@
           environment?
           run-so
           list-directory
+          realpath
 
           wrap
           unwrap
