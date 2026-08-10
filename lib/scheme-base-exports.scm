@@ -99,6 +99,7 @@
         null?
         number->string
         number?
+        open-input-string
         open-output-string
         or
         pair?
