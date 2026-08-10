@@ -57,7 +57,16 @@
           (else (loop (read-char port))))))
 
 (define (skip-block-comment port)
-  (compile-error "block comments not yet supported"))
+  (let loop ((depth 1))
+    (if (zero? depth)
+        (void)
+        (let ((ch (read-char port)))
+          (cond ((eof-object? ch) (compile-error "unterminated block comment"))
+                ((and (char=? ch #\#) (char=? (peek-char port) #\|))
+                 (read-char port) (loop (+ depth 1)))
+                ((and (char=? ch #\|) (char=? (peek-char port) #\#))
+                 (read-char port) (loop (- depth 1)))
+                (else (loop depth)))))))
 
 (define (read-quoted-form port)
   (read-char port) ; skip the quote character

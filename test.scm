@@ -1,3 +1,21 @@
+;; let's start by testing some comments
+
+#;100
+#;#f
+#;(a
+   b ;; foo
+   c)
+
+#|
+testing nested comments
+#|
+still a comment #||#
+|#
+and still a comment
+|#; a comment right after another
+
+;; and now to more important things! |# <---make emacs scheme mode happy
+
 (import (whisper))
 
 ;; this is needed separately because we use some primcalls not exported
