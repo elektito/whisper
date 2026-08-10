@@ -517,6 +517,7 @@ extern value primcall_port_q(environment env, enum call_flags flags, int nargs, 
 extern value primcall_procedure_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_read_char(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_read_line(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_realpath(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_car_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_set_cdr_b(environment env, enum call_flags flags, int nargs, ...);

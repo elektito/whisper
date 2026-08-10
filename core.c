@@ -3935,6 +3935,25 @@ value primcall_list_directory(environment env, enum call_flags flags, int nargs,
     return reverse_list(entries, NIL);
 }
 
+value primcall_realpath(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("realpath needs a single argument"); }
+    init_args();
+    value path = next_arg();
+    free_args();
+
+    if (!IS_STRING(path)) { raise_error("realpath argument is not a string"); }
+
+    char *pathz = strz(path);
+    char *resolved = realpath(pathz, NULL);
+    free(pathz);
+    if (!resolved) { return FALSE; }
+
+    value result = make_string(resolved, strlen(resolved));
+    free(resolved);
+
+    return result;
+}
+
 value primcall_gc(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("gc takes no arguments"); }
     gc();
