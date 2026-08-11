@@ -72,6 +72,12 @@ and still a comment
 
 ;;
 
+(equal? "1750" (number->string 1000 8))
+(equal? "1111101000" (number->string 1000 2))
+(equal? "7d0" (number->string 2000 16))
+
+;;
+
 (eq? 100 (if #t 100 200))
 (eq? 200 (if #f 100 200))
 (eq? 100 (if 0 100 200))

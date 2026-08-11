@@ -2569,6 +2569,11 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
         while (m >= 2) { buf[start++] = '0' + (m % 2); m /= 2; }
         buf[start++] = '0' + m;
         buf[start] = 0;
+        for(int i = 0, j = start - 1; i < start / 2; ++i, --j) {
+            char tmp = buf[i];
+            buf[i] = buf[j];
+            buf[j] = tmp;
+        }
     } else
         raise_error("radix not supported by number->string");
     return make_string(buf, strlen(buf));
