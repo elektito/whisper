@@ -132,6 +132,8 @@
         string->vector
         string-append
         string-copy
+        string-copy!
+        string-fill!
         string-for-each
         string-length
         string-map
@@ -168,4 +170,5 @@
         when
         with-exception-handler
         write-char
+        write-string
         zero?)

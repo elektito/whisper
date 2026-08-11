@@ -712,6 +712,26 @@ and still a comment
     (and (equal? s r)
          (not (eq? s r)))))
 
+(let ((s "1234567"))
+  (string-copy! s 2 "ab")
+  (equal? s "12ab567"))
+(let ((s "1234567"))
+  (string-copy! s 2 "abcde" 3)
+  (equal? s "12de567"))
+(let ((s "1234567"))
+  (string-copy! s 3 "abcde" 2 4)
+  (equal? s "123cd67"))
+
+(let ((s "12345"))
+  (string-fill! s #\a)
+  (equal? "aaaaa" s))
+(let ((s "12345"))
+  (string-fill! s #\a 2)
+  (equal? "12aaa" s))
+(let ((s "12345"))
+  (string-fill! s #\a 2 4)
+  (equal? "12aa5" s))
+
 (equal? "" (string-append))
 (let ((s "12"))
   (let ((a (string-append s)))
@@ -2305,6 +2325,14 @@ and still a comment
        (result (parameterize ((current-input-port redirected))
                  (read-char explicit))))
   (equal? #\Y result))
+
+;; write-string with implicit and explicit port
+(let ((out (open-output-string)))
+  (parameterize ((current-output-port out))
+    (write-string "foobar")
+    (write-string "foobar" out 3)
+    (write-string "foobar" out 3 5))
+  (equal? (get-output-string out) "foobarbarba"))
 
 (let* ((port (open-output-string))
        (result (output-port? port)))

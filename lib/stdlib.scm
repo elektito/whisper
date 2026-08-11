@@ -734,6 +734,30 @@
          (string-foldcase s2)
          (map string-foldcase rest)))
 
+(define string-fill!
+  (case-lambda
+   ((str fill) (string-fill! str fill 0 (string-length str)))
+   ((str fill start) (string-fill! str fill start (string-length str)))
+   ((str fill start end) (do ((i start (+ i 1)))
+                             ((= i end) str)
+                           (string-set! str i fill)))))
+
+(define string-copy
+  (case-lambda
+   ((str) (substring str 0 (string-length str)))
+   ((str start) (substring str start (string-length str)))
+   ((str start end) (substring str start end))))
+
+(define string-copy!
+  (case-lambda
+   ((to at from) (string-copy! to at from 0 (string-length from)))
+   ((to at from start) (string-copy! to at from start (string-length from)))
+   ((to at from start end) (let ((n (- end start)))
+                             (do ((from-idx start (+ from-idx 1))
+                                  (to-idx at (+ to-idx 1)))
+                                 ((= from-idx end) to)
+                               (string-set! to to-idx (string-ref from from-idx)))))))
+
 (define (print . x)
   (let loop ((x x))
     (if (null? x)
@@ -856,19 +880,16 @@
    ((v start) (%vector->string v start (vector-length v)))
    ((v start end) (%vector->string v start end))))
 
-(define (%vector-fill! vec fill start end)
-  (let loop ((i start))
-    (if (= i end)
-        vec
-        (begin
-          (vector-set! vec i fill)
-          (loop (+ i 1))))))
-
 (define vector-fill!
   (case-lambda
-   ((v fill) (%vector-fill! v fill 0 (vector-length v)))
-   ((v fill start) (%vector-fill! v fill start (vector-length v)))
-   ((v fill start end) (%vector-fill! v fill start end))))
+   ((v fill) (vector-fill! v fill 0 (vector-length v)))
+   ((v fill start) (vector-fill! v fill start (vector-length v)))
+   ((v fill start end) (let loop ((i start))
+                         (if (= i end)
+                             v
+                             (begin
+                               (vector-set! v i fill)
+                               (loop (+ i 1))))))))
 
 ;; record types
 
@@ -1315,6 +1336,13 @@
   (case-lambda
    ((ch) (%write-char ch (current-output-port)))
    ((ch port) (%write-char ch port))))
+
+(define write-string
+  (case-lambda
+   ((str) (write-string str (current-output-port) 0 (string-length str)))
+   ((str port) (write-string str port 0 (string-length str)))
+   ((str port start) (write-string str port start (string-length str)))
+   ((str port start end) (%display (substring str start end) port))))
 
 (define (call-with-port port proc)
   (let ((result (proc port)))
