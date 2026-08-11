@@ -69,6 +69,9 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define NIL (value)(NIL_TAG)
 #define EOFOBJ (value)(EOFOBJ_TAG)
 
+#define FIXNUM_MAX ((INT64_C(1) << 60) - 1)
+#define FIXNUM_MIN (-(INT64_C(1) << 60))
+
 /************ hash table ***********/
 
 #define HASH_TABLE_INITIAL_SIZE 8
