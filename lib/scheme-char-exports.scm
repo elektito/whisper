@@ -1,7 +1,20 @@
 (export char-upcase
+        char-ci<=?
+        char-ci<?
+        char-ci=?
+        char-ci>=?
+        char-ci>?
         char-downcase
+        char-foldcase
         char-alphabetic?
         char-numeric?
         char-upper-case?
         char-lower-case?
-        string-ci=?)
+        string-ci<=?
+        string-ci<?
+        string-ci=?
+        string-ci>=?
+        string-ci>?
+        string-downcase
+        string-foldcase
+        string-upcase)

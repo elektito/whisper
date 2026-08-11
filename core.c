@@ -2962,25 +2962,6 @@ value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ..
     return TRUE;
 }
 
-value primcall_string_ci_eq_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 2) { raise_error("string-ci=? needs at least two arguments"); }
-    init_args();
-    value prev = next_arg();
-    if (!IS_STRING(prev)) { raise_error("string-ci=? argument is not a string"); }
-    for (int i = 1; i < nargs; ++i) {
-        value cur = next_arg();
-        if (!IS_STRING(cur)) { raise_error("string-ci=? argument is not a string"); }
-        if (string_ci_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
-            free_args();
-            return FALSE;
-        }
-        prev = cur;
-    }
-
-    free_args();
-    return TRUE;
-}
-
 value primcall_string_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("string? needs a single argument"); }
     init_args();

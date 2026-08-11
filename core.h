@@ -538,7 +538,6 @@ extern value primcall_string_length(environment env, enum call_flags flags, int 
 extern value primcall_string_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_string_ci_eq_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_string_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_substring(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_symbol_q(environment env, enum call_flags flags, int nargs, ...);

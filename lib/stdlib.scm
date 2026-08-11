@@ -561,6 +561,34 @@
   (and (char>=? ch #\a)
        (char<=? ch #\z)))
 
+(define (char-foldcase ch)
+  (char-downcase ch))
+
+(define (char-ci=? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise char=? (map char-foldcase chars)))))
+
+(define (char-ci<? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise char<? (map char-foldcase chars)))))
+
+(define (char-ci>? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise char>? (map char-foldcase chars)))))
+
+(define (char-ci<=? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise char<=? (map char-foldcase chars)))))
+
+(define (char-ci>=? . chars)
+  (if (null? (cdr chars))
+      #t
+      (all? (pairwise char>=? (map char-foldcase chars)))))
+
 (define (integer? n)
   ;; TODO we need to change this if/when we have other kinds of numbers
   (number? n))
@@ -666,6 +694,45 @@
     (do ((i 0 (+ i 1)))
         ((= i shortest) (void))
       (apply proc (mapcar (lambda (x) (string-ref x i)) args)))))
+
+(define (string-downcase s)
+  (string-map char-downcase s))
+
+(define (string-foldcase s)
+  (string-map char-foldcase s))
+
+(define (string-upcase s)
+  (string-map char-upcase s))
+
+(define (string-ci=? s1 s2 . rest)
+  (apply string=?
+         (string-foldcase s1)
+         (string-foldcase s2)
+         (map string-foldcase rest)))
+
+(define (string-ci<? s1 s2 . rest)
+  (apply string<?
+         (string-foldcase s1)
+         (string-foldcase s2)
+         (map string-foldcase rest)))
+
+(define (string-ci<=? s1 s2 . rest)
+  (apply string<=?
+         (string-foldcase s1)
+         (string-foldcase s2)
+         (map string-foldcase rest)))
+
+(define (string-ci>? s1 s2 . rest)
+  (apply string>?
+         (string-foldcase s1)
+         (string-foldcase s2)
+         (map string-foldcase rest)))
+
+(define (string-ci>=? s1 s2 . rest)
+  (apply string>=?
+         (string-foldcase s1)
+         (string-foldcase s2)
+         (map string-foldcase rest)))
 
 (define (print . x)
   (let loop ((x x))
