@@ -262,6 +262,29 @@
 (define (zero? x)
   (eq? x 0))
 
+(define (integer? n)
+  ;; TODO we need to change this if/when we have other kinds of numbers
+  (number? n))
+
+(define (positive? n)
+  (> n 0))
+
+(define (negative? n)
+  (< n 0))
+
+(define (even? n)
+  (unless (integer? n)
+    (error "not an integer"))
+  (zero? (floor-remainder n 2)))
+
+(define (odd? n)
+  (unless (integer? n)
+    (error "not an integer"))
+  (not (zero? (floor-remainder n 2))))
+
+(define (!= m n)
+  (not (= m n)))
+
 (define min
   (case-lambda
    ((x) x)
@@ -617,29 +640,6 @@
   (if (null? (cdr chars))
       #t
       (all? (pairwise char>=? (map char-foldcase chars)))))
-
-(define (integer? n)
-  ;; TODO we need to change this if/when we have other kinds of numbers
-  (number? n))
-
-(define (positive? n)
-  (> n 0))
-
-(define (negative? n)
-  (< n 0))
-
-(define (even? n)
-  (unless (integer? n)
-    (error "not an integer"))
-  (zero? (floor-remainder n 2)))
-
-(define (odd? n)
-  (unless (integer? n)
-    (error "not an integer"))
-  (not (zero? (floor-remainder n 2))))
-
-(define (!= m n)
-  (not (= m n)))
 
 (define (string-join strs sep)
   (let loop ((result #f) (strs strs))
