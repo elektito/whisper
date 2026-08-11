@@ -100,6 +100,17 @@ and still a comment
        (string->number "1000" 1))
 (not (string->number "foo"))
 
+(= 1 (max 1))
+(= 2 (max 1 2))
+(= 8 (max 4 1 8 7 -9))
+
+(= 1 (min 1))
+(= 1 (min 1 2))
+(= -9 (min 4 1 8 7 -9))
+
+(= 9 (square 3))
+(= 9 (square -3))
+
 ;;
 
 (eq? 100 (if #t 100 200))
@@ -339,6 +350,13 @@ and still a comment
 (let ((x '(1 2 3)))
   (set-cdr! x 10)
   (equal? x '(1 . 10)))
+
+(null? (list-copy '()))
+(equal? '(1 2 3) (list-copy '(1 2 3)))
+(equal? '(1 2 3 . 4) (list-copy '(1 2 3 . 4)))
+(let ((x #(1 2 3)))
+  ;; non-list objects should be returned unchanged
+  (eq? x (list-copy x)))
 
 ;; letrec
 
@@ -626,6 +644,22 @@ and still a comment
          (equal? "12" a))))
 (equal? "123456" (string-append "12" "" "3456"))
 
+(equal? (string->list "") '())
+(equal? (string->list "ABC") '(#\A #\B #\C))
+(equal? (string->list "ABCDEFG" 2 5) '(#\C #\D #\E))
+(equal? (string->list "ABCDEFG" 2) '(#\C #\D #\E #\F #\G))
+(equal? (list->string '(#\A #\B #\C)) "ABC")
+(equal? (list->string '()) "")
+
+(equal? "" (string-map char-upcase ""))
+(equal? "foobar1" (string-map char-downcase "FoOBaR1"))
+
+(let ((result '()))
+  (string-for-each (lambda (c)
+                     (set! result (cons c result)))
+                   "foo")
+  (equal? '(#\o #\o #\f) result))
+
 ;; make sure primitive functions are available as normal functions
 
 (procedure? cons)
@@ -837,7 +871,7 @@ and still a comment
                              #(10 20)
                              #(30 40)))
 
-#;(let ((result '()))
+(let ((result '()))
   (vector-for-each (lambda (x y)
                      (set! result (cons (cons x y) result)))
                    #(10 20 30 40 50)
@@ -2196,3 +2230,13 @@ and still a comment
        (result (parameterize ((current-input-port redirected))
                  (read-char explicit))))
   (equal? #\Y result))
+
+(let* ((port (open-output-string))
+       (result (output-port? port)))
+  (close-output-port port)
+  result)
+
+(let* ((port (open-input-string "foo"))
+       (result (input-port? port)))
+  (close-input-port port)
+  result)

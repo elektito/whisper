@@ -37,6 +37,8 @@
         char>=?
         char>?
         char?
+        close-input-port
+        close-output-port
         close-port
         cond
         cons
@@ -80,6 +82,7 @@
         list
         list->string
         list->vector
+        list-copy
         list-ref
         list-set!
         list-tail
@@ -89,6 +92,7 @@
         make-string
         make-vector
         map
+        max
         member
         memq
         memv
@@ -102,6 +106,7 @@
         open-input-string
         open-output-string
         or
+        output-port?
         pair?
         parameterize
         peek-char
@@ -119,13 +124,17 @@
         set!
         set-car!
         set-cdr!
+        square
         string
+        string->list
         string->number
         string->symbol
         string->vector
         string-append
         string-copy
+        string-for-each
         string-length
+        string-map
         string-ref
         string-set!
         string<=?
@@ -149,6 +158,7 @@
         vector-append
         vector-copy
         vector-copy!
+        vector-for-each
         vector-fill!
         vector-length
         vector-map

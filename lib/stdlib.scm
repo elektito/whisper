@@ -268,6 +268,15 @@
    ((x y) (if (< x y) x y))
    ((x y . rest) (apply min (min x y) rest))))
 
+(define max
+  (case-lambda
+   ((x) x)
+   ((x y) (if (> x y) x y))
+   ((x y . rest) (max x (apply max y rest)))))
+
+(define (square z)
+  (* z z))
+
 (define (caaar x) (car (car (car x))))
 (define (caadr x) (car (car (cdr x))))
 (define (cadar x) (car (cdr (car x))))
@@ -309,6 +318,17 @@
 (define (list-ref ls k)
   (car (list-tail ls k)))
 
+(define (list-copy lis)
+  (let recur ((lis lis))
+    (if (pair? lis)
+        (cons (car lis) (recur (cdr lis)))
+        lis)))
+
+(define (list-set! ls k obj)
+  (if (zero? k)
+      (set-car! ls obj)
+      (list-set! (cdr ls) (- k 1) obj)))
+
 (define (length ls)
   (cond ((null? ls) 0)
         ((not (pair? ls))
@@ -327,10 +347,8 @@
 (define (last ls)
   (list-ref ls (- (length ls) 1)))
 
-(define (list->string x)
-  (if (null? x)
-      ""
-      (string-append (make-string 1 (car x)) (list->string (cdr x)))))
+(define (list->string ls)
+  (apply string ls))
 
 (define (%reverse ls acc)
   (if (null? ls)
@@ -359,6 +377,9 @@
       (if (< i 0)
           ls
           (loop (- i 1) (- val step) (cons val ls)))))))
+
+(define (range start end)
+  (iota (- end start) start))
 
 (define (any? values)
   (if (null? values)
@@ -626,6 +647,26 @@
   (let ((s (make-string (length chars))))
     (%string s chars 0)))
 
+(define string->list
+  (case-lambda
+   ((s) (string->list s 0 (string-length s)))
+   ((s start) (string->list s start (string-length s)))
+   ((s start end) (map (lambda (n) (string-ref s n))
+                       (range start end)))))
+
+(define (string-map proc . args)
+  (let* ((shortest (apply min (map string-length args)))
+         (result (make-string shortest)))
+    (do ((i 0 (+ i 1)))
+        ((= i shortest) result)
+      (string-set! result i (apply proc (mapcar (lambda (x) (string-ref x i)) args))))))
+
+(define (string-for-each proc . args)
+  (let ((shortest (apply min (map string-length args))))
+    (do ((i 0 (+ i 1)))
+        ((= i shortest) (void))
+      (apply proc (mapcar (lambda (x) (string-ref x i)) args)))))
+
 (define (print . x)
   (let loop ((x x))
     (if (null? x)
@@ -646,15 +687,20 @@
     vec))
 
 (define (vector-map proc . args)
-  ;; let*
-  (let ((shortest (apply min (map vector-length args))))
-    (let ((result (make-vector shortest)))
-      (let loop ((i 0))
-        (if (= i shortest)
-            result
-            (begin
-              (vector-set! result i (apply proc (mapcar (lambda (x) (vector-ref x i)) args)))
-              (loop (+ i 1))))))))
+  (let* ((shortest (apply min (map vector-length args)))
+         (result (make-vector shortest)))
+    (let loop ((i 0))
+      (if (= i shortest)
+          result
+          (begin
+            (vector-set! result i (apply proc (mapcar (lambda (x) (vector-ref x i)) args)))
+            (loop (+ i 1)))))))
+
+(define (vector-for-each proc . args)
+  (let* ((shortest (apply min (map vector-length args))))
+    (do ((i 0 (+ i 1)))
+        ((= i shortest) (void))
+      (apply proc (mapcar (lambda (x) (vector-ref x i)) args)))))
 
 (define (%vector-copy vector start end)
   (let ((n (- end start)))
@@ -1202,3 +1248,38 @@
   (case-lambda
    ((ch) (%write-char ch (current-output-port)))
    ((ch port) (%write-char ch port))))
+
+(define (call-with-port port proc)
+  (let ((result (proc port)))
+    (close-port port)
+    result))
+
+(define (call-with-input-file filename proc)
+  (let ((port (open-input-file filename)))
+    (call-with-port port proc)))
+
+(define (call-with-output-file filename proc)
+  (let ((port (open-output-file filename)))
+    (call-with-port port proc)))
+
+(define (with-input-from-file filename thunk)
+  (let ((port (open-input-file filename)))
+    (parameterize ((current-input-port port))
+      (thunk)
+      (close-input-port port))))
+
+(define (with-output-to-file filename thunk)
+  (let ((port (open-output-file filename)))
+    (parameterize ((current-output-port port))
+      (thunk)
+      (close-output-port port))))
+
+(define (close-input-port port)
+  (unless (input-port? port)
+    (raise (file-error "Not an input port")))
+  (close-port port))
+
+(define (close-output-port port)
+  (unless (output-port? port)
+    (raise (file-error "Not an output port")))
+  (close-port port))
