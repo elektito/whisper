@@ -60,6 +60,7 @@
         error-object?
         error-object-irritants
         error-object-message
+        even?
         file-error?
         floor/
         floor-quotient
@@ -109,6 +110,7 @@
         number?
         open-input-string
         open-output-string
+        odd?
         or
         output-port?
         pair?

@@ -628,6 +628,16 @@
 (define (negative? n)
   (< n 0))
 
+(define (even? n)
+  (unless (integer? n)
+    (error "not an integer"))
+  (zero? (floor-remainder n 2)))
+
+(define (odd? n)
+  (unless (integer? n)
+    (error "not an integer"))
+  (not (zero? (floor-remainder n 2))))
+
 (define (!= m n)
   (not (= m n)))
 
