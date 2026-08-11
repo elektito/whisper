@@ -2654,6 +2654,14 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     return OBJECT(obj);
 }
 
+value primcall_output_port_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("output-port? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_WRITE);
+}
+
 value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("pair? needs a single argument"); }
     init_args();
