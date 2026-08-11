@@ -2310,6 +2310,11 @@ value primcall_percent_display(environment env, enum call_flags flags, int nargs
     return VOID;
 }
 
+value primcall_eof_object(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("eof-object takes no arguments"); }
+    return EOFOBJ;
+}
+
 value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("eof-object? needs a single argument"); }
     init_args();

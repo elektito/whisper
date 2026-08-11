@@ -808,6 +808,7 @@
                       (environment? "environment_q" 1 1)
                       (environment-bind! "environment_bind_b" 4 4)
                       (environment-lookup "environment_lookup" 2 2)
+                      (eof-object "eof_object" 1 1)
                       (eof-object? "eof_object_q" 1 1)
                       (eq? "eq_q" 2 2)
                       (eqv? "eqv_q" 2 2)
@@ -953,6 +954,7 @@
                              (eq? 2 value () ("BOOL(" 0 " == " 1 ")"))
                              (eqv? 2 value () ("BOOL(" 0 " == " 1 ")")) ;; TODO fix when we have other number types
                              (environment? 1 value () ("BOOL(IS_ENVIRONMENT(" 0 "))"))
+                             (eof-object 1 value () ("EOFOBJ"))
                              (eof-object? 1 value () ("BOOL(IS_EOFOBJ(" 0 "))"))
                              (hash-table? 1 value () ("BOOL(IS_HASH_TABLE(" 0 "))"))
                              (not 1 value () ("BOOL(" 0 " == FALSE)"))
@@ -1697,6 +1699,7 @@
                                  (identifier 'primcall 'environment? 'environment?)
                                  (identifier 'primcall 'environment-bind! 'environment-bind!)
                                  (identifier 'primcall 'environment-lookup 'environment-lookup)
+                                 (identifier 'primcall 'eof-object 'eof-object)
                                  (identifier 'primcall 'eof-object? 'eof-object?)
                                  (identifier 'primcall 'eq? 'eq?)
                                  (identifier 'primcall 'eqv? 'eqv?)
