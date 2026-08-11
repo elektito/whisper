@@ -1325,9 +1325,13 @@
          (begin result1 result2 ...)
          (guard-aux reraise clause1 clause2 ...)))))
 
+;; TODO change this to a simple lambda with two arguments after a
+;; version bump. the case-lambda is for while we transition to the new
+;; two-argument system.
 (set-system-exception-handler
- (lambda (msg)
-   (raise (make-error msg '() 'system))))
+ (case-lambda
+  ((msg) (raise (make-error msg '() 'system)))
+  ((kind msg) (raise (make-error msg '() kind)))))
 
 ;; parameters
 

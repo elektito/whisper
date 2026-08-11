@@ -61,6 +61,8 @@ static struct pool **heaps;
 static int n_heaps = 0;
 
 /* symbols used by the runtime */
+value symbol_file;
+value symbol_system;
 value symbol_value;
 value symbol_macro;
 value symbol_special;
@@ -167,26 +169,42 @@ static void terminate_with_message(const char *msg, size_t len) {
 }
 
 __attribute__((noreturn, cold))
-void raise_error(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int len = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
+void _vraise_error(value kind, const char *fmt, va_list ap) {
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+
+    int len = vsnprintf(NULL, 0, fmt, ap_copy);
+    va_end(ap_copy);
 
     char *buf = malloc(len + 1);
-    va_start(ap, fmt);
     vsnprintf(buf, len + 1, fmt, ap);
     va_end(ap);
 
     if (system_exception_handler) {
         value msg = make_string(buf, len);
         free(buf);
-        call(system_exception_handler, 1, msg);
+        call(system_exception_handler, 2, kind, msg);
 
         panic("system exception handler returned");
     }
 
     terminate_with_message(buf, len);
+}
+
+__attribute__((noreturn, cold))
+void raise_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    _vraise_error(symbol_system, fmt, ap);
+    va_end(ap);
+}
+
+__attribute__((noreturn, cold))
+void raise_file_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    _vraise_error(symbol_file, fmt, ap);
+    va_end(ap);
 }
 
 __attribute__((noreturn, cold))
@@ -1761,6 +1779,10 @@ void init_symbols(void) {
 
     /* intern symbols needed by the runtime */
 
+    /* error kind symbols */
+    symbol_file = extend_global_env("file", 4, sym_unbound);
+    symbol_system = extend_global_env("system", 6, sym_unbound);
+
     /* sym_kind symbolic names */
     symbol_value = extend_global_env("value", 5, sym_unbound);
     symbol_macro = extend_global_env("macro", 5, sym_unbound);
@@ -2616,7 +2638,7 @@ value primcall_open_input_file(environment env, enum call_flags flags, int nargs
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
     FILE *fp = fopen(obj->port.filename, "r");
-    if (!fp) { raise_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
+    if (!fp) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
 
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_READ;
@@ -2656,7 +2678,7 @@ value primcall_open_output_file(environment env, enum call_flags flags, int narg
     if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
     char *filenamez = strz(GET_STRING(filename));
     FILE *fp = fopen(filenamez, "w");
-    if (!fp) { raise_error("error opening file '%s': %s", filenamez, strerror(errno)); }
+    if (!fp) { raise_file_error("error opening file '%s': %s", filenamez, strerror(errno)); }
     free(filenamez);
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
@@ -2791,7 +2813,7 @@ value primcall_set_system_exception_handler(environment env, enum call_flags fla
     free_args();
 
     if (!IS_CLOSURE(proc)) { raise_error("set-system-exception-handler argument must be a procedure"); }
-    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 1)) { raise_error("set-system-exception-handler: passed procedure must accept one argument"); }
+    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 2)) { raise_error("set-system-exception-handler: passed procedure must accept two arguments"); }
     system_exception_handler = proc;
 
     return VOID;
