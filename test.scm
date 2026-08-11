@@ -88,15 +88,15 @@ and still a comment
 (eq? (void) (if #f 100))
 
 (cond (else #t))
-;(not (= 10 (let ((else #f))
-;             (cond (else 10)))))
+(void? (let ((else #f))
+         (cond (else 10))))
 (= 200 (cond ((= 10 20) 50 100)
              ((= 5 5) 80 200)
              ((= 40 40) 300)))
-;(= 300 (cond (#f 100)
-;             (#f 200)
-;             (300)
-;             (else 400)))
+(= 300 (cond (#f 100)
+             (#f 200)
+             (300)
+             (else 400)))
 
 (eq? 'composite
      (case (* 2 3)
