@@ -2569,6 +2569,11 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
         while (m >= 2) { buf[start++] = '0' + (m % 2); m /= 2; }
         buf[start++] = '0' + m;
         buf[start] = 0;
+        for(int i = 0, j = start - 1; i < start / 2; ++i, --j) {
+            char tmp = buf[i];
+            buf[i] = buf[j];
+            buf[j] = tmp;
+        }
     } else
         raise_error("radix not supported by number->string");
     return make_string(buf, strlen(buf));
@@ -2647,6 +2652,14 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     obj->port.printf = string_printf;
     obj->port.write_char = string_write_char;
     return OBJECT(obj);
+}
+
+value primcall_output_port_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("output-port? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_WRITE);
 }
 
 value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -2777,16 +2790,58 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     if (nargs != 1 && nargs != 2) { raise_error("string-to-number needs one or two arguments"); }
     init_args();
     value str_v = next_arg();
-    value base = nargs == 1 ? FIXNUM(10) : next_arg();
+    value base_v = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
     if (!IS_STRING(str_v)) { raise_error("string->number first argument must be a string"); }
-    if (!IS_FIXNUM(base)) { raise_error("string->number second argument must be a number"); }
-    if (GET_STRING(str_v)->len == 0) return FALSE;
+    if (!IS_FIXNUM(base_v)) { raise_error("string->number second argument must be a number"); }
+
+    int base = (int) GET_FIXNUM(base_v);
+    if (base < 2 || base > 36) { raise_error("string->number radix is not valid"); }
+
+    size_t len = GET_STRING(str_v)->len;
+    if (len == 0) { return FALSE; }
 
     char *str = strz(str_v);
+    char *start = str;
+
+    if (len >= 2 && str[0] == '#') {
+        char prefix = str[1];
+        if (prefix == 'x' || prefix == 'X') {
+            base = 16;
+            start += 2;
+            len -= 2;
+        } else if (prefix == 'd' || prefix == 'D') {
+            base = 10;
+            start += 2;
+            len -= 2;
+        } else if (prefix == 'o' || prefix == 'O') {
+            base = 8;
+            start += 2;
+            len -= 2;
+        } else if (prefix == 'b' || prefix == 'B') {
+            base = 2;
+            start += 2;
+            len -= 2;
+        }
+    }
+
+    if (len == 0) { free(str); return FALSE; }
+
+    /* strtoll accepts whitespace at the beginning, so we explicitly
+     * check for that and reject it. */
+    if (isspace((unsigned char)*start)) {
+        free(str);
+        return FALSE;
+    }
+
     char *endptr;
-    int64_t result = strtoll(str, &endptr, GET_FIXNUM(base));
-    if (endptr != str + GET_STRING(str_v)->len) { free(str); return FALSE; }
+    errno = 0;
+    int64_t result = strtoll(start, &endptr, base);
+    if (errno != 0 || endptr != start + len || result < FIXNUM_MIN || result > FIXNUM_MAX) {
+        free(str);
+        return FALSE;
+    }
+
     free(str);
     return FIXNUM(result);
 }

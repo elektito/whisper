@@ -69,6 +69,9 @@ typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 #define NIL (value)(NIL_TAG)
 #define EOFOBJ (value)(EOFOBJ_TAG)
 
+#define FIXNUM_MAX ((INT64_C(1) << 60) - 1)
+#define FIXNUM_MIN (-(INT64_C(1) << 60))
+
 /************ hash table ***********/
 
 #define HASH_TABLE_INITIAL_SIZE 8
@@ -511,6 +514,7 @@ extern value primcall_open_input_file(environment env, enum call_flags flags, in
 extern value primcall_open_input_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_output_file(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_output_port_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_peek_char(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_port_q(environment env, enum call_flags flags, int nargs, ...);
