@@ -60,6 +60,15 @@ static size_t gc_lazy_reclaims = 0;
 static struct pool **heaps;
 static int n_heaps = 0;
 
+/* symbols used by the runtime */
+value symbol_value;
+value symbol_macro;
+value symbol_special;
+value symbol_aux;
+value symbol_primcall;
+value symbol_alias;
+value symbol_env_alias;
+
 /*************** non-static variables **************/
 
 /* the stack address at the start of main function (used for gc) */
@@ -1749,6 +1758,17 @@ void env_delegate(value env, value sym, value target) {
 
 void init_symbols(void) {
     hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);
+
+    /* intern symbols needed by the runtime */
+
+    /* sym_kind symbolic names */
+    symbol_value = extend_global_env("value", 5, sym_unbound);
+    symbol_macro = extend_global_env("macro", 5, sym_unbound);
+    symbol_special = extend_global_env("special", 7, sym_unbound);
+    symbol_aux = extend_global_env("aux", 3, sym_unbound);
+    symbol_primcall = extend_global_env("primcall", 8, sym_unbound);
+    symbol_alias = extend_global_env("alias", 5, sym_unbound);
+    symbol_env_alias = extend_global_env("env-alias", 9, sym_unbound);
 }
 
 value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
@@ -3852,15 +3872,14 @@ value primcall_make_empty_environment(environment env, enum call_flags flags, in
  * symbol: absence is #f from environment-lookup, and environment-bind!
  * never writes it. */
 static value sym_kind_to_symbol(enum sym_kind kind) {
-    /* extend_global_env with sym_unbound is just interning here */
     switch (kind) {
-    case sym_value:     return extend_global_env("value", 5, sym_unbound);
-    case sym_macro:     return extend_global_env("macro", 5, sym_unbound);
-    case sym_special:   return extend_global_env("special", 7, sym_unbound);
-    case sym_aux:       return extend_global_env("aux", 3, sym_unbound);
-    case sym_primcall:  return extend_global_env("primcall", 8, sym_unbound);
-    case sym_alias:     return extend_global_env("alias", 5, sym_unbound);
-    case sym_env_alias: return extend_global_env("env-alias", 9, sym_unbound);
+    case sym_value: return symbol_value;
+    case sym_macro: return symbol_macro;
+    case sym_special: return symbol_special;
+    case sym_aux: return symbol_aux;
+    case sym_primcall: return symbol_primcall;
+    case sym_alias: return symbol_alias;
+    case sym_env_alias: return symbol_env_alias;
     default:
         panic("internal error: unhandled sym_kind case");
     }
@@ -3868,13 +3887,13 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
 
 /* the reverse of sym_kind_to_symbol */
 static enum sym_kind symbol_to_sym_kind(value sym) {
-    if (sym == extend_global_env("value", 5, sym_unbound))     return sym_value;
-    if (sym == extend_global_env("macro", 5, sym_unbound))     return sym_macro;
-    if (sym == extend_global_env("special", 7, sym_unbound))   return sym_special;
-    if (sym == extend_global_env("aux", 3, sym_unbound))       return sym_aux;
-    if (sym == extend_global_env("primcall", 8, sym_unbound))  return sym_primcall;
-    if (sym == extend_global_env("alias", 5, sym_unbound))     return sym_alias;
-    if (sym == extend_global_env("env-alias", 9, sym_unbound)) return sym_env_alias;
+    if (sym == symbol_value) return sym_value;
+    if (sym == symbol_macro) return sym_macro;
+    if (sym == symbol_special) return sym_special;
+    if (sym == symbol_aux) return sym_aux;
+    if (sym == symbol_primcall) return sym_primcall;
+    if (sym == symbol_alias) return sym_alias;
+    if (sym == symbol_env_alias) return sym_env_alias;
     struct symbol *s = GET_SYMBOL(sym);
     raise_error("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }
