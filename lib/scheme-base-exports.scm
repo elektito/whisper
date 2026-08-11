@@ -61,6 +61,9 @@
         error-object-irritants
         error-object-message
         file-error?
+        floor/
+        floor-quotient
+        floor-remainder
         for-each
         get-output-string
         guard
@@ -97,6 +100,7 @@
         memq
         memv
         min
+        (rename floor-remainder modulo)
         negative?
         newline
         not
@@ -114,12 +118,14 @@
         positive?
         procedure?
         quasiquote
+        (rename truncate-quotient quotient)
         quote
         raise
         raise-continuable
         read-char
         read-line
         reverse
+        (rename truncate-remainder remainder)
         round
         set!
         set-car!
@@ -150,6 +156,9 @@
         symbol=?
         symbol?
         syntax-rules
+        truncate/
+        truncate-quotient
+        truncate-remainder
         unless
         unquote
         unquote-splicing

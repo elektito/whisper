@@ -158,13 +158,66 @@ and still a comment
 (eq? 2 (/ 10 5))
 (eq? 20 (/ 3000 10 5 3))
 
+;; r7rs examples
+(let-values (((q r) (floor/ 5 2)))
+  (and (= q 2) (= r 1)))
+(let-values (((q r) (floor/ -5 2)))
+  (and (= q -3) (= r 1)))
+(let-values (((q r) (floor/ 5 -2)))
+  (and (= q -3) (= r -1)))
+(let-values (((q r) (floor/ -5 -2)))
+  (and (= q 2) (= r -1)))
+(let-values (((q r) (truncate/ 5 2)))
+  (and (= q 2) (= r 1)))
+(let-values (((q r) (truncate/ -5 2)))
+  (and (= q -2) (= r -1)))
+(let-values (((q r) (truncate/ 5 -2)))
+  (and (= q -2) (= r 1)))
+(let-values (((q r) (truncate/ -5 -2)))
+  (and (= q 2) (= r -1)))
+
+(= (floor-quotient 5 2) 2)
+(= (floor-quotient -5 2) -3)
+(= (floor-quotient 5 -2) -3)
+(= (floor-quotient -5 -2) 2)
+(= (floor-remainder 5 2) 1)
+(= (floor-remainder -5 2) 1)
+(= (floor-remainder 5 -2) -1)
+(= (floor-remainder -5 -2) -1)
+
+(= (truncate-quotient 5 2) 2)
+(= (truncate-quotient -5 2) -2)
+(= (truncate-quotient 5 -2) -2)
+(= (truncate-quotient -5 -2) 2)
+(= (truncate-remainder 5 2) 1)
+(= (truncate-remainder -5 2) -1)
+(= (truncate-remainder 5 -2) 1)
+(= (truncate-remainder -5 -2) -1)
+
+;; truncate and remainder are the same as truncate-quotient and
+;; truncate-remainder
+(= (quotient 5 2) 2)
+(= (quotient -5 2) -2)
+(= (quotient 5 -2) -2)
+(= (quotient -5 -2) 2)
+(= (remainder 5 2) 1)
+(= (remainder -5 2) -1)
+(= (remainder 5 -2) 1)
+(= (remainder -5 -2) -1)
+
+;; modulo is the same as floor-remainder
+(= (modulo 5 2) 1)
+(= (modulo -5 2) 1)
+(= (modulo 5 -2) -1)
+(= (modulo -5 -2) -1)
+
+
 (eq? #f (not #t))
 (eq? #t (not #f))
 (eq? #f (not '()))
 (eq? #f (not 'nil))
 (eq? #f (not 1))
 (eq? #f (not 0))
-
 
 (< 10 20)
 (not (< 20 10))

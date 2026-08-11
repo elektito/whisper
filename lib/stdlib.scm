@@ -277,6 +277,35 @@
 (define (square z)
   (* z z))
 
+(define (truncate-quotient m n)
+  (/ m n))
+
+(define (truncate-remainder m n)
+  (- m (* n (truncate-quotient m n))))
+
+(define (truncate/ m n)
+  (values (truncate-quotient m n)
+          (truncate-remainder m n)))
+
+(define (floor-quotient m n)
+  (let ((q (truncate-quotient m n))
+        (r (truncate-remainder m n)))
+    (if (and (not (zero? r))
+             (not (eqv? (negative? m) (negative? n))))
+        (- q 1)
+        q)))
+
+(define (floor-remainder n d)
+  (let ((r (truncate-remainder n d)))
+    (if (and (not (zero? r))
+             (not (eqv? (negative? n) (negative? d))))
+        (+ r d)
+        r)))
+
+(define (floor/ m n)
+  (values (floor-quotient m n)
+          (floor-remainder m n)))
+
 (define (caaar x) (car (car (car x))))
 (define (caadr x) (car (car (cdr x))))
 (define (cadar x) (car (cdr (car x))))
