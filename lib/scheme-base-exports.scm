@@ -10,6 +10,7 @@
         >
         >=
         _
+        abs
         and
         append
         apply
@@ -61,11 +62,13 @@
         error-object-irritants
         error-object-message
         even?
+        expt
         file-error?
         floor/
         floor-quotient
         floor-remainder
         for-each
+        gcd
         get-output-string
         guard
         if
@@ -74,6 +77,7 @@
         integer->char
         integer?
         lambda
+        lcm
         length
         let
         let*

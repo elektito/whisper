@@ -285,6 +285,45 @@
 (define (!= m n)
   (not (= m n)))
 
+(define (expt base power)
+  (cond ((< power 0) (error "expt: negative exponent not supported"))
+        ((= power 0) 1)
+        (else
+         (let loop ((b base) (p power) (acc 1))
+           (cond ((= p 0) acc)
+                 ((even? p) (loop (* b b) (truncate-quotient p 2) acc))
+                 (else (loop (* b b) (truncate-quotient p 2) (* acc b))))))))
+
+(define (abs x)
+  (if (< x 0) (- x) x))
+
+(define (gcd2 a b)
+  (let loop ((x (abs a)) (y (abs b)))
+    (if (= y 0)
+        x
+        (loop y (truncate-remainder x y)))))
+
+(define (lcm2 a b)
+  (if (or (= a 0) (= b 0))
+      0
+      (* (truncate-quotient (abs a) (gcd2 a b)) (abs b))))
+
+(define (gcd . args)
+  (if (null? args)
+      0
+      (let loop ((rest (cdr args)) (acc (car args)))
+        (if (null? rest)
+            (abs acc)
+            (loop (cdr rest) (gcd2 acc (car rest)))))))
+
+(define (lcm . args)
+  (if (null? args)
+      1
+      (let loop ((rest (cdr args)) (acc (car args)))
+        (if (null? rest)
+            (abs acc)
+            (loop (cdr rest) (lcm2 acc (car rest)))))))
+
 (define min
   (case-lambda
    ((x) x)

@@ -211,6 +211,20 @@ and still a comment
 (= (modulo 5 -2) -1)
 (= (modulo -5 -2) -1)
 
+(= 10 (abs -10))
+(= 10 (abs 10))
+(= 0 (abs 0))
+
+(= 4 (gcd 32 -36))
+(= 10 (gcd 10 20 30))
+(= 0 (gcd))
+(= 288 (lcm 32 -36))
+(= 60 (lcm 10 20 30))
+(= 1 (lcm))
+
+(= 0 (expt 0 3))
+(= 1 (expt 1 3))
+(= 81 (expt 3 4))
 
 (eq? #f (not #t))
 (eq? #t (not #f))
