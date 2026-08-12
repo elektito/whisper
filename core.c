@@ -1,9 +1,10 @@
 #include "core.h"
 
+#include <dirent.h>
 #include <dlfcn.h>
+#include <poll.h>
 
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdint.h>
@@ -2284,6 +2285,45 @@ value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(IS_CHAR(x));
 }
 
+value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%u8-ready? needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+
+    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) {
+        raise_error("%%char-ready? only works on input ports");
+    }
+
+    if (GET_OBJECT(port)->port.string) {
+        return TRUE;
+    }
+
+    FILE *fp = GET_OBJECT(port)->port.fp;
+
+    /* FIXME check if there's any data buffered in the FILE. this is
+     * non-portable (glibc specific). the correct way to handle this is
+     * probably to not rely on FILE* and use OS system calls directly,
+     * and optionally implement our own buffering. */
+    int chars_in_buffer = (fp->_IO_read_ptr != NULL && (fp->_IO_read_ptr < fp->_IO_read_end));
+    if (chars_in_buffer) {
+        return TRUE;
+    }
+
+    int fd = fileno(fp);
+    struct pollfd pfd = { .fd = fd, .events = POLLIN};
+    int r = poll(&pfd, 1, 0);
+
+    printf("poll ret: %d, revents: 0x%x\n", r, pfd.revents);
+
+    /* POLLHUP = EOF, which  still means we should return true */
+    if (r > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 value primcall_close_port(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
     value port = next_arg();
@@ -2389,6 +2429,17 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%exit needs a single argument"); }
+    init_args();
+    value code = next_arg();
+    free_args();
+    if (!IS_FIXNUM(code)) { raise_error("%%exit aregument is not an integer"); }
+    cleanup();
+    exit(GET_FIXNUM(code));
+    return VOID;
+}
+
 value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
     init_args();
@@ -2405,6 +2456,20 @@ value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
         exit(GET_FIXNUM(code));
     } else {
         raise_error("invalid exit code");
+    }
+
+    return VOID;
+}
+
+value primcall_percent_flush_output_port(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%flush-output-port needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port)) { raise_error("%%flush-output-port argument is not a port"); }
+
+    if (GET_OBJECT(port)->port.fp) {
+        fflush(GET_OBJECT(port)->port.fp);
     }
 
     return VOID;
