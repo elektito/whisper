@@ -2290,10 +2290,13 @@ value primcall_close_port(environment env, enum call_flags flags, int nargs, ...
     free_args();
     if (!IS_PORT(port)) { raise_error("close-port argument is not a port"); }
     if (GET_OBJECT(port)->port.closed) return VOID;
-    if (GET_OBJECT(port)->port.string) return VOID;
-    int ret = fclose(GET_OBJECT(port)->port.fp);
-    if (ret) { raise_error("failed to close the port: %s", strerror(errno)); }
-    GET_OBJECT(port)->port.closed = 1;
+
+    if (GET_OBJECT(port)->port.fp) {
+        int ret = fclose(GET_OBJECT(port)->port.fp);
+        if (ret) { raise_error("failed to close the port: %s", strerror(errno)); }
+        GET_OBJECT(port)->port.closed = 1;
+    }
+
     return VOID;
 }
 
@@ -2662,6 +2665,7 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     obj->port.string_len = GET_STRING(str)->len;
     obj->port.string_pos = 0;
     obj->port.string = malloc(obj->port.string_len);
+    obj->port.fp = 0;
     memcpy(obj->port.string, GET_STRING(str)->s, obj->port.string_len);
     obj->port.read_char = string_read_char;
     obj->port.peek_char = string_peek_char;
@@ -2699,6 +2703,7 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     obj->port.string_len = 0;
     obj->port.printf = string_printf;
     obj->port.write_char = string_write_char;
+    obj->port.fp = 0;
     return OBJECT(obj);
 }
 
