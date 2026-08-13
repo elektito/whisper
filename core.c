@@ -243,6 +243,8 @@ const char *find_func_name(funcptr func) {
         memcpy(buf, unknown, strlen(unknown));
         buf[strlen(unknown)] = 0;
     } else {
+        /* TODO if name starts with "##" followed by a number, unmangle
+         * it first for a clearer error message. */
         buf = malloc(ctx.name_len + 1);
         memcpy(buf, ctx.name, ctx.name_len);
         buf[ctx.name_len] = 0;
