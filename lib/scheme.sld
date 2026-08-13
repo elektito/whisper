@@ -22,6 +22,10 @@
   (import (whisper))
   (include-library-declarations "scheme-process-context-exports.scm"))
 
+(define-library (scheme read)
+  (import (whisper))
+  (include-library-declarations "scheme-read-exports.scm"))
+
 (define-library (scheme write)
   (import (whisper))
   (include-library-declarations "scheme-write-exports.scm"))

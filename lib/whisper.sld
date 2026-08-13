@@ -2,6 +2,7 @@
   (import (whisper core))
   (include "stdlib.scm")
   (include "format.scm")
+  (include "read.scm")
 
   (include-library-declarations "scheme-base-exports.scm")
   (include-library-declarations "scheme-cxr-exports.scm")
@@ -9,6 +10,7 @@
   (include-library-declarations "scheme-case-lambda-exports.scm")
   (include-library-declarations "scheme-file-exports.scm")
   (include-library-declarations "scheme-process-context-exports.scm")
+  (include-library-declarations "scheme-read-exports.scm")
   (include-library-declarations "scheme-write-exports.scm")
 
   (export atom?
