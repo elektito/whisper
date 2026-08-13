@@ -1426,6 +1426,16 @@
    ((str port start) (write-string str port start (string-length str)))
    ((str port start end) (%display (substring str start end) port))))
 
+(define char-ready?
+  (case-lambda
+   (() (char-ready? (current-input-port)))
+   ((port) (%u8-ready? port))))
+
+(define flush-output-port
+  (case-lambda
+   (() (flush-output-port (current-output-port)))
+   ((port) (%flush-output-port port))))
+
 (define (call-with-port port proc)
   (let ((result (proc port)))
     (close-port port)

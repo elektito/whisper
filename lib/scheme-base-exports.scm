@@ -31,6 +31,7 @@
         cddr
         cdr
         char->integer
+        char-ready?
         char-whitespace?
         char<=?
         char<?
@@ -67,6 +68,7 @@
         floor/
         floor-quotient
         floor-remainder
+        flush-output-port
         for-each
         gcd
         get-output-string
