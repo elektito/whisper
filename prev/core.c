@@ -1,9 +1,10 @@
 #include "core.h"
 
+#include <dirent.h>
 #include <dlfcn.h>
+#include <poll.h>
 
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdint.h>
@@ -59,6 +60,17 @@ static size_t gc_lazy_reclaims = 0;
 
 static struct pool **heaps;
 static int n_heaps = 0;
+
+/* symbols used by the runtime */
+value symbol_file;
+value symbol_system;
+value symbol_value;
+value symbol_macro;
+value symbol_special;
+value symbol_aux;
+value symbol_primcall;
+value symbol_alias;
+value symbol_env_alias;
 
 /*************** non-static variables **************/
 
@@ -158,26 +170,42 @@ static void terminate_with_message(const char *msg, size_t len) {
 }
 
 __attribute__((noreturn, cold))
-void raise_error(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int len = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
+void _vraise_error(value kind, const char *fmt, va_list ap) {
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+
+    int len = vsnprintf(NULL, 0, fmt, ap_copy);
+    va_end(ap_copy);
 
     char *buf = malloc(len + 1);
-    va_start(ap, fmt);
     vsnprintf(buf, len + 1, fmt, ap);
     va_end(ap);
 
     if (system_exception_handler) {
         value msg = make_string(buf, len);
         free(buf);
-        call(system_exception_handler, 1, msg);
+        call(system_exception_handler, 2, kind, msg);
 
         panic("system exception handler returned");
     }
 
     terminate_with_message(buf, len);
+}
+
+__attribute__((noreturn, cold))
+void raise_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    _vraise_error(symbol_system, fmt, ap);
+    va_end(ap);
+}
+
+__attribute__((noreturn, cold))
+void raise_file_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    _vraise_error(symbol_file, fmt, ap);
+    va_end(ap);
 }
 
 __attribute__((noreturn, cold))
@@ -1749,6 +1777,21 @@ void env_delegate(value env, value sym, value target) {
 
 void init_symbols(void) {
     hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);
+
+    /* intern symbols needed by the runtime */
+
+    /* error kind symbols */
+    symbol_file = extend_global_env("file", 4, sym_unbound);
+    symbol_system = extend_global_env("system", 6, sym_unbound);
+
+    /* sym_kind symbolic names */
+    symbol_value = extend_global_env("value", 5, sym_unbound);
+    symbol_macro = extend_global_env("macro", 5, sym_unbound);
+    symbol_special = extend_global_env("special", 7, sym_unbound);
+    symbol_aux = extend_global_env("aux", 3, sym_unbound);
+    symbol_primcall = extend_global_env("primcall", 8, sym_unbound);
+    symbol_alias = extend_global_env("alias", 5, sym_unbound);
+    symbol_env_alias = extend_global_env("env-alias", 9, sym_unbound);
 }
 
 value extend_global_env(char *name, size_t name_len, enum sym_kind kind) {
@@ -2242,15 +2285,58 @@ value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(IS_CHAR(x));
 }
 
+value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%u8-ready? needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+
+    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) {
+        raise_error("%%char-ready? only works on input ports");
+    }
+
+    if (GET_OBJECT(port)->port.string) {
+        return TRUE;
+    }
+
+    FILE *fp = GET_OBJECT(port)->port.fp;
+
+    /* FIXME check if there's any data buffered in the FILE. this is
+     * non-portable (glibc specific). the correct way to handle this is
+     * probably to not rely on FILE* and use OS system calls directly,
+     * and optionally implement our own buffering. */
+    int chars_in_buffer = (fp->_IO_read_ptr != NULL && (fp->_IO_read_ptr < fp->_IO_read_end));
+    if (chars_in_buffer) {
+        return TRUE;
+    }
+
+    int fd = fileno(fp);
+    struct pollfd pfd = { .fd = fd, .events = POLLIN};
+    int r = poll(&pfd, 1, 0);
+
+    printf("poll ret: %d, revents: 0x%x\n", r, pfd.revents);
+
+    /* POLLHUP = EOF, which  still means we should return true */
+    if (r > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 value primcall_close_port(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
     value port = next_arg();
     free_args();
     if (!IS_PORT(port)) { raise_error("close-port argument is not a port"); }
     if (GET_OBJECT(port)->port.closed) return VOID;
-    int ret = fclose(GET_OBJECT(port)->port.fp);
-    if (ret) { raise_error("failed to close the port: %s", strerror(errno)); }
-    GET_OBJECT(port)->port.closed = 1;
+
+    if (GET_OBJECT(port)->port.fp) {
+        int ret = fclose(GET_OBJECT(port)->port.fp);
+        if (ret) { raise_error("failed to close the port: %s", strerror(errno)); }
+        GET_OBJECT(port)->port.closed = 1;
+    }
+
     return VOID;
 }
 
@@ -2309,6 +2395,11 @@ value primcall_percent_display(environment env, enum call_flags flags, int nargs
     return VOID;
 }
 
+value primcall_eof_object(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("eof-object takes no arguments"); }
+    return EOFOBJ;
+}
+
 value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("eof-object? needs a single argument"); }
     init_args();
@@ -2338,6 +2429,17 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%exit needs a single argument"); }
+    init_args();
+    value code = next_arg();
+    free_args();
+    if (!IS_FIXNUM(code)) { raise_error("%%exit aregument is not an integer"); }
+    cleanup();
+    exit(GET_FIXNUM(code));
+    return VOID;
+}
+
 value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
     init_args();
@@ -2354,6 +2456,20 @@ value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
         exit(GET_FIXNUM(code));
     } else {
         raise_error("invalid exit code");
+    }
+
+    return VOID;
+}
+
+value primcall_percent_flush_output_port(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%flush-output-port needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port)) { raise_error("%%flush-output-port argument is not a port"); }
+
+    if (GET_OBJECT(port)->port.fp) {
+        fflush(GET_OBJECT(port)->port.fp);
     }
 
     return VOID;
@@ -2590,7 +2706,7 @@ value primcall_open_input_file(environment env, enum call_flags flags, int nargs
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
     FILE *fp = fopen(obj->port.filename, "r");
-    if (!fp) { raise_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
+    if (!fp) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
 
     obj->type = OBJ_PORT;
     obj->port.direction = PORT_DIR_READ;
@@ -2614,6 +2730,7 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     obj->port.string_len = GET_STRING(str)->len;
     obj->port.string_pos = 0;
     obj->port.string = malloc(obj->port.string_len);
+    obj->port.fp = 0;
     memcpy(obj->port.string, GET_STRING(str)->s, obj->port.string_len);
     obj->port.read_char = string_read_char;
     obj->port.peek_char = string_peek_char;
@@ -2630,7 +2747,7 @@ value primcall_open_output_file(environment env, enum call_flags flags, int narg
     if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
     char *filenamez = strz(GET_STRING(filename));
     FILE *fp = fopen(filenamez, "w");
-    if (!fp) { raise_error("error opening file '%s': %s", filenamez, strerror(errno)); }
+    if (!fp) { raise_file_error("error opening file '%s': %s", filenamez, strerror(errno)); }
     free(filenamez);
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
@@ -2651,6 +2768,7 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     obj->port.string_len = 0;
     obj->port.printf = string_printf;
     obj->port.write_char = string_write_char;
+    obj->port.fp = 0;
     return OBJECT(obj);
 }
 
@@ -2765,7 +2883,7 @@ value primcall_set_system_exception_handler(environment env, enum call_flags fla
     free_args();
 
     if (!IS_CLOSURE(proc)) { raise_error("set-system-exception-handler argument must be a procedure"); }
-    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 1)) { raise_error("set-system-exception-handler: passed procedure must accept one argument"); }
+    if (!CLOSURE_ACCEPTS(GET_CLOSURE(proc), 2)) { raise_error("set-system-exception-handler: passed procedure must accept two arguments"); }
     system_exception_handler = proc;
 
     return VOID;
@@ -2951,25 +3069,6 @@ value primcall_string_eq_q(environment env, enum call_flags flags, int nargs, ..
         value cur = next_arg();
         if (!IS_STRING(cur)) { raise_error("string=? argument is not a string"); }
         if (string_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
-            free_args();
-            return FALSE;
-        }
-        prev = cur;
-    }
-
-    free_args();
-    return TRUE;
-}
-
-value primcall_string_ci_eq_q(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 2) { raise_error("string-ci=? needs at least two arguments"); }
-    init_args();
-    value prev = next_arg();
-    if (!IS_STRING(prev)) { raise_error("string-ci=? argument is not a string"); }
-    for (int i = 1; i < nargs; ++i) {
-        value cur = next_arg();
-        if (!IS_STRING(cur)) { raise_error("string-ci=? argument is not a string"); }
-        if (string_ci_cmp(GET_STRING(prev), GET_STRING(cur)) != 0) {
             free_args();
             return FALSE;
         }
@@ -3865,15 +3964,14 @@ value primcall_make_empty_environment(environment env, enum call_flags flags, in
  * symbol: absence is #f from environment-lookup, and environment-bind!
  * never writes it. */
 static value sym_kind_to_symbol(enum sym_kind kind) {
-    /* extend_global_env with sym_unbound is just interning here */
     switch (kind) {
-    case sym_value:     return extend_global_env("value", 5, sym_unbound);
-    case sym_macro:     return extend_global_env("macro", 5, sym_unbound);
-    case sym_special:   return extend_global_env("special", 7, sym_unbound);
-    case sym_aux:       return extend_global_env("aux", 3, sym_unbound);
-    case sym_primcall:  return extend_global_env("primcall", 8, sym_unbound);
-    case sym_alias:     return extend_global_env("alias", 5, sym_unbound);
-    case sym_env_alias: return extend_global_env("env-alias", 9, sym_unbound);
+    case sym_value: return symbol_value;
+    case sym_macro: return symbol_macro;
+    case sym_special: return symbol_special;
+    case sym_aux: return symbol_aux;
+    case sym_primcall: return symbol_primcall;
+    case sym_alias: return symbol_alias;
+    case sym_env_alias: return symbol_env_alias;
     default:
         panic("internal error: unhandled sym_kind case");
     }
@@ -3881,13 +3979,13 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
 
 /* the reverse of sym_kind_to_symbol */
 static enum sym_kind symbol_to_sym_kind(value sym) {
-    if (sym == extend_global_env("value", 5, sym_unbound))     return sym_value;
-    if (sym == extend_global_env("macro", 5, sym_unbound))     return sym_macro;
-    if (sym == extend_global_env("special", 7, sym_unbound))   return sym_special;
-    if (sym == extend_global_env("aux", 3, sym_unbound))       return sym_aux;
-    if (sym == extend_global_env("primcall", 8, sym_unbound))  return sym_primcall;
-    if (sym == extend_global_env("alias", 5, sym_unbound))     return sym_alias;
-    if (sym == extend_global_env("env-alias", 9, sym_unbound)) return sym_env_alias;
+    if (sym == symbol_value) return sym_value;
+    if (sym == symbol_macro) return sym_macro;
+    if (sym == symbol_special) return sym_special;
+    if (sym == symbol_aux) return sym_aux;
+    if (sym == symbol_primcall) return sym_primcall;
+    if (sym == symbol_alias) return sym_alias;
+    if (sym == symbol_env_alias) return sym_env_alias;
     struct symbol *s = GET_SYMBOL(sym);
     raise_error("environment-bind!: invalid kind: %.*s", (int) s->name_len, s->name);
 }
