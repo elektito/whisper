@@ -2440,27 +2440,6 @@ value primcall_percent_exit(environment env, enum call_flags flags, int nargs, .
     return VOID;
 }
 
-value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
-    init_args();
-    value code = nargs == 1 ? next_arg() : FIXNUM(0);
-    free_args();
-    if (IS_BOOL(code)) {
-        cleanup();
-        if (GET_BOOL(code))
-            exit(0);
-        else
-            exit(1);
-    } else if (IS_FIXNUM(code)) {
-        cleanup();
-        exit(GET_FIXNUM(code));
-    } else {
-        raise_error("invalid exit code");
-    }
-
-    return VOID;
-}
-
 value primcall_percent_flush_output_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("%%flush-output-port needs a single argument"); }
     init_args();

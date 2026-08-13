@@ -1470,3 +1470,30 @@
   (unless (output-port? port)
     (raise (file-error "Not an output port")))
   (close-port port))
+
+;; process-context
+
+;; will be set further down
+(define exit-continuation #f)
+
+(define exit
+  (case-lambda
+   (() (exit 0))
+   ((exit-code) (exit-continuation exit-code))))
+
+(define emergency-exit
+  (case-lambda
+   (() (%exit 0))
+   ((exit-code) (%exit (if (integer? exit-code)
+                           (%exit exit-code)
+                           (if exit-code 0 1))))))
+
+;; capture a continuation that will exit the system when called again, and store
+;; it in exit-continuation. we exit this way to make sure all dynamic-wind
+;; out-guards are called before we exit.
+(let* ((dont-exit (gensym))
+       (code (call/cc (lambda (k)
+                        (set! exit-continuation k)
+                        dont-exit))))
+  (unless (eq? code dont-exit)
+    (emergency-exit code)))
