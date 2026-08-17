@@ -901,7 +901,7 @@
                                 (let ((car-varnum (compile-quoted-item func indent (car f))))
                                   (gen-code func indent "x~a = make_pair(x~a, x~a);\n" varnum car-varnum varnum)))))
                         varnum))
-        (else (compile-error "unknown quoted value: ~s" form))))
+        (else (compile-error "internal error: unknown quoted value: ~s" form))))
 
 (define (compile-quote func indent form)
   (if (!= (length form) 2)
