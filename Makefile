@@ -17,7 +17,7 @@ LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
                    lib/scheme-process-context-exports.scm \
                    lib/scheme-write-exports.scm
 
-WHISPER_LIB_SRC = lib/stdlib.scm lib/format.scm lib/whisper.sld $(LIB_EXPORT_FILES)
+WHISPER_LIB_SRC = lib/stdlib.scm lib/format.scm lib/read.scm lib/whisper.sld $(LIB_EXPORT_FILES)
 
 all: $(CURRENT)
 
