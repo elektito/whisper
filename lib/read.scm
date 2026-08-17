@@ -5,36 +5,101 @@
 (define (read-error fmt . args)
   (error (apply format fmt args)))
 
+(define-record-type <reader-state>
+  (make-reader-state filename line column line-lengths)
+  reader-state?
+  (filename reader-state-filename reader-state-filename-set!)
+  (line reader-state-line reader-state-line-set!)
+  (column reader-state-column reader-state-column-set!)
+  (line-lengths reader-state-line-lengths reader-state-line-lengths-set!))
+
+(define (new-reader-state filename)
+  (make-reader-state filename 1 1 '()))
+
+(define (line+)
+  (reader-state-line-set! (reader-state) (+ 1 (reader-state-line (reader-state)))))
+
+(define (col+)
+  (reader-state-column-set! (reader-state) (+ 1 (reader-state-column (reader-state)))))
+
+(define (line-)
+  (reader-state-line-set! (reader-state) (- (reader-state-line (reader-state)) 1)))
+
+(define (col-)
+  (reader-state-column-set! (reader-state) (- (reader-state-column (reader-state)) 1)))
+
+(define (reset-col)
+  ;; push current column onto line-lengths
+  (reader-state-line-lengths-set! (reader-state)
+                                  (cons (reader-state-column (reader-state))
+                                        (reader-state-line-lengths (reader-state))))
+  ;; reset column to 1
+  (reader-state-column-set! (reader-state) 1))
+
+(define (stateful-read-char port)
+  (let ((ch (read-char port)))
+    (if (char=? ch #\newline)
+        (begin
+          (line+)
+          (reset-col))
+        (col+))
+    ch))
+
+(define (revert-col-to-last)
+  (line-)
+  (let ((last (car (reader-state-line-lengths (reader-state)))))
+    (reader-state-line-lengths-set! (reader-state) (cdr (reader-state-line-lengths (reader-state))))
+    (reader-state-column-set! (reader-state) last)))
+
+(define (stateful-unread-char ch port)
+  (if (char=? ch #\newline)
+      (revert-col-to-last)
+      (col-))
+  (unread-char ch port))
+
+(define reader-state (make-parameter (new-reader-state "<nofile>")))
+(define reader-wrapper (make-parameter #f))
+
 (define read
   (case-lambda
    (() (read (current-input-port)))
    ((port)
     (skip-whitespace-and-comments port)
-    (let ((ch (peek-char port)))
-      (cond ((eof-object? ch) ch)
-            ((char=? #\( ch) (read-list port))
-            ((char=? #\" ch) (read-string-literal port))
-            ((char=? #\# ch) (read-sharp-thing port))
-            ((char=? #\' ch) (read-quoted-form port))
-            ((char=? #\` ch) (read-quasiquoted-form port))
-            ((char=? #\, ch) (read-unquoted-form port))
-            ((char=? #\| ch) (read-piped-symbol port))
-            ((char=? #\. ch) (read-dot-or-identifier port))
-            ((char=? #\) ch) (read-error "extra closing parenthesis"))
-            (else (read-char port) ; read-identifier-or-number expects first character already read and passed to it
-                  (read-identifier-or-number port ch)))))))
+    (let* ((ch (peek-char port))
+           (start-line (reader-state-line (reader-state)))
+           (start-col (reader-state-column (reader-state)))
+           (result (cond ((eof-object? ch) ch)
+                         ((char=? #\( ch) (read-list port))
+                         ((char=? #\" ch) (read-string-literal port))
+                         ((char=? #\# ch) (read-sharp-thing port))
+                         ((char=? #\' ch) (read-quoted-form port))
+                         ((char=? #\` ch) (read-quasiquoted-form port))
+                         ((char=? #\, ch) (read-unquoted-form port))
+                         ((char=? #\| ch) (read-piped-symbol port))
+                         ((char=? #\. ch) (read-dot-or-identifier port))
+                         ((char=? #\) ch) (read-error "extra closing parenthesis"))
+                         (else (stateful-read-char port) ; read-identifier-or-number expects first character already read and passed to it
+                               (read-identifier-or-number port ch)))))
+      (if (and (not (eof-object? result))
+               (reader-wrapper))
+          ((reader-wrapper) result
+                            start-line
+                            start-col
+                            (reader-state-line (reader-state))
+                            (reader-state-column (reader-state)))
+          result)))))
 
 (define (skip-whitespace-and-comments port)
   (let loop ((ch (peek-char port)))
-    (cond ((char-whitespace? ch) (read-char port) (loop (peek-char port)))
+    (cond ((char-whitespace? ch) (stateful-read-char port) (loop (peek-char port)))
           ((char=? #\; ch) (skip-line-comment port) (loop (peek-char port)))
-          ((char=? #\# ch) (read-char port)
+          ((char=? #\# ch) (stateful-read-char port)
                            (let ((next-char (peek-char port)))
                              (case next-char
-                               ((#\;) (read-char port)
+                               ((#\;) (stateful-read-char port)
                                       (read port)
                                       (loop (peek-char port))) ; read and ignore one datum
-                               ((#\|) (read-char port)
+                               ((#\|) (stateful-read-char port)
                                       (skip-block-comment port)
                                       (loop (peek-char port)))
                                ;; read the last character so we can
@@ -42,45 +107,45 @@
                                ;; notice that two "unread" operations is
                                ;; not guaranteed to be supported on all
                                ;; platforms.
-                               (else (read-char port)
-                                     (unread-char next-char port)
-                                     (unread-char ch port)))))
+                               (else (stateful-read-char port)
+                                     (stateful-unread-char next-char port)
+                                     (stateful-unread-char ch port)))))
           (else (void)))))
 
 (define (skip-line-comment port)
-  (read-char port) ; skip the semicolon character
-  (let loop ((ch (read-char port)))
+  (stateful-read-char port) ; skip the semicolon character
+  (let loop ((ch (stateful-read-char port)))
     (cond ((eof-object? ch) ch)
           ((eq? #\newline ch) ch)
-          (else (loop (read-char port))))))
+          (else (loop (stateful-read-char port))))))
 
 (define (skip-block-comment port)
   (let loop ((depth 1))
     (if (zero? depth)
         (void)
-        (let ((ch (read-char port)))
+        (let ((ch (stateful-read-char port)))
           (cond ((eof-object? ch) (read-error "unterminated block comment"))
                 ((and (char=? ch #\#) (char=? (peek-char port) #\|))
-                 (read-char port) (loop (+ depth 1)))
+                 (stateful-read-char port) (loop (+ depth 1)))
                 ((and (char=? ch #\|) (char=? (peek-char port) #\#))
-                 (read-char port) (loop (- depth 1)))
+                 (stateful-read-char port) (loop (- depth 1)))
                 (else (loop depth)))))))
 
 (define (read-quoted-form port)
-  (read-char port) ; skip the quote character
+  (stateful-read-char port) ; skip the quote character
   (let ((form (read port)))
     (cons 'quote (cons form '()))))
 
 (define (read-quasiquoted-form port)
-  (read-char port) ; skip the quasiquote character
+  (stateful-read-char port) ; skip the quasiquote character
   (let ((form (read port)))
     (cons 'quasiquote (cons form '()))))
 
 (define (read-unquoted-form port)
-  (read-char port) ; skip the unquote (comma) character
+  (stateful-read-char port) ; skip the unquote (comma) character
   (let ((unquote (if (char=? #\@ (peek-char port))
                      (begin
-                       (read-char port)
+                       (stateful-read-char port)
                        'unquote-splicing)
                      'unquote)))
     (let ((form (read port)))
@@ -110,12 +175,12 @@
         (check-for-stray-dot (append (reverse rest) tail)))))
 
 (define (read-list port)
-  (read-char port) ; get rid of the open parenthesis
+  (stateful-read-char port) ; get rid of the open parenthesis
   (skip-whitespace-and-comments port)
   (let loop ((ch (peek-char port))
              (ls '()))
     (cond ((eof-object? ch) (read-error "eof inside list"))
-          ((char=? #\) ch) (read-char port) (postprocess-list ls))
+          ((char=? #\) ch) (stateful-read-char port) (postprocess-list ls))
           (else (let ((item (read port)))
                   (if (eof-object? item)
                       (read-error "eof inside list")
@@ -124,10 +189,10 @@
                         (loop (peek-char port) (cons item ls)))))))))
 
 (define (read-string-literal port)
-  (read-char port) ; get rid of open quotation
+  (stateful-read-char port) ; get rid of open quotation
   (let loop ((ch (peek-char port))
              (s ""))
-    (read-char port)
+    (stateful-read-char port)
     (cond ((eof-object? ch) (read-error "eof in string"))
           ((char=? #\" ch) s)
           ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
@@ -136,10 +201,10 @@
                   (loop (peek-char port) s))))))
 
 (define (read-piped-symbol port)
-  (read-char port) ; get rid of initial pipe
+  (stateful-read-char port) ; get rid of initial pipe
   (let loop ((ch (peek-char port))
              (s ""))
-    (read-char port)
+    (stateful-read-char port)
     (cond ((eof-object? ch) (read-error "eof in piped symbol"))
           ((char=? #\| ch) (string->symbol s))
           ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
@@ -150,7 +215,7 @@
 (define (read-escaped-char port)
   ;; note: the backslash is already read
   (let ((ch (peek-char port)))
-    (read-char port)
+    (stateful-read-char port)
     (case ch
       ((#\a) #\alarm)
       ((#\b) #\backspace)
@@ -171,10 +236,10 @@
 (define (read-escaped-hex-char port)
   ;; reads a character literal like \x22;
   ;; assumes \x is already read
-  (let loop ((ch (read-char port)) (s ""))
+  (let loop ((ch (stateful-read-char port)) (s ""))
     (cond ((eof-object? ch) (read-error "eof inside escape sequence"))
           ((char-is-hex-digit? ch)
-           (loop (read-char port) (string-append-char s ch)))
+           (loop (stateful-read-char port) (string-append-char s ch)))
           ((char=? #\; ch) (let ((n (string->number s 16)))
                              (if n
                                  (integer->char n)
@@ -194,7 +259,7 @@
       (char=? #\) ch)))
 
 (define (read-dot-or-identifier port)
-  (read-char port) ; skip the dot
+  (stateful-read-char port) ; skip the dot
   (let ((ch (peek-char port)))
     (if (or (eof-object? ch)
             (char-is-separator? ch))
@@ -204,15 +269,15 @@
 (define (read-identifier-or-number port first-char)
   (let loop ((first-iter #t) (ch first-char) (s ""))
     (cond ((char-is-separator? ch) (sym-or-num s))
-          ((eq? #\\ ch) (unless first-iter (read-char port))
+          ((eq? #\\ ch) (unless first-iter (stateful-read-char port))
                         (let ((escaped-char (read-escaped-char port)))
                           (loop #f (peek-char port) (string-append-char s escaped-char))))
           (else (unless first-iter
-                  (read-char port))
+                  (stateful-read-char port))
                 (loop #f (peek-char port) (string-append-char s ch))))))
 
 (define (read-sharp-thing port)
-  (read-char port) ; skip the sharp
+  (stateful-read-char port) ; skip the sharp
   (let ((ch (peek-char port)))
     (cond ((eof-object? ch) (read-error "unexpected eof after sharp"))
           ((char=? #\\ ch) (read-char-literal port))
@@ -233,7 +298,7 @@
            (cond ((string=? "#f" s) #f)
                  ((string=? "#t" s) #t)
                  (else (string->symbol s))))
-          (else (read-char port)
+          (else (stateful-read-char port)
                 (loop (peek-char port) (string-append s (make-string 1 ch)))))))
 
 (define (str->char s)
@@ -251,10 +316,10 @@
         (else (read-error "invalid character literal"))))
 
 (define (read-char-literal port)
-  (read-char port) ; skip the backslash
+  (stateful-read-char port) ; skip the backslash
   (when (eof-object? (peek-char port))
     (read-error "eof inside character literal"))
-  (let ((s (make-string 1 (read-char port))))
+  (let ((s (make-string 1 (stateful-read-char port))))
     (let loop ((ch (peek-char port))
                (s s))
       (if (or (eof-object? ch)
@@ -264,5 +329,5 @@
               (char=? #\' ch))
           (str->char s)
           (begin
-            (read-char port)
+            (stateful-read-char port)
             (loop (peek-char port) (string-append s (make-string 1 ch))))))))

@@ -170,18 +170,19 @@
 
 (define (repl env)
   (display "> ")
-  (let ((expr (read (current-input-port))))
-    (unless (eof-object? expr)
-      (guard (e (#t (report-repl-error e)))
-        (call-with-values (lambda () (eval expr env))
-          (lambda v
-            (let loop ((v v))
-              (unless (null? v)
-                (unless (void? (car v))
-                  (write (car v))
-                  (newline))
-                (loop (cdr v)))))))
-      (repl env))))
+  (parameterize ((reader-state (new-reader-state "<repl>")))
+    (let ((expr (read (current-input-port))))
+      (unless (eof-object? expr)
+        (guard (e (else (report-repl-error e)))
+               (call-with-values (lambda () (eval expr env))
+                 (lambda v
+                   (let loop ((v v))
+                     (unless (null? v)
+                       (unless (void? (car v))
+                         (write (car v))
+                         (newline))
+                       (loop (cdr v)))))))
+      (repl env)))))
 
 ;;;;;; main ;;;;;;
 

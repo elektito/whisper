@@ -86,6 +86,10 @@
           unread-char
           urandom
 
+          new-reader-state
+          reader-state
+          reader-wrapper
+
           gc
           gc-manual-mode!
           gc-stats))
