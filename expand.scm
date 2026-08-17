@@ -1012,7 +1012,7 @@
               (and (not (pair? (cadr form)))
                    (not (symbol? (cadr form)))
                    (not (identifier? (cadr form)))))
-      (compile-error "invalid define form")))
+      (compile-error "invalid define form: ~s" form)))
 
   (if (pair? (cadr form))
       (let ((define (car form))
@@ -1056,7 +1056,7 @@
   (let* ((transformer (expand-form form env filename))
          (b (resolve-head (car transformer) env)))
     (unless (and b (binding-is-special b 'syntax-rules))
-      (compile-error "invalid macro transformer (only syntax-rules supported)"))
+      (compile-error "invalid macro transformer (only syntax-rules supported): ~s" form))
     (compile-syntax-rules transformer env)))
 
 (define (expand-form form env filename)
@@ -1104,9 +1104,9 @@
                  ((binding-is-special head-binding 'set!)
                   (process-set! head-binding form env filename))
                  ((binding-is-special head-binding 'define)
-                  (compile-error "define in expression position"))
+                  (compile-error "define in expression position: ~s" form))
                  ((binding-is-special head-binding 'define-syntax)
-                  (compile-error "define-syntax in expression position"))
+                  (compile-error "define-syntax in expression position: ~s" form))
                  ((binding-is-special head-binding 'lambda)
                   (expand-lambda head-binding form env filename))
                  ((binding-is-special head-binding 'let)
@@ -1137,7 +1137,7 @@
 (define (expand-if form env filename)
   (let ((len (length form)))
     (unless (or (= len 3) (= len 4))
-      (compile-error "invalid if form"))
+      (compile-error "invalid if form: ~s" form))
     (expand-other (if (= len 3)
                       (append form (list (list (identifier 'primcall 'void 'void))))
                       form)
@@ -1159,10 +1159,10 @@
 
 (define (process-set! head-binding form env filename)
   (unless (= 3 (length form))
-    (compile-error "invalid set! form"))
+    (compile-error "invalid set! form: ~s" form))
   (let ((target (expand-form (cadr form) env filename)))
     (unless (identifier? target)
-      (compile-error "invalid set! target"))
+      (compile-error "invalid set! target: ~s" form))
     (binding-mutated?-set! (identifier-binding target) #t)
     (list (if (identifier? (car form))
               (car form)
@@ -1172,7 +1172,7 @@
 
 (define (expand-lambda head-binding form env filename)
   (when (< (length form) 3)
-    (compile-error "invalid lambda form"))
+    (compile-error "invalid lambda form: ~s" form))
 
   ;; first convert all formals to a list of ids (including a dotted list
   ;; or just a name to capture all parameters)
@@ -1204,16 +1204,16 @@
 
 (define (expand-let head-binding form env filename)
   (cond ((< (length form) 3)
-         (compile-error "invalid let form"))
+         (compile-error "invalid let form: ~s" form))
         ((and (not (list? (cadr form)))
               (not (symbol-or-identifier? (cadr form))))
-         (compile-error "invalid let form"))
+         (compile-error "invalid let form: ~s" form))
         ((and (symbol-or-identifier? (cadr form))
               (not (list? (caddr form))))
-         (compile-error "invalid let form"))
+         (compile-error "invalid let form: ~s" form))
         ((and (symbol-or-identifier? (cadr form))
               (< (length form) 4))
-         (compile-error "invalid let form"))
+         (compile-error "invalid let form: ~s" form))
         ((let ((bindings (if (symbol-or-identifier? (cadr form))
                              (caddr form)
                              (cadr form))))
@@ -1222,7 +1222,7 @@
                                   (= (length x) 2)
                                   (symbol-or-identifier? (car x))))
                            bindings))))
-         (compile-error "invalid let bindings")))
+         (compile-error "invalid let bindings: ~s" form)))
 
   (if (symbol-or-identifier? (cadr form))
       ;; named let
@@ -1258,15 +1258,15 @@
 
 (define (%expand-letrec form-name head-binding form env filename)
   (cond ((< (length form) 3)
-         (compile-error "bad ~a form" form-name))
+         (compile-error "bad ~a form: ~s" form-name form))
         ((not (list? (cadr form)))
-         (compile-error "bad ~a form" form-name))
+         (compile-error "bad ~a form: ~s" form-name form))
         ((not (all? (map (lambda (x)
                            (and (list? x)
                                 (= (length x) 2)
                                 (symbol-or-identifier? (car x))))
                          (cadr form))))
-         (compile-error "bad ~a bindings" form-name)))
+         (compile-error "bad ~a bindings: ~s" form-name form)))
   (let* ((bindings (cadr form))
          (vars (map (lambda (b) (lexical-binder (car b))) bindings))
          (new-env (make-expand-env vars env))
@@ -1292,7 +1292,7 @@
 
 (define (%expand-let-syntax form-name recursive? head-binding form env filename)
   (when (< (length form) 3)
-    (compile-error "invalid ~a form" form-name))
+    (compile-error "invalid ~a form: ~s" form-name form))
 
   ;; - create a new env with the macro names bound to empty macro
   ;;   bindings

@@ -905,7 +905,7 @@
 
 (define (compile-quote func indent form)
   (if (!= (length form) 2)
-      (compile-error "quote expects a single argument")
+      (compile-error "quote expects a single argument: ~s" form)
       (compile-quoted-item func indent (cadr form))))
 
 (define (parse-lambda-params form)
@@ -1304,7 +1304,7 @@
           ((lexical global alias) (compile-call func indent form tail? discard?))
           ((primcall) (compile-primcall func indent form (lookup-primcall meaning) tail? discard?))
           ((special) (compile-special func indent form meaning tail? discard?))
-          ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name (car form))))
+          ((aux) (compile-error "invalid use of aux keyword `~a`: ~s" (identifier-name (car form)) form))
           (else (compile-error "internal error: unhandled identifier kind: ~a" meaning))))))
 
 (define (var-is-modified? var)
@@ -1343,11 +1343,11 @@
        (intern (func-program func) (identifier-name form))
        (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n"
                  varnum (mangle-name form)))
-      ((special) (compile-error "invalid use of special: ~a" (identifier-name form)))
+      ((special) (compile-error "invalid use of special `~a`: form" (identifier-name form) form))
 
-      ((macro) (compile-error "invalid use of macro name: ~a" (identifier-name form)))
+      ((macro) (compile-error "invalid use of macro name `~a`: ~s" (identifier-name form) form))
 
-      ((aux) (compile-error "invalid use of aux keyword: ~a" (identifier-name form)))
+      ((aux) (compile-error "invalid use of aux keyword `~a`: ~s" (identifier-name form) form))
 
       (else (compile-error "internal error: unknown identifier kind: ~a" (binding-kind b))))
     varnum))
@@ -1611,7 +1611,7 @@
   (cond ((symbol? spec) (cons spec spec))
         ((and (pair? spec) (eq? (car spec) 'rename) (= (length spec) 3))
          (cons (cadr spec) (caddr spec)))
-        (else (compile-error "invalid export spec: ~a" spec))))
+        (else (compile-error "invalid export spec: ~s" spec))))
 
 ;; compiles one (define-library <name> <declaration> ...) form against
 ;; its own fresh <expand-root-env>, then resolves its exports and
@@ -1678,7 +1678,7 @@
           (let ((decl (caar decls))
                 (filename (cdar decls)))
             (unless (and (pair? decl) (symbol? (car decl)))
-              (compile-error "invalid define-library declaration: ~a" decl))
+              (compile-error "invalid define-library declaration: ~s" decl))
             (case (car decl)
               ((import)
                (process-import decl lib-env (program-filename program))
@@ -1729,7 +1729,7 @@
               (list export-name kind local-name)))
         (let ((entry (environment-lookup (expand-root-env-runtime-env lib-env) local-name)))
           (unless entry
-            (compile-error "exported name is neither defined nor imported: ~a" local-name))
+            (compile-error "exported name is neither defined nor imported: ~s" local-name))
           (let ((kind (car entry))
                 (value (cdr entry)))
             (case kind
@@ -1739,9 +1739,9 @@
               ((alias macro)
                (let ((origin (hash-table-ref/default (compilation-unit-import-origins cu) local-name #f)))
                  (unless origin
-                   (compile-error "internal error: no import origin recorded for: ~a" local-name))
+                   (compile-error "internal error: no import origin recorded for: ~s" local-name))
                  (list export-name (if (eq? kind 'alias) 'value 'macro) 'from (car origin) (cdr origin))))
-              (else (compile-error "internal error: unknown export kind: ~a" kind))))))))
+              (else (compile-error "internal error: unknown export kind: ~s" kind))))))))
 
 ;; serialize this program's compiled libraries into one manifest.
 (define (write-manifest program filename)
@@ -1762,7 +1762,7 @@
 ;; batch and eval's undefined-variable checks.
 (define (raise-if-undefined undefined)
   (unless (null? undefined)
-    (compile-error "undefined variable~a: ~a"
+    (compile-error "undefined variable~a: ~s"
                    (if (= 1 (length undefined)) "" "s")
                    (string-join (map (lambda (id) (symbol->string (identifier-name id))) undefined) ", "))))
 
