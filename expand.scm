@@ -1146,9 +1146,11 @@
 ;; that does not introduce new bindings or otherwise need special
 ;; handling. we simply map over the list with expand-form.
 (define (expand-other form env filename)
-  (map (lambda (form)
-         (expand-form form env filename))
-       form))
+  (let loop ((rest form) (acc '()))
+    (cond ((null? rest) (reverse acc))
+          ((pair? rest) (loop (cdr rest)
+                              (cons (expand-form (car rest) env filename) acc)))
+          (else (compile-error "invalid form: ~s" form)))))
 
 (define (expand-quasiquote form env filename)
   (qq-quasiquote form env filename))
