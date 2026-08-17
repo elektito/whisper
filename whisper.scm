@@ -1681,7 +1681,7 @@
               (compile-error "invalid define-library declaration: ~a" decl))
             (case (car decl)
               ((import)
-               (process-import decl lib-env)
+               (process-import decl lib-env (program-filename program))
                (loop (cdr decls) (cons decl imports) export-names forms))
               ((export)
                (loop (cdr decls) imports
@@ -1881,7 +1881,7 @@
   (let* ((env (make-empty-environment))
          (root-env (new-expand-root-env env #f)))
     (for-each (lambda (import-set)
-                (process-import (list 'import import-set) root-env))
+                (process-import (list 'import import-set) root-env #f))
               import-sets)
     (load-imported-libraries! root-env env)
     env))

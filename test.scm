@@ -1744,6 +1744,13 @@ and still a comment
   (equal? (foo xx (1 2 3) (a b))
           '(XX #(1) #(2) #(3) #(a) #(b))))
 
+;; macro transformer is itself a macro call
+(define-syntax sr-builder (syntax-rules ()
+                            ((_) (syntax-rules ()
+                                   ((_) 42)))))
+(define-syntax mac-in-transformer (sr-builder))
+(= (mac-in-transformer) 42)
+
 ;; tco: self tail calls compile to a goto. capture of an unmutated loop
 ;; var must see that iteration's own value, not the final one.
 (equal? '(0 1 2)
