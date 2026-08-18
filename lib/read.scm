@@ -83,6 +83,7 @@
       (if (and (not (eof-object? result))
                (reader-wrapper))
           ((reader-wrapper) result
+                            (reader-state-filename (reader-state))
                             start-line
                             start-col
                             (reader-state-line (reader-state))
