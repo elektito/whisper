@@ -1283,7 +1283,7 @@
                 (ret-varnum (func-next-varnum func)))
             (gen-code func indent "value x~a = ~a(x~a, ~a, ~a, ~a);\n"
                       ret-varnum
-                      (if (eq? tail? #t) "tail_call_with_args" "call_with_args")
+                      (if tail? "tail_call_with_args" "call_with_args")
                       func-varnum
                       (call-flags-string tail? discard?)
                       (length arg-varnums)
