@@ -973,7 +973,7 @@
            ;; it.
            (reuse? (and existing (eq? 'global (binding-kind existing))))
            (library-name (and (expand-root-env? env)
-                               (compilation-unit-library-name (expand-root-env-compilation-unit env))))
+                              (compilation-unit-library-name (expand-root-env-compilation-unit env))))
            (binding (cond (reuse? existing)
                           (library-name (new-binding 'global (library-mangle-name library-name key)))
                           (else (new-binding 'global key))))

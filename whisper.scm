@@ -301,8 +301,8 @@
   (format output "static const char *required_libs[] = {\n")
   (let ((own-names (map library-name (program-libraries program)))
         (imports (apply append
-                         (map cdr ;; library-imports are in the form (import ...)
-                              (apply append (map library-imports (program-libraries program)))))))
+                        (map cdr ;; library-imports are in the form (import ...)
+                             (apply append (map library-imports (program-libraries program)))))))
     (let loop ((imports imports) (seen own-names))
       (unless (null? imports)
         (let ((name (import-set-library-name (car imports))))
@@ -1135,7 +1135,7 @@
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
         (let ((varnum (compile-letrec-init func (+ 1 indent) (identifier-binding (caar bindings))
-                                            (cadar bindings) eligible-bindings)))
+                                           (cadar bindings) eligible-bindings)))
           (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n" (mangle-unique-name (caar bindings)) varnum))
         (loop (cdr bindings))))
 
