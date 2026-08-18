@@ -184,6 +184,12 @@
 ;; filename (like in the repl).
 (define *read-included-file*)
 
+;; if this is injected, it should be set to a function that receives two
+;; forms, both pairs, and lets it known that the first pair was replaced
+;; with the second. this can be used to keep track of source location
+;; information.
+(define *replace-form* #f)
+
 ;;;;;; private globals ;;;;;;
 
 ;; loaded libraries, as entries of the form (lib-name lib results) where
@@ -627,6 +633,10 @@
          (prior (hash-table-ref/default refs name #f)))
     (hash-table-set! refs name (cons id (or immediate? (and prior (cdr prior)))))))
 
+(define (replace-form form1 form2)
+  (when *replace-form*
+    (*replace-form* form1 form2)))
+
 ;;;;;; libraries ;;;;;;
 
 (define-record-type <library>
@@ -961,8 +971,8 @@
 ;; like (define (f . formals) <body>) are desugared to normal define
 ;; with lambda. valueless defines like (define x) are converted to
 ;; (define x (void)).
-(define (expand-top-level-define head-binding form env filename)
-  (let ((form (validate-and-normalize-define form env)))
+(define (expand-top-level-define head-binding define-form env filename)
+  (let ((form (validate-and-normalize-define define-form env)))
     (let* ((name (cadr form))
            (key (binder-key name))
            (existing (expand-env-lookup env key))
@@ -984,11 +994,13 @@
         ;; r7rs small treats a redefinition the same as set!
         (binding-mutated?-set! redefinition #t))
       (hash-table-set! defines key binding)
-      (let ((define (if (identifier? (car form))
-                        (car form)
-                        (make-identifier (car form) head-binding)))
-            (expanded-value (expand-form (caddr form) env filename)))
-        (list define name expanded-value)))))
+      (let* ((define (if (identifier? (car form))
+                         (car form)
+                         (make-identifier (car form) head-binding)))
+             (expanded-value (expand-form (caddr form) env filename))
+             (result (list define name expanded-value)))
+        (replace-form define-form result)
+        result))))
 
 ;; validate the given define form and then normalize it so it's always
 ;; in the form of (define name value).
@@ -1088,41 +1100,43 @@
         ((atom? form) form)
         (else ;; pair
          (let* ((head (car form))
-                (head-binding (resolve-head head env)))
-           (cond ((not head-binding) (expand-other form env filename))
-                 ((eq? 'macro (binding-kind head-binding))
-                  (expand-form (expand-macro head-binding form env) env filename))
-                 ((binding-is-special head-binding 'quote)
-                  (list (if (identifier? head)
-                            head
-                            (make-identifier head head-binding))
-                        (cadr form)))
-                 ((binding-is-special head-binding 'quasiquote)
-                  (expand-quasiquote form env filename))
-                 ((binding-is-special head-binding 'if)
-                  (expand-if form env filename))
-                 ((binding-is-special head-binding 'set!)
-                  (process-set! head-binding form env filename))
-                 ((binding-is-special head-binding 'define)
-                  (compile-error "define in expression position: ~s" form))
-                 ((binding-is-special head-binding 'define-syntax)
-                  (compile-error "define-syntax in expression position: ~s" form))
-                 ((binding-is-special head-binding 'lambda)
-                  (expand-lambda head-binding form env filename))
-                 ((binding-is-special head-binding 'let)
-                  (expand-let head-binding form env filename))
-                 ((binding-is-special head-binding 'letrec)
-                  (expand-letrec head-binding form env filename))
-                 ((binding-is-special head-binding 'letrec*)
-                  (expand-letrec* head-binding form env filename))
-                 ((binding-is-special head-binding 'let-syntax)
-                  (expand-let-syntax head-binding form env filename))
-                 ((binding-is-special head-binding 'letrec-syntax)
-                  (expand-letrec-syntax head-binding form env filename))
-                 ((binding-is-special head-binding 'include)
-                  (expand-include form env filename))
-                 ((binding-is-special head-binding 'syntax-rules) form)
-                 (else (expand-other form env filename)))))))
+                (head-binding (resolve-head head env))
+                (result (cond ((not head-binding) (expand-other form env filename))
+                              ((eq? 'macro (binding-kind head-binding))
+                               (expand-form (expand-macro head-binding form env) env filename))
+                              ((binding-is-special head-binding 'quote)
+                               (list (if (identifier? head)
+                                         head
+                                         (make-identifier head head-binding))
+                                     (cadr form)))
+                              ((binding-is-special head-binding 'quasiquote)
+                               (expand-quasiquote form env filename))
+                              ((binding-is-special head-binding 'if)
+                               (expand-if form env filename))
+                              ((binding-is-special head-binding 'set!)
+                               (process-set! head-binding form env filename))
+                              ((binding-is-special head-binding 'define)
+                               (compile-error "define in expression position: ~s" form))
+                              ((binding-is-special head-binding 'define-syntax)
+                               (compile-error "define-syntax in expression position: ~s" form))
+                              ((binding-is-special head-binding 'lambda)
+                               (expand-lambda head-binding form env filename))
+                              ((binding-is-special head-binding 'let)
+                               (expand-let head-binding form env filename))
+                              ((binding-is-special head-binding 'letrec)
+                               (expand-letrec head-binding form env filename))
+                              ((binding-is-special head-binding 'letrec*)
+                               (expand-letrec* head-binding form env filename))
+                              ((binding-is-special head-binding 'let-syntax)
+                               (expand-let-syntax head-binding form env filename))
+                              ((binding-is-special head-binding 'letrec-syntax)
+                               (expand-letrec-syntax head-binding form env filename))
+                              ((binding-is-special head-binding 'include)
+                               (expand-include form env filename))
+                              ((binding-is-special head-binding 'syntax-rules) form)
+                              (else (expand-other form env filename)))))
+           (replace-form form result)
+           result))))
 
 ;; expand non-top-level include form. an include is equivalent to a
 ;; begin around the contents of the files it names, so that is what we

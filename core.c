@@ -107,45 +107,95 @@ static void symbols_ht_each(value k, value v, void *ctx) {
 
 #ifdef DEBUG
 
-static funcptr *stacktrace = NULL;
-static int stacktrace_size = 0;
-static int stacktrace_cap = 0;
+static struct shadow_stack_frame *shadow_stack = NULL;
+static int shadow_stack_size = 0;
+static int shadow_stack_cap = 0;
 
 void enter_proc(funcptr func) {
-    if (stacktrace_size == stacktrace_cap) {
-        stacktrace_cap *= 2;
-        if (stacktrace_cap == 0) {
-            stacktrace_cap = 16;
+    if (shadow_stack_size == shadow_stack_cap) {
+        shadow_stack_cap *= 2;
+        if (shadow_stack_cap == 0) {
+            shadow_stack_cap = 16;
         }
 
-        stacktrace = realloc(stacktrace, stacktrace_cap * sizeof(funcptr));
+        shadow_stack = realloc(shadow_stack, shadow_stack_cap * sizeof(struct shadow_stack_frame));
     }
 
-    stacktrace[stacktrace_size++] = func;
+    int idx = shadow_stack_size++;
+    shadow_stack[idx].func = func;
+    shadow_stack[idx].filename = "";
+    shadow_stack[idx].start_line = -1;
+    shadow_stack[idx].start_col = -1;
+    shadow_stack[idx].end_line = -1;
+    shadow_stack[idx].end_col = -1;
 }
 
 void leave_proc(void) {
-    stacktrace_size--;
+    shadow_stack_size--;
 }
 
 /* unlike most our functions, this one is not static so hopefully it
  * won't be inlined and be still availble in the debugger, in case we
  * want to call it directly. */
 void print_stacktrace(void) {
-    if (stacktrace_size == 0) {
+    if (shadow_stack_size == 0) {
         fprintf(stderr, "Stacktrace is empty.\n");
         return;
     }
 
-    int idx = 1;
-    for (int i = 0; i < stacktrace_size; ++i) {
+    for (int i = 0; i < shadow_stack_size; ++i) {
         struct symbol_ht_ctx ctx;
         ctx.name_len = 0;
-        ctx.func = stacktrace[i];
+        ctx.func = shadow_stack[i].func;
         hash_table_each(&symbols, symbols_ht_each, &ctx);
 
-        fprintf(stderr, "[%d] %.*s\n", idx++, (int)ctx.name_len, ctx.name);
+        if (ctx.name_len) {
+            fprintf(stderr, "[%d] %.*s\n", i, (int)ctx.name_len, ctx.name);
+        } else {
+            fprintf(stderr, "[%d] (unknown)\n", i);
+        }
+
+        /* print source form, if available */
+        if (shadow_stack[i].start_line > 0) {
+            FILE *fp = fopen(shadow_stack[i].filename, "r");
+            if (fp) {
+                int cur_line = 1;
+                int cur_col = 1;
+                int ch;
+
+                while ((ch = fgetc(fp)) != EOF) {
+                    if (cur_line > shadow_stack[i].end_line || (cur_line == shadow_stack[i].end_line && cur_col >= shadow_stack[i].end_col)) {
+                        break;
+                    }
+
+                    if (cur_line > shadow_stack[i].start_line || (cur_line == shadow_stack[i].start_line && cur_col >= shadow_stack[i].start_col)) {
+                        fputc(ch, stderr);
+                    }
+
+                    if (ch == '\n') {
+                        cur_line++;
+                        cur_col = 1;
+                    } else {
+                        cur_col++;
+                    }
+                }
+
+                fclose(fp);
+                fprintf(stderr, "\n");
+            } else {
+                printf("Could not open source file: %s\n", shadow_stack[i].filename);
+            }
+        }
     }
+}
+
+void set_form_span(const char *filename, int start_line, int start_col, int end_line, int end_col) {
+    int last = shadow_stack_size - 1;
+    shadow_stack[last].filename = filename;
+    shadow_stack[last].start_line = start_line;
+    shadow_stack[last].start_col = start_col;
+    shadow_stack[last].end_line = end_line;
+    shadow_stack[last].end_col = end_col;
 }
 
 #else
@@ -882,7 +932,7 @@ static void gc_free_block(void *p, struct pool *heap) {
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
 #ifdef DEBUG
-            free(obj->continuation.stacktrace);
+            free(obj->continuation.shadow_stack);
 #endif
             break;
         default:
@@ -2078,18 +2128,19 @@ static void reinstate_stack(value cont) {
     /* restore the shadow stack to the depth and contents it had at capture.
      * these are plain globals, so the memcpy above does not touch them.
      *
-     * stacktrace_cap must not be restored. it describes how big the
+     * shadow_stack_cap need not be restored. it describes how big the
      * array currently is, which is a fact about the live allocation and
      * not about the captured state. we never change the pointer itself
      * so whatever we memcpy over the buffer is lower than or equal to
      * cap. */
-    if (GET_OBJECT(cont)->continuation.stacktrace_size > 0) {
-        memcpy(stacktrace,
-               GET_OBJECT(cont)->continuation.stacktrace,
-               GET_OBJECT(cont)->continuation.stacktrace_size * sizeof(funcptr));
+    if (GET_OBJECT(cont)->continuation.shadow_stack_size > 0) {
+        memcpy(shadow_stack,
+               GET_OBJECT(cont)->continuation.shadow_stack,
+               GET_OBJECT(cont)->continuation.shadow_stack_size * sizeof(struct shadow_stack_frame));
     }
 
-    stacktrace_size = GET_OBJECT(cont)->continuation.stacktrace_size;
+    printf("CCCCCC\n");
+    shadow_stack_size = GET_OBJECT(cont)->continuation.shadow_stack_size;
 #endif
 
     longjmp(GET_OBJECT(cont)->continuation.jmp_buf, 1);
@@ -2143,8 +2194,8 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 #ifdef DEBUG
     /* before any allocation point, so a collection can never see the field
      * holding the previous occupant's pointer and free() it twice. */
-    obj->continuation.stacktrace = NULL;
-    obj->continuation.stacktrace_size = 0;
+    obj->continuation.shadow_stack = NULL;
+    obj->continuation.shadow_stack_size = 0;
 #endif
 
     void *cur_stack = &obj;
@@ -2153,17 +2204,17 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
     memcpy(GET_OBJECT(obj)->continuation.stack, cur_stack, stack_size);
     GET_OBJECT(obj)->continuation.stack_size = stack_size;
 #ifdef DEBUG
-    if (stacktrace_size > 0) {
-        size_t trace_bytes = stacktrace_size * sizeof(funcptr);
-        GET_OBJECT(obj)->continuation.stacktrace = malloc(trace_bytes);
-        if (GET_OBJECT(obj)->continuation.stacktrace == NULL) {
+    if (shadow_stack_size > 0) {
+        size_t bytes = shadow_stack_size * sizeof(struct shadow_stack_frame);
+        GET_OBJECT(obj)->continuation.shadow_stack = malloc(bytes);
+        if (GET_OBJECT(obj)->continuation.shadow_stack == NULL) {
             panic("out of memory saving stack trace for continuation");
         }
 
-        memcpy(GET_OBJECT(obj)->continuation.stacktrace, stacktrace, trace_bytes);
+        memcpy(GET_OBJECT(obj)->continuation.shadow_stack, shadow_stack, bytes);
     }
 
-    GET_OBJECT(obj)->continuation.stacktrace_size = stacktrace_size;
+    GET_OBJECT(obj)->continuation.shadow_stack_size = shadow_stack_size;
 #endif
     if (setjmp(GET_OBJECT(obj)->continuation.jmp_buf) == 0) {
         /* direct return */

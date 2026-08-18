@@ -190,6 +190,7 @@
   (init-find-library (resolve-library-search-path (reverse (cmdline-library-paths args))))
   (init-read-included-file (resolve-include-search-path
                             (reverse (cmdline-include-paths args))))
+  (init-source-location-tracking)
   (when (not (cmdline-input-file args))
     (repl (environment '(whisper) '(scheme eval)))
     (exit 0))

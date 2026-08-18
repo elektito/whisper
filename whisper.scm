@@ -32,6 +32,32 @@
   ;; done.
   (sealed-globals program-sealed-globals program-sealed-globals-set!))
 
+(define *form-spans* (make-eq-hash-table))
+
+(define (wrap-read-item item filename start-line start-col end-line end-col)
+  (when (pair? item)
+    (hash-table-set! *form-spans* item (list filename start-line start-col end-line end-col)))
+  item)
+
+(define (lookup-form-span form)
+  (let* ((result (hash-table-ref/default *form-spans* form #f))
+         (found (not (not result)))
+         (filename (and found (car result)))
+         (start-line (and found (cadr result)))
+         (start-col (and found (caddr result)))
+         (end-line (and found (cadddr result)))
+         (end-col (and found (list-ref result 4))))
+    (values found filename start-line start-col end-line end-col)))
+
+(define (init-source-location-tracking)
+  ;; note that we keep the old form in the hash table, because one form
+  ;; might be replaced by multiple forms so we might need to lookup
+  ;; form1 again.
+  (set! *replace-form* (lambda (form1 form2)
+                         (let ((info (hash-table-ref/default *form-spans* form1 #f)))
+                           (when info
+                             (hash-table-set! *form-spans* form2 info))))))
+
 ;; resolves the library manifest search path from the -L flags
 ;; (cmdline-dirs, already in given order) and WHISPER_LIBRARY_PATH. The
 ;; search path is the only way to find a library, so it falls back to
@@ -209,13 +235,15 @@
     (unless path
       (compile-error "include file not found: ~a" filename))
     (let ((port (open-input-file path)))
-      (let loop ((form (read port))
-                 (forms '()))
-        (if (eof-object? form)
-            (begin
-              (close-port port)
-              (cons path (reverse forms)))
-            (loop (read port) (cons form forms)))))))
+      (parameterize ((reader-state (new-reader-state filename))
+                     (reader-wrapper wrap-read-item))
+        (let loop ((form (read port))
+                   (forms '()))
+          (if (eof-object? form)
+              (begin
+                (close-port port)
+                (cons path (reverse forms)))
+              (loop (read port) (cons form forms))))))))
 
 (define (create-program port filename env program-mode?)
   (make-program (new-expand-root-env env program-mode?)
@@ -1296,6 +1324,9 @@
   (hash-table-ref/default *primcalls-table* meaning #f))
 
 (define (compile-list func indent form tail? discard?)
+  (let-values (((found filename start-line start-col end-line end-col) (lookup-form-span form)))
+    (when found
+      (gen-code func indent "set_form_span(\"~a\", ~a, ~a, ~a, ~a);\n" filename start-line start-col end-line end-col)))
   (if (not (identifier? (car form)))
       (compile-call func indent form tail? discard?)
       (let* ((binding (identifier-binding (car form)))
@@ -1579,31 +1610,35 @@
   (let ((func (program-init-func program))
         (env (program-env program))
         (filename (program-filename program)))
-    (let loop ((form (read (program-port program)))
-               ;; one entry per top-level form, since each might turn
-               ;; into several by the expander
-               (groups '()))
-      (if (eof-object? form)
-          (begin
-            (mark-sealed-globals! program (expand-root-env-compilation-unit env))
-            (for-each (lambda (forms)
-                        (let ((varnum (compile-expanded-forms func forms #f)))
-                          (when (and (!= varnum -1) (program-is-test-suite program))
-                            (gen-code func 1 "test_assert(x~a);\n" varnum))))
-                      (reverse groups))
-            (when (program-is-test-suite program)
-              (gen-code func 1 "printf(\"\\n\");\n"))
-            (gen-code func 1 "return VOID;\n"))
-          (loop (read (program-port program))
-                (cons (expand-top-level-form form env filename) groups))))))
+    (parameterize ((reader-state (new-reader-state filename))
+                   (reader-wrapper wrap-read-item))
+      (let loop ((form (read (program-port program)))
+                 ;; one entry per top-level form, since each might turn
+                 ;; into several by the expander
+                 (groups '()))
+        (if (eof-object? form)
+            (begin
+              (mark-sealed-globals! program (expand-root-env-compilation-unit env))
+              (for-each (lambda (forms)
+                          (let ((varnum (compile-expanded-forms func forms #f)))
+                            (when (and (!= varnum -1) (program-is-test-suite program))
+                              (gen-code func 1 "test_assert(x~a);\n" varnum))))
+                        (reverse groups))
+              (when (program-is-test-suite program)
+                (gen-code func 1 "printf(\"\\n\");\n"))
+              (gen-code func 1 "return VOID;\n"))
+            (loop (read (program-port program))
+                  (cons (expand-top-level-form form env filename) groups)))))))
 
 (define (compile-library program)
-  (let loop ((form (read (program-port program))))
-    (unless (eof-object? form)
-      (unless (and (pair? form) (eq? (car form) 'define-library))
-        (compile-error "a library file must contain only define-library forms"))
-      (compile-library-definition form program)
-      (loop (read (program-port program))))))
+  (parameterize ((reader-state (new-reader-state (program-filename program)))
+                 (reader-wrapper wrap-read-item))
+    (let loop ((form (read (program-port program))))
+      (unless (eof-object? form)
+        (unless (and (pair? form) (eq? (car form) 'define-library))
+          (compile-error "a library file must contain only define-library forms"))
+        (compile-library-definition form program)
+        (loop (read (program-port program)))))))
 
 ;; parses one export spec into (local-name . export-name); a bare symbol
 ;; exports itself, (rename local export) exports under a different name.

@@ -24,6 +24,21 @@ typedef struct closure *closure;
 typedef void(*kont)(value v);
 typedef value(*funcptr)(environment env, enum call_flags flags, int nargs, ...);
 
+#ifdef DEBUG
+
+struct shadow_stack_frame {
+    funcptr func;
+
+    /* current form source location */
+    const char *filename;
+    int start_line;
+    int start_col;
+    int end_line;
+    int end_col;
+};
+
+#endif
+
 /************ tags and masks and some macros ***********/
 
 #define FIXNUM_TAG 0x0
@@ -257,8 +272,8 @@ struct object {
              * re-entering deeper than the current depth drives the
              * global stacktrace_size negative and writes at
              * stacktrace[-1]. */
-            funcptr *stacktrace;
-            int stacktrace_size;
+            struct shadow_stack_frame *shadow_stack;
+            int shadow_stack_size;
 #endif
         } continuation;
     };
@@ -625,3 +640,9 @@ struct static_lib {
 
 extern void register_static_lib(struct static_lib *lib);
 extern void run_static_libs(value env);
+
+#ifdef DEBUG
+extern void set_form_span(const char *filename, int start_line, int start_col, int end_line, int end_col);
+#else
+#define set_form_span(f, sl, sc, el, ec)
+#endif
