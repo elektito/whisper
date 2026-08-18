@@ -137,21 +137,12 @@ void print_stacktrace(void) {
         return;
     }
 
-    fprintf(stderr, "NOTE: unnamed lambdas will not show up in the stack trace.\n");
-
     int idx = 1;
     for (int i = 0; i < stacktrace_size; ++i) {
         struct symbol_ht_ctx ctx;
         ctx.name_len = 0;
         ctx.func = stacktrace[i];
         hash_table_each(&symbols, symbols_ht_each, &ctx);
-
-        /* unknown names are either let blocks, or unnamed lambdas.
-         * would have been nice if we could detect the difference and
-         * for the lambda's show an entry in the stacktrace. */
-        if (ctx.name_len == 0) {
-            continue;
-        }
 
         fprintf(stderr, "[%d] %.*s\n", idx++, (int)ctx.name_len, ctx.name);
     }
