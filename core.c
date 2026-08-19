@@ -3509,16 +3509,37 @@ value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
-    int64_t result = 1;
+    int64_t result_fixnum = 1;
+    float result_flonum = 1.0;
+    int inexact = 0;
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("multiplication (*) argument is not a number"); }
-        result *= GET_FIXNUM(v);
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum *= (float) GET_FIXNUM(v);
+            } else {
+                result_fixnum *= GET_FIXNUM(v);
+            }
+        } else if (IS_FLONUM(v)) {
+            if (!inexact) {
+                result_flonum = (float) result_fixnum;
+            }
+
+            result_flonum *= GET_FLONUM(v);
+            inexact = 1;
+        } else {
+            free_args();
+            raise_error("multiplication argument is not a number");
+        }
     }
 
     free_args();
-    return FIXNUM(result);
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return FIXNUM(result_fixnum);
+    }
 }
 
 value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
