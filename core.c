@@ -3049,7 +3049,6 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
                 saw_base = 1;
             } else if (prefix == 'i' || prefix == 'I') {
                 if (saw_exactness) { free(str); return FALSE; }
-                base = 10;
                 start += 2;
                 len -= 2;
                 inexact = 1;
@@ -3057,7 +3056,6 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
                 saw_exactness = 1;
             } else if (prefix == 'e' || prefix == 'E') {
                 if (saw_exactness) { free(str); return FALSE; }
-                base = 10;
                 start += 2;
                 len -= 2;
                 inexact = 0;
