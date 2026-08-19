@@ -3685,11 +3685,27 @@ value primcall_num_lt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("< needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("< argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("< argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("< argument is not a number"); }
-        if (GET_FIXNUM(n) >= GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("< argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) >= GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) >= GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) >= (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) >= GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3700,11 +3716,26 @@ value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("> needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("> argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("> argument is not a number");
+    }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("> argument is not a number"); }
-        if (GET_FIXNUM(n) <= GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("> argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) <= GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) <= GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) <= (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) <= GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3715,11 +3746,27 @@ value primcall_num_le(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("<= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("<= argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("<= argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("<= argument is not a number"); }
-        if (GET_FIXNUM(n) > GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("<= argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) > GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) > GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) > (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) > GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3730,11 +3777,27 @@ value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error(">= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error(">= argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error(">= argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error(">= argument is not a number"); }
-        if (GET_FIXNUM(n) < GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error(">= argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) < GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) < GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) < (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) < GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
