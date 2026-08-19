@@ -46,16 +46,17 @@ struct shadow_stack_frame {
 #define CLOSURE_TAG 0x02
 #define STRING_TAG 0x03
 #define PAIR_TAG 0x04
-#define SENTINEL_TAG 0x5       /*   0...0_101 */
-#define VOID_TAG 0x15          /*      10_101 */
-#define BOOL_TAG 0xd           /*       1_101 */
-#define TRUE_TAG 0x1d          /*      11_101 */
-#define FALSE_TAG 0x0d         /*      01_101 */
-#define CHAR_TAG 0x25          /*     100_101 */
-#define NIL_TAG 0x45           /*    1000_101 */
-#define EOFOBJ_TAG 0x85        /*   10000_101 */
-#define HT_TOMBSTONE_TAG 0x105 /*  100000_101 */
-#define TAILCALL_TAG 0x205     /* 1000000_101 */
+#define SENTINEL_TAG 0x5       /*    0...0_101 */
+#define VOID_TAG 0x15          /*       10_101 */
+#define BOOL_TAG 0xd           /*        1_101 */
+#define TRUE_TAG 0x1d          /*       11_101 */
+#define FALSE_TAG 0x0d         /*       01_101 */
+#define CHAR_TAG 0x25          /*      100_101 */
+#define NIL_TAG 0x45           /*     1000_101 */
+#define EOFOBJ_TAG 0x85        /*    10000_101 */
+#define HT_TOMBSTONE_TAG 0x105 /*   100000_101 */
+#define TAILCALL_TAG 0x205     /*  1000000_101 */
+#define FLONUM_TAG 0x405       /* 10000000_101 */
 #define SYMBOL_TAG 0x06
 
 #define TAG_MASK 0x7
@@ -65,6 +66,7 @@ struct shadow_stack_frame {
 #define CHAR_TAG_MASK 0x3f
 #define SYMBOL_TAG_MASK 0x7
 #define EOFOBJ_TAG_MASK 0x1ff
+#define FLONUM_TAG_MASK 0x7ff
 
 #define FIXNUM(v) (value)((uint64_t)(v) << 3 | FIXNUM_TAG)
 #define CLOSURE(v) (value)((uint64_t)(v) | CLOSURE_TAG)
@@ -74,6 +76,7 @@ struct shadow_stack_frame {
 #define CHAR(v) (value)((uint64_t)(v) << 32 | CHAR_TAG)
 #define SYMBOL(v) (value)((uint64_t)(v) | SYMBOL_TAG)
 #define OBJECT(v) (value)((uint64_t)(v) | OBJECT_TAG)
+#define FLONUM(v) to_flonum(v)
 
 #define SENTINEL (value)(SENTINEL_TAG)
 #define VOID (value)(VOID_TAG)
@@ -86,6 +89,12 @@ struct shadow_stack_frame {
 
 #define FIXNUM_MAX ((INT64_C(1) << 60) - 1)
 #define FIXNUM_MIN (-(INT64_C(1) << 60))
+
+static inline value to_flonum(float f) {
+    uint32_t bits;
+    memcpy(&bits, &f, sizeof(bits));
+    return (value)(((uint64_t) bits << 32) | FLONUM_TAG);
+}
 
 /************ hash table ***********/
 
@@ -289,8 +298,10 @@ struct object {
 #define GET_CHAR(v) ((char)((uint64_t)(v) >> 32))
 #define GET_SYMBOL(v) ((struct symbol *)((uint64_t)(v) & VALUE_MASK))
 #define GET_OBJECT(v) ((struct object *)((uint64_t)(v) & VALUE_MASK))
+#define GET_FLONUM(v) get_flonum(v)
 
 #define IS_FIXNUM(v) (((uint64_t)(v) & TAG_MASK) == FIXNUM_TAG)
+#define IS_FLONUM(v) (((uint64_t)(v) & FLONUM_TAG_MASK) == FLONUM_TAG)
 #define IS_CLOSURE(v) (((uint64_t)(v) & TAG_MASK) == CLOSURE_TAG)
 #define IS_STRING(v) (((uint64_t)(v) & TAG_MASK) == STRING_TAG)
 #define IS_BOOL(v) (((uint64_t)(v) & BOOL_TAG_MASK) == BOOL_TAG)
@@ -309,6 +320,13 @@ struct object {
 #define IS_HASH_TABLE(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_HASH_TABLE)
 #define IS_ENVIRONMENT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ENVIRONMENT)
 #define IS_MVALUES(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_MVALUES)
+
+static inline float get_flonum(void *v) {
+    uint32_t bits = (uint32_t)((uintptr_t) v >> 32);
+    float f;
+    memcpy(&f, &bits, sizeof(f));
+    return f;
+}
 
 /************ globals and helpers ***********/
 
@@ -509,6 +527,8 @@ extern value primcall_eof_object(environment env, enum call_flags flags, int nar
 extern value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_flonum_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_flush_output_port(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gensym(environment env, enum call_flags flags, int nargs, ...);

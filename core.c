@@ -1470,6 +1470,7 @@ static void _display_vector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, ")");
 }
 
+static void _write_flonum(float f, value port);
 static void _display(value v, value port) {
     if (IS_FIXNUM(v)) {
         GET_OBJECT(port)->port.printf(port, "%ld", GET_FIXNUM(v));
@@ -1489,9 +1490,47 @@ static void _display(value v, value port) {
         _display_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
         _display_vector(GET_OBJECT(v), port);
+    } else if (IS_FLONUM(v)) {
+        _write_flonum(GET_FLONUM(v), port);
     } else {
         print_unprintable(v, port);
     }
+}
+
+
+static void _write_flonum(float f, value port) {
+    /* this function is much more complicated than it should be because
+     * we want 1.0 to be printed as 1.0, not as 1.000000 (as %f would
+     * do) and not as 1 (as %g would do).
+     *
+     * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
+     * against libm for now */
+
+    char buf[64];
+
+    /* format using %g into a buffer */
+    snprintf(buf, sizeof(buf), "%g", f);
+
+    /* check for missing decimal point on numeric values */
+    if (!strchr(buf, '.') && !strchr(buf, ',') &&
+        !strstr(buf, "nan") && !strstr(buf, "NAN") &&
+        !strstr(buf, "inf") && !strstr(buf, "INF")) {
+
+        char *exp_ptr = strpbrk(buf, "eE");
+
+        if (exp_ptr) {
+            /* scientific notation: move "e+XX" right by 2 bytes and insert ".0" */
+            memmove(exp_ptr + 2, exp_ptr, strlen(exp_ptr) + 1);
+            exp_ptr[0] = '.';
+            exp_ptr[1] = '0';
+        } else {
+            /* standard notation: simply append ".0" */
+            strcat(buf, ".0");
+        }
+    }
+
+    /* output the modified buffer to the port */
+    GET_OBJECT(port)->port.printf(port, "%s", buf);
 }
 
 static void _write_pair(struct pair *v, value port, int in_the_middle) {
@@ -1622,6 +1661,8 @@ static void _write(value v, value port) {
         _write_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
         _write_vector(GET_OBJECT(v), port);
+    } else if (IS_FLONUM(v)) {
+        _write_flonum(GET_FLONUM(v), port);
     } else {
         print_unprintable(v, port);
     }
@@ -2473,6 +2514,24 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("fixnum? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(IS_FIXNUM(v));
+}
+
+value primcall_flonum_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("flonum? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(IS_FLONUM(v));
+}
+
 value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("%%exit needs a single argument"); }
     init_args();
@@ -2683,7 +2742,7 @@ value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) 
     init_args();
     value v = next_arg();
     free_args();
-    return BOOL(IS_FIXNUM(v));
+    return BOOL(IS_FIXNUM(v) || IS_FLONUM(v));
 }
 
 value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...) {
@@ -2944,25 +3003,57 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
 
     char *str = strz(str_v);
     char *start = str;
+    int inexact = 0;
+    int exact = 0;
+    int saw_exactness = 0;
+    int saw_base = 0;
 
-    if (len >= 2 && str[0] == '#') {
-        char prefix = str[1];
-        if (prefix == 'x' || prefix == 'X') {
-            base = 16;
-            start += 2;
-            len -= 2;
-        } else if (prefix == 'd' || prefix == 'D') {
-            base = 10;
-            start += 2;
-            len -= 2;
-        } else if (prefix == 'o' || prefix == 'O') {
-            base = 8;
-            start += 2;
-            len -= 2;
-        } else if (prefix == 'b' || prefix == 'B') {
-            base = 2;
-            start += 2;
-            len -= 2;
+    /* there can be two # prefixes, one for base (like #x) and one for
+     * exactness (like #i), and they can be mixed in any order */
+    for (int i = 0; i < 2; ++i) {
+        if (len >= 2 && start[0] == '#') {
+            char prefix = start[1];
+            if (prefix == 'x' || prefix == 'X') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 16;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'd' || prefix == 'D') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 10;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'o' || prefix == 'O') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 8;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'b' || prefix == 'B') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 2;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'i' || prefix == 'I') {
+                if (saw_exactness) { free(str); return FALSE; }
+                base = 10;
+                start += 2;
+                len -= 2;
+                inexact = 1;
+                exact = 0;
+                saw_exactness = 1;
+            } else if (prefix == 'e' || prefix == 'E') {
+                if (saw_exactness) { free(str); return FALSE; }
+                base = 10;
+                start += 2;
+                len -= 2;
+                inexact = 0;
+                exact = 1;
+                saw_exactness = 1;
+            }
         }
     }
 
@@ -2975,7 +3066,32 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
         return FALSE;
     }
 
+    int contains_dot = 0;
+    for (char *c = start; *c; ++c) {
+        if (*c == '.') {
+            contains_dot = 1;
+            break;
+        }
+    }
+
     char *endptr;
+
+    if (inexact || contains_dot) {
+        errno = 0;
+        float result_f = strtof(start, &endptr);
+        if (errno == 0 && endptr == start + len) {
+            if (base != 10) {
+                raise_error("inexact numbers with non-ten bases are not supported");
+            }
+
+            if (exact) {
+                return FIXNUM((int64_t) result_f);
+            } else {
+                return FLONUM(result_f);
+            }
+        }
+    }
+
     errno = 0;
     int64_t result = strtoll(start, &endptr, base);
     if (errno != 0 || endptr != start + len || result < FIXNUM_MIN || result > FIXNUM_MAX) {
@@ -2984,7 +3100,12 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     }
 
     free(str);
-    return FIXNUM(result);
+
+    if (inexact) {
+        return FLONUM(result);
+    } else {
+        return FIXNUM(result);
+    }
 }
 
 value primcall_string_to_symbol(environment env, enum call_flags flags, int nargs, ...) {

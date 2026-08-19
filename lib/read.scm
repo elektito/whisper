@@ -286,7 +286,7 @@
                              (if (not (list? ls))
                                  (read-error "bad vector literal: #~s" ls)
                                  (list->vector ls))))
-          ((member ch '(#\x #\X #\O #\o #\b #\B #\d #\D))
+          ((member ch '(#\x #\X #\O #\o #\b #\B #\d #\D #\i #\I #\e #\E))
            (let* ((s (read-until-delim port))
                   (s (string-append (make-string 1 #\#) s))
                   (n (string->number s)))
