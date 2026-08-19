@@ -107,54 +107,95 @@ static void symbols_ht_each(value k, value v, void *ctx) {
 
 #ifdef DEBUG
 
-static funcptr *stacktrace = NULL;
-static int stacktrace_size = 0;
-static int stacktrace_cap = 0;
+static struct shadow_stack_frame *shadow_stack = NULL;
+static int shadow_stack_size = 0;
+static int shadow_stack_cap = 0;
 
 void enter_proc(funcptr func) {
-    if (stacktrace_size == stacktrace_cap) {
-        stacktrace_cap *= 2;
-        if (stacktrace_cap == 0) {
-            stacktrace_cap = 16;
+    if (shadow_stack_size == shadow_stack_cap) {
+        shadow_stack_cap *= 2;
+        if (shadow_stack_cap == 0) {
+            shadow_stack_cap = 16;
         }
 
-        stacktrace = realloc(stacktrace, stacktrace_cap * sizeof(funcptr));
+        shadow_stack = realloc(shadow_stack, shadow_stack_cap * sizeof(struct shadow_stack_frame));
     }
 
-    stacktrace[stacktrace_size++] = func;
+    int idx = shadow_stack_size++;
+    shadow_stack[idx].func = func;
+    shadow_stack[idx].filename = "";
+    shadow_stack[idx].start_line = -1;
+    shadow_stack[idx].start_col = -1;
+    shadow_stack[idx].end_line = -1;
+    shadow_stack[idx].end_col = -1;
 }
 
 void leave_proc(void) {
-    stacktrace_size--;
+    shadow_stack_size--;
 }
 
 /* unlike most our functions, this one is not static so hopefully it
  * won't be inlined and be still availble in the debugger, in case we
  * want to call it directly. */
 void print_stacktrace(void) {
-    if (stacktrace_size == 0) {
+    if (shadow_stack_size == 0) {
         fprintf(stderr, "Stacktrace is empty.\n");
         return;
     }
 
-    fprintf(stderr, "NOTE: unnamed lambdas will not show up in the stack trace.\n");
-
-    int idx = 1;
-    for (int i = 0; i < stacktrace_size; ++i) {
+    for (int i = 0; i < shadow_stack_size; ++i) {
         struct symbol_ht_ctx ctx;
         ctx.name_len = 0;
-        ctx.func = stacktrace[i];
+        ctx.func = shadow_stack[i].func;
         hash_table_each(&symbols, symbols_ht_each, &ctx);
 
-        /* unknown names are either let blocks, or unnamed lambdas.
-         * would have been nice if we could detect the difference and
-         * for the lambda's show an entry in the stacktrace. */
-        if (ctx.name_len == 0) {
-            continue;
+        if (ctx.name_len) {
+            fprintf(stderr, "[%d] %.*s\n", i, (int)ctx.name_len, ctx.name);
+        } else {
+            fprintf(stderr, "[%d] (unknown)\n", i);
         }
 
-        fprintf(stderr, "[%d] %.*s\n", idx++, (int)ctx.name_len, ctx.name);
+        /* print source form, if available */
+        if (shadow_stack[i].start_line > 0) {
+            FILE *fp = fopen(shadow_stack[i].filename, "r");
+            if (fp) {
+                int cur_line = 1;
+                int cur_col = 1;
+                int ch;
+
+                while ((ch = fgetc(fp)) != EOF) {
+                    if (cur_line > shadow_stack[i].end_line || (cur_line == shadow_stack[i].end_line && cur_col >= shadow_stack[i].end_col)) {
+                        break;
+                    }
+
+                    if (cur_line > shadow_stack[i].start_line || (cur_line == shadow_stack[i].start_line && cur_col >= shadow_stack[i].start_col)) {
+                        fputc(ch, stderr);
+                    }
+
+                    if (ch == '\n') {
+                        cur_line++;
+                        cur_col = 1;
+                    } else {
+                        cur_col++;
+                    }
+                }
+
+                fclose(fp);
+                fprintf(stderr, "\n");
+            } else {
+                printf("Could not open source file: %s\n", shadow_stack[i].filename);
+            }
+        }
     }
+}
+
+void set_form_span(const char *filename, int start_line, int start_col, int end_line, int end_col) {
+    int last = shadow_stack_size - 1;
+    shadow_stack[last].filename = filename;
+    shadow_stack[last].start_line = start_line;
+    shadow_stack[last].start_col = start_col;
+    shadow_stack[last].end_line = end_line;
+    shadow_stack[last].end_col = end_col;
 }
 
 #else
@@ -243,6 +284,8 @@ const char *find_func_name(funcptr func) {
         memcpy(buf, unknown, strlen(unknown));
         buf[strlen(unknown)] = 0;
     } else {
+        /* TODO if name starts with "##" followed by a number, unmangle
+         * it first for a clearer error message. */
         buf = malloc(ctx.name_len + 1);
         memcpy(buf, ctx.name, ctx.name_len);
         buf[ctx.name_len] = 0;
@@ -889,7 +932,7 @@ static void gc_free_block(void *p, struct pool *heap) {
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
 #ifdef DEBUG
-            free(obj->continuation.stacktrace);
+            free(obj->continuation.shadow_stack);
 #endif
             break;
         default:
@@ -1427,6 +1470,7 @@ static void _display_vector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, ")");
 }
 
+static void _write_flonum(float f, value port);
 static void _display(value v, value port) {
     if (IS_FIXNUM(v)) {
         GET_OBJECT(port)->port.printf(port, "%ld", GET_FIXNUM(v));
@@ -1446,9 +1490,47 @@ static void _display(value v, value port) {
         _display_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
         _display_vector(GET_OBJECT(v), port);
+    } else if (IS_FLONUM(v)) {
+        _write_flonum(GET_FLONUM(v), port);
     } else {
         print_unprintable(v, port);
     }
+}
+
+
+static void _write_flonum(float f, value port) {
+    /* this function is much more complicated than it should be because
+     * we want 1.0 to be printed as 1.0, not as 1.000000 (as %f would
+     * do) and not as 1 (as %g would do).
+     *
+     * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
+     * against libm for now */
+
+    char buf[64];
+
+    /* format using %g into a buffer */
+    snprintf(buf, sizeof(buf), "%g", f);
+
+    /* check for missing decimal point on numeric values */
+    if (!strchr(buf, '.') && !strchr(buf, ',') &&
+        !strstr(buf, "nan") && !strstr(buf, "NAN") &&
+        !strstr(buf, "inf") && !strstr(buf, "INF")) {
+
+        char *exp_ptr = strpbrk(buf, "eE");
+
+        if (exp_ptr) {
+            /* scientific notation: move "e+XX" right by 2 bytes and insert ".0" */
+            memmove(exp_ptr + 2, exp_ptr, strlen(exp_ptr) + 1);
+            exp_ptr[0] = '.';
+            exp_ptr[1] = '0';
+        } else {
+            /* standard notation: simply append ".0" */
+            strcat(buf, ".0");
+        }
+    }
+
+    /* output the modified buffer to the port */
+    GET_OBJECT(port)->port.printf(port, "%s", buf);
 }
 
 static void _write_pair(struct pair *v, value port, int in_the_middle) {
@@ -1579,6 +1661,8 @@ static void _write(value v, value port) {
         _write_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
         _write_vector(GET_OBJECT(v), port);
+    } else if (IS_FLONUM(v)) {
+        _write_flonum(GET_FLONUM(v), port);
     } else {
         print_unprintable(v, port);
     }
@@ -2085,18 +2169,19 @@ static void reinstate_stack(value cont) {
     /* restore the shadow stack to the depth and contents it had at capture.
      * these are plain globals, so the memcpy above does not touch them.
      *
-     * stacktrace_cap must not be restored. it describes how big the
+     * shadow_stack_cap need not be restored. it describes how big the
      * array currently is, which is a fact about the live allocation and
      * not about the captured state. we never change the pointer itself
      * so whatever we memcpy over the buffer is lower than or equal to
      * cap. */
-    if (GET_OBJECT(cont)->continuation.stacktrace_size > 0) {
-        memcpy(stacktrace,
-               GET_OBJECT(cont)->continuation.stacktrace,
-               GET_OBJECT(cont)->continuation.stacktrace_size * sizeof(funcptr));
+    if (GET_OBJECT(cont)->continuation.shadow_stack_size > 0) {
+        memcpy(shadow_stack,
+               GET_OBJECT(cont)->continuation.shadow_stack,
+               GET_OBJECT(cont)->continuation.shadow_stack_size * sizeof(struct shadow_stack_frame));
     }
 
-    stacktrace_size = GET_OBJECT(cont)->continuation.stacktrace_size;
+    printf("CCCCCC\n");
+    shadow_stack_size = GET_OBJECT(cont)->continuation.shadow_stack_size;
 #endif
 
     longjmp(GET_OBJECT(cont)->continuation.jmp_buf, 1);
@@ -2150,8 +2235,8 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 #ifdef DEBUG
     /* before any allocation point, so a collection can never see the field
      * holding the previous occupant's pointer and free() it twice. */
-    obj->continuation.stacktrace = NULL;
-    obj->continuation.stacktrace_size = 0;
+    obj->continuation.shadow_stack = NULL;
+    obj->continuation.shadow_stack_size = 0;
 #endif
 
     void *cur_stack = &obj;
@@ -2160,17 +2245,17 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
     memcpy(GET_OBJECT(obj)->continuation.stack, cur_stack, stack_size);
     GET_OBJECT(obj)->continuation.stack_size = stack_size;
 #ifdef DEBUG
-    if (stacktrace_size > 0) {
-        size_t trace_bytes = stacktrace_size * sizeof(funcptr);
-        GET_OBJECT(obj)->continuation.stacktrace = malloc(trace_bytes);
-        if (GET_OBJECT(obj)->continuation.stacktrace == NULL) {
+    if (shadow_stack_size > 0) {
+        size_t bytes = shadow_stack_size * sizeof(struct shadow_stack_frame);
+        GET_OBJECT(obj)->continuation.shadow_stack = malloc(bytes);
+        if (GET_OBJECT(obj)->continuation.shadow_stack == NULL) {
             panic("out of memory saving stack trace for continuation");
         }
 
-        memcpy(GET_OBJECT(obj)->continuation.stacktrace, stacktrace, trace_bytes);
+        memcpy(GET_OBJECT(obj)->continuation.shadow_stack, shadow_stack, bytes);
     }
 
-    GET_OBJECT(obj)->continuation.stacktrace_size = stacktrace_size;
+    GET_OBJECT(obj)->continuation.shadow_stack_size = shadow_stack_size;
 #endif
     if (setjmp(GET_OBJECT(obj)->continuation.jmp_buf) == 0) {
         /* direct return */
@@ -2429,6 +2514,24 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("fixnum? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(IS_FIXNUM(v));
+}
+
+value primcall_flonum_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("flonum? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+
+    return BOOL(IS_FLONUM(v));
+}
+
 value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("%%exit needs a single argument"); }
     init_args();
@@ -2437,27 +2540,6 @@ value primcall_percent_exit(environment env, enum call_flags flags, int nargs, .
     if (!IS_FIXNUM(code)) { raise_error("%%exit aregument is not an integer"); }
     cleanup();
     exit(GET_FIXNUM(code));
-    return VOID;
-}
-
-value primcall_exit(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { raise_error("exit needs zero or one argument"); }
-    init_args();
-    value code = nargs == 1 ? next_arg() : FIXNUM(0);
-    free_args();
-    if (IS_BOOL(code)) {
-        cleanup();
-        if (GET_BOOL(code))
-            exit(0);
-        else
-            exit(1);
-    } else if (IS_FIXNUM(code)) {
-        cleanup();
-        exit(GET_FIXNUM(code));
-    } else {
-        raise_error("invalid exit code");
-    }
-
     return VOID;
 }
 
@@ -2660,7 +2742,7 @@ value primcall_number_q(environment env, enum call_flags flags, int nargs, ...) 
     init_args();
     value v = next_arg();
     free_args();
-    return BOOL(IS_FIXNUM(v));
+    return BOOL(IS_FIXNUM(v) || IS_FLONUM(v));
 }
 
 value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...) {
@@ -2921,25 +3003,57 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
 
     char *str = strz(str_v);
     char *start = str;
+    int inexact = 0;
+    int exact = 1;
+    int saw_exactness = 0;
+    int saw_base = 0;
 
-    if (len >= 2 && str[0] == '#') {
-        char prefix = str[1];
-        if (prefix == 'x' || prefix == 'X') {
-            base = 16;
-            start += 2;
-            len -= 2;
-        } else if (prefix == 'd' || prefix == 'D') {
-            base = 10;
-            start += 2;
-            len -= 2;
-        } else if (prefix == 'o' || prefix == 'O') {
-            base = 8;
-            start += 2;
-            len -= 2;
-        } else if (prefix == 'b' || prefix == 'B') {
-            base = 2;
-            start += 2;
-            len -= 2;
+    /* there can be two # prefixes, one for base (like #x) and one for
+     * exactness (like #i), and they can be mixed in any order */
+    for (int i = 0; i < 2; ++i) {
+        if (len >= 2 && start[0] == '#') {
+            char prefix = start[1];
+            if (prefix == 'x' || prefix == 'X') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 16;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'd' || prefix == 'D') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 10;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'o' || prefix == 'O') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 8;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'b' || prefix == 'B') {
+                if (saw_base) { free(str); return FALSE; }
+                base = 2;
+                start += 2;
+                len -= 2;
+                saw_base = 1;
+            } else if (prefix == 'i' || prefix == 'I') {
+                if (saw_exactness) { free(str); return FALSE; }
+                base = 10;
+                start += 2;
+                len -= 2;
+                inexact = 1;
+                exact = 0;
+                saw_exactness = 1;
+            } else if (prefix == 'e' || prefix == 'E') {
+                if (saw_exactness) { free(str); return FALSE; }
+                base = 10;
+                start += 2;
+                len -= 2;
+                inexact = 0;
+                exact = 1;
+                saw_exactness = 1;
+            }
         }
     }
 
@@ -2952,7 +3066,32 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
         return FALSE;
     }
 
+    int contains_dot = 0;
+    for (char *c = start; *c; ++c) {
+        if (*c == '.') {
+            contains_dot = 1;
+            break;
+        }
+    }
+
     char *endptr;
+
+    if (inexact || contains_dot) {
+        errno = 0;
+        float result_f = strtof(start, &endptr);
+        if (errno == 0 && endptr == start + len) {
+            if (base != 10) {
+                raise_error("inexact numbers with non-ten bases are not supported");
+            }
+
+            if (exact) {
+                return FIXNUM((int64_t) result_f);
+            } else {
+                return FLONUM(result_f);
+            }
+        }
+    }
+
     errno = 0;
     int64_t result = strtoll(start, &endptr, base);
     if (errno != 0 || endptr != start + len || result < FIXNUM_MIN || result > FIXNUM_MAX) {
@@ -2961,7 +3100,12 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     }
 
     free(str);
-    return FIXNUM(result);
+
+    if (inexact) {
+        return FLONUM(result);
+    } else {
+        return FIXNUM(result);
+    }
 }
 
 value primcall_string_to_symbol(environment env, enum call_flags flags, int nargs, ...) {
