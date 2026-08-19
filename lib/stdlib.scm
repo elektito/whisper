@@ -260,7 +260,7 @@
   (not (pair? x)))
 
 (define (zero? x)
-  (eq? x 0))
+  (= x 0))
 
 (define (integer? n)
   ;; TODO we need to change this if/when we have bignums
