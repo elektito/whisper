@@ -3066,14 +3066,7 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
         return FALSE;
     }
 
-    int contains_dot = 0;
-    for (char *c = start; *c; ++c) {
-        if (*c == '.') {
-            contains_dot = 1;
-            break;
-        }
-    }
-
+    int contains_dot = !!strpbrk(start, ".");
     char *endptr;
 
     if (inexact || contains_dot) {
