@@ -3524,17 +3524,57 @@ value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
 value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("subtraction (-) needs at least one argument"); }
     init_args();
-    value result = next_arg();
-    if (!IS_FIXNUM(result)) { raise_error("subtraction (-) argument is not a number"); }
-    if (nargs == 1) return FIXNUM(-GET_FIXNUM(result));
+    value arg = next_arg();
+
+    value result_fixnum = 0;
+    float result_flonum = 0.0;
+    int inexact = 0;
+
+    if (IS_FIXNUM(arg)) {
+        result_fixnum = arg;
+    } else if (IS_FLONUM(arg)) {
+        result_flonum = GET_FLONUM(arg);
+        inexact = 1;
+    } else {
+        free_args();
+        raise_error("subtraction (-) argument is not a number");
+    }
+
+    if (nargs == 1) {
+        if (inexact) {
+            return FLONUM(-result_flonum);
+        } else {
+            return FIXNUM(-GET_FIXNUM(result_fixnum));
+        }
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("subtraction (-) argument is not a number"); }
-        result -= (int64_t) v;
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum -= (float) GET_FIXNUM(v);
+            } else {
+                result_fixnum -= (int64_t) v;
+            }
+        } else if (IS_FLONUM(v)) {
+            if (!inexact) {
+                result_flonum = (float) GET_FIXNUM(result_fixnum);
+                inexact = 1;
+            }
+
+            result_flonum -= GET_FLONUM(v);
+        } else {
+            free_args();
+            raise_error("subtraction (-) argument is not a number");
+        }
     }
 
     free_args();
-    return result;
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return result_fixnum;
+    }
 }
 
 value primcall_num_eq(environment env, enum call_flags flags, int nargs, ...) {
