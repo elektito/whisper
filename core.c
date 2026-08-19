@@ -2631,7 +2631,7 @@ value primcall_integer_to_char(environment env, enum call_flags flags, int nargs
     init_args();
     value n = next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not an integer"); }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { raise_error("integer->char argument is out of range"); }
     return CHAR((char) GET_FIXNUM(n));
 }
@@ -2692,7 +2692,7 @@ value primcall_make_string(environment env, enum call_flags flags, int nargs, ..
     value n = next_arg();
     value ch = nargs == 1 ? CHAR(0) : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("make-string first argument should be a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("make-string first argument should be an integer"); }
     if (GET_FIXNUM(n) < 0) { raise_error("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { raise_error("make-string second argument should be a character"); }
     return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
@@ -2704,7 +2704,7 @@ value primcall_make_vector(environment env, enum call_flags flags, int nargs, ..
     value n = next_arg();
     value fill = nargs == 1 ? VOID : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("make-vector first argument should be a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("make-vector first argument should be an integer"); }
     if (GET_FIXNUM(n) < 0) { raise_error("make-vector first argument is negative"); }
     return make_vector(GET_FIXNUM(n), fill);
 }
@@ -3003,7 +3003,7 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     value base_v = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
     if (!IS_STRING(str_v)) { raise_error("string->number first argument must be a string"); }
-    if (!IS_FIXNUM(base_v)) { raise_error("string->number second argument must be a number"); }
+    if (!IS_FIXNUM(base_v)) { raise_error("string->number second argument must be an integer"); }
 
     int base = (int) GET_FIXNUM(base_v);
     if (base < 2 || base > 36) { raise_error("string->number radix is not valid"); }
@@ -3162,8 +3162,8 @@ value primcall_string_copy(environment env, enum call_flags flags, int nargs, ..
     value start = nargs > 1 ? next_arg() : FIXNUM(0);
     value end = nargs > 2 ? next_arg() : FIXNUM(GET_STRING(str)->len);
     free_args();
-    if (!IS_FIXNUM(start)) { raise_error("string-copy second argument is not a number"); }
-    if (!IS_FIXNUM(end)) { raise_error("string-copy third argument is not a number"); }
+    if (!IS_FIXNUM(start)) { raise_error("string-copy second argument is not an integer"); }
+    if (!IS_FIXNUM(end)) { raise_error("string-copy third argument is not an integer"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { raise_error("string-copy start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("string-copy end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
@@ -3187,7 +3187,7 @@ value primcall_string_ref(environment env, enum call_flags flags, int nargs, ...
     value idx = next_arg();
     free_args();
     if (!IS_STRING(str)) { raise_error("string-ref first argument is not a string"); }
-    if (!IS_FIXNUM(idx)) { raise_error("string-ref second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("string-ref second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { raise_error("string-ref index is out of range"); }
     return CHAR(GET_STRING(str)->s[GET_FIXNUM(idx)]);
 }
@@ -3200,7 +3200,7 @@ value primcall_string_set_b(environment env, enum call_flags flags, int nargs, .
     value ch = next_arg();
     free_args();
     if (!IS_STRING(str)) { raise_error("string-set! first argument is not a string"); }
-    if (!IS_FIXNUM(idx)) { raise_error("string-set! second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("string-set! second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { raise_error("string-set! index is out of range"); }
     if (!IS_CHAR(ch)) { raise_error("string-set! third argument is not a char"); }
     GET_STRING(str)->s[GET_FIXNUM(idx)] = GET_CHAR(ch);
@@ -3242,8 +3242,8 @@ value primcall_substring(environment env, enum call_flags flags, int nargs, ...)
     value end = next_arg();
     free_args();
     if (!IS_STRING(str)) { raise_error("substring first argument is not a string"); }
-    if (!IS_FIXNUM(start)) { raise_error("substring second argument is not a number"); }
-    if (!IS_FIXNUM(end)) { raise_error("substring third argument is not a number"); }
+    if (!IS_FIXNUM(start)) { raise_error("substring second argument is not an integer"); }
+    if (!IS_FIXNUM(end)) { raise_error("substring third argument is not an integer"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) > GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
     if (GET_FIXNUM(end) < GET_FIXNUM(start) || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
@@ -3288,7 +3288,7 @@ value primcall_urandom(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("urandom needs a single argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("urandom argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("urandom argument is not an integer"); }
     free_args();
 
     FILE *fp = fopen("/dev/urandom", "r");
@@ -3343,7 +3343,7 @@ value primcall_vector_ref(environment env, enum call_flags flags, int nargs, ...
     value idx = next_arg();
     free_args();
     if (!IS_VECTOR(vec)) { raise_error("vector-ref first argument is not a vector"); }
-    if (!IS_FIXNUM(idx)) { raise_error("vector-ref second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("vector-ref second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector-ref index is out of range"); }
     return GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)];
 }
@@ -3356,7 +3356,7 @@ value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, .
     value v = next_arg();
     free_args();
     if (!IS_VECTOR(vec)) { raise_error("vector-set! first argument is not a vector"); }
-    if (!IS_FIXNUM(idx)) { raise_error("vector-set! second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("vector-set! second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector-set! index is out of range"); }
     GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)] = v;
     return VOID;
