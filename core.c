@@ -3482,30 +3482,79 @@ value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error("division (-) needs at least one argument"); }
+    if (nargs < 1) { raise_error("division (/) needs at least one argument"); }
     init_args();
-    value result_v = next_arg();
-    if (!IS_FIXNUM(result_v)) { raise_error("division (/) argument is not a number"); }
-    int64_t result = GET_FIXNUM(result_v);
+
     if (nargs == 1) {
-        if (result == 1)
-            return FIXNUM(1);
-        if (result == -1)
-            return FIXNUM(-1);
-        if (result == 0)
-            raise_error("division by zero");
-        return FIXNUM(0); /* we don't have fractionals, so 1/n is always zero */
-    }
-    for (int i = 1; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("division (/) argument is not a number"); }
-        if (GET_FIXNUM(v) == 0)
-            raise_error("division by zero");
-        result /= GET_FIXNUM(v);
+        if (IS_FIXNUM(v)) {
+            int64_t n = GET_FIXNUM(v);
+            if (n == 1) {
+                return FIXNUM(1);
+            } else if (n == -1) {
+                return FIXNUM(-1);
+            } else if (n == 0) {
+                free_args();
+                raise_error("division by zero");
+            }
+
+            free_args();
+            return FIXNUM(0); /* we don't have rationals so 1/n is always 0 */
+        } else if (IS_FLONUM(v)) {
+            if (GET_FLONUM(v) == 0.0) {
+                free_args();
+                raise_error("division by zero");
+            }
+
+            free_args();
+            return FLONUM(1.0 / GET_FLONUM(v));
+        } else {
+            free_args();
+            raise_error("division argument is not a number");
+        }
     }
 
-    free_args();
-    return FIXNUM(result);
+    int64_t result_fixnum = 0;
+    float result_flonum = 0.0;
+    int inexact = 0;
+
+    value v = next_arg();
+    if (IS_FIXNUM(v)) {
+        result_fixnum = GET_FIXNUM(v);
+    } else if (IS_FLONUM(v)) {
+        result_flonum = GET_FLONUM(v);
+        inexact = 1;
+    } else {
+        free_args();
+        raise_error("division argument is not a number");
+    }
+
+    for (int i = 1; i < nargs; ++i) {
+        value v = next_arg();
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum /= (float) GET_FIXNUM(v);
+            } else {
+                result_fixnum /= GET_FIXNUM(v);
+            }
+        } else if (IS_FLONUM(v)) {
+            if (!inexact) {
+                result_flonum = (float) result_fixnum;
+                inexact = 1;
+            }
+
+            result_flonum /= GET_FLONUM(v);
+        } else {
+            free_args();
+            raise_error("division argument is not a number");
+        }
+    }
+
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return FIXNUM(result_fixnum);
+    }
 }
 
 value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
