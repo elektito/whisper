@@ -496,7 +496,11 @@
 
 (define (compile-number func indent form)
   (let ((varnum (func-next-varnum func)))
-    (gen-code func indent "value x~a = FIXNUM(~a);\n" varnum form)
+    (cond ((fixnum? form)
+           (gen-code func indent "value x~a = FIXNUM(~a);\n" varnum form))
+          ((flonum? form)
+           (gen-code func indent "value x~a = FLONUM(~a);\n" varnum form))
+          (else (compile-error "internal-error: unhandled number type: ~s" form)))
     varnum))
 
 (define (compile-string func indent form)
