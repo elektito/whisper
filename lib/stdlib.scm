@@ -263,8 +263,8 @@
   (eq? x 0))
 
 (define (integer? n)
-  ;; TODO we need to change this if/when we have other kinds of numbers
-  (number? n))
+  ;; TODO we need to change this if/when we have bignums
+  (fixnum? n))
 
 (define (positive? n)
   (> n 0))

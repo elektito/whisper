@@ -34,6 +34,8 @@
           print
           format
           pretty-print
+          flonum?
+          fixnum?
 
           gensym
           box
