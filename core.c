@@ -1497,8 +1497,7 @@ static void _display(value v, value port) {
     }
 }
 
-
-static void _write_flonum(float f, value port) {
+static void snprintf_flonum(char *buf, size_t buf_size, float f) {
     /* this function is much more complicated than it should be because
      * we want 1.0 to be printed as 1.0, not as 1.000000 (as %f would
      * do) and not as 1 (as %g would do).
@@ -1506,10 +1505,8 @@ static void _write_flonum(float f, value port) {
      * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
      * against libm for now */
 
-    char buf[64];
-
     /* format using %g into a buffer */
-    snprintf(buf, sizeof(buf), "%g", f);
+    snprintf(buf, buf_size, "%g", f);
 
     /* check for missing decimal point on numeric values */
     if (!strchr(buf, '.') && !strchr(buf, ',') &&
@@ -1528,8 +1525,11 @@ static void _write_flonum(float f, value port) {
             strcat(buf, ".0");
         }
     }
+}
 
-    /* output the modified buffer to the port */
+static void _write_flonum(float f, value port) {
+    char buf[64];
+    snprintf_flonum(buf, sizeof(buf), f);
     GET_OBJECT(port)->port.printf(port, "%s", buf);
 }
 
@@ -2751,19 +2751,27 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
     value n = next_arg();
     value base = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("number->string first argument should be a number"); }
-    if (!IS_FIXNUM(base)) { raise_error("number->string second argument should be a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) { raise_error("number->string first argument should be a number"); }
+    if (!IS_FIXNUM(base)) { raise_error("number->string second argument should be an integer"); }
+    if (IS_FLONUM(n) && base != FIXNUM(10)) { raise_error("number->string only supports base 10 with inexact numbers"); }
+
+    if (IS_FLONUM(n)) {
+        char buf[64];
+        snprintf_flonum(buf, sizeof(buf), GET_FLONUM(n));
+        return make_string(buf, strlen(buf));
+    }
+
     char buf[128];
     int start = 0;
     int64_t m = GET_FIXNUM(n);
     if (m < 0) { buf[0] = '-'; start = 1; m = -m; }
-    if (base == FIXNUM(10))
+    if (base == FIXNUM(10)) {
         snprintf(buf + start, sizeof(buf), "%ld", m);
-    else if (base == FIXNUM(16))
+    } else if (base == FIXNUM(16)) {
         snprintf(buf + start, sizeof(buf), "%lx", m);
-    else if (base == FIXNUM(8))
+    } else if (base == FIXNUM(8)) {
         snprintf(buf + start, sizeof(buf), "%lo", m);
-    else if (base == FIXNUM(2)) {
+    } else if (base == FIXNUM(2)) {
         while (m >= 2) { buf[start++] = '0' + (m % 2); m /= 2; }
         buf[start++] = '0' + m;
         buf[start] = 0;
@@ -2772,8 +2780,10 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
             buf[i] = buf[j];
             buf[j] = tmp;
         }
-    } else
+    } else {
         raise_error("radix not supported by number->string");
+    }
+
     return make_string(buf, strlen(buf));
 }
 
