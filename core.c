@@ -3445,14 +3445,40 @@ value primcall_percent_write_char(environment env, enum call_flags flags, int na
 }
 
 value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
-    value result = FIXNUM(0);
+    value result_fixnum = 0;
+    float result_flonum = 0.0;
+    int inexact = 0;
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("addition (+) argument is not a number"); }
-        result += (int64_t) v;
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum += (float) GET_FIXNUM(v);
+            } else {
+                /* fixnums have a zero tag, so they can be summed up
+                 * without untagging */
+                result_fixnum += (int64_t) v;
+            }
+        } else if (IS_FLONUM(v)) {
+            if (inexact) {
+                result_flonum += GET_FLONUM(v);
+            } else {
+                result_flonum = (float) GET_FIXNUM(result_fixnum);
+                result_flonum += GET_FLONUM(v);
+                inexact = 1;
+            }
+        } else {
+            free_args();
+            raise_error("addition (+) argument is not a number");
+        }
     }
-    return result;
+
+    free_args();
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return result_fixnum;
+    }
 }
 
 value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
