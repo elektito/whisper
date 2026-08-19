@@ -286,6 +286,11 @@
                              (if (not (list? ls))
                                  (read-error "bad vector literal: #~s" ls)
                                  (list->vector ls))))
+          ((member ch '(#\x #\X #\O #\o #\b #\B #\d #\D))
+           (let* ((s (read-until-delim port))
+                  (s (string-append (make-string 1 #\#) s))
+                  (n (string->number s)))
+             (or n (read-error "bad numeric literal: ~a" s))))
           (else (read-sharp-identifier port)))))
 
 (define (read-sharp-identifier port)
@@ -320,6 +325,10 @@
   (stateful-read-char port) ; skip the backslash
   (when (eof-object? (peek-char port))
     (read-error "eof inside character literal"))
+  (let ((s (read-until-delim port)))
+    (str->char s)))
+
+(define (read-until-delim port)
   (let ((s (make-string 1 (stateful-read-char port))))
     (let loop ((ch (peek-char port))
                (s s))
@@ -328,7 +337,7 @@
               (char=? #\( ch)
               (char=? #\) ch)
               (char=? #\' ch))
-          (str->char s)
+          s
           (begin
             (stateful-read-char port)
             (loop (peek-char port) (string-append s (make-string 1 ch))))))))
