@@ -141,7 +141,7 @@
   (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g]
 
  -r\tcompile and run the program
- -c\tonly compile a c file
+ -c\tonly compile a to c file
  -l\tcompile as a library, producing both a .so and a .a
  -L\tadd the given path to the list of locations the compiler looks for
 \tlibraries in (may be repeated)
