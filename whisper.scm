@@ -1807,7 +1807,7 @@
 ;; batch and eval's undefined-variable checks.
 (define (raise-if-undefined undefined)
   (unless (null? undefined)
-    (compile-error "undefined variable~a: ~s"
+    (compile-error "undefined variable~a: ~a"
                    (if (= 1 (length undefined)) "" "s")
                    (string-join (map (lambda (id) (symbol->string (identifier-name id))) undefined) ", "))))
 
