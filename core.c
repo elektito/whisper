@@ -62,15 +62,15 @@ static struct pool **heaps;
 static int n_heaps = 0;
 
 /* symbols used by the runtime */
-value symbol_file;
-value symbol_system;
-value symbol_value;
-value symbol_macro;
-value symbol_special;
-value symbol_aux;
-value symbol_primcall;
-value symbol_alias;
-value symbol_env_alias;
+static value symbol_file;
+static value symbol_system;
+static value symbol_value;
+static value symbol_macro;
+static value symbol_special;
+static value symbol_aux;
+static value symbol_primcall;
+static value symbol_alias;
+static value symbol_env_alias;
 
 /*************** non-static variables **************/
 
