@@ -430,8 +430,7 @@ extern const char **cmdline_argv;
 
 /************ extern function declarations ***********/
 
-extern void init_memory(void);
-extern void init_ports(void);
+extern void init_runtime(void);
 extern value make_symbol(char *name, size_t len, enum sym_kind kind);
 extern value make_closure(funcptr func, int min_args, int max_args, int nfreevars, ...);
 extern value make_string(const char *s, size_t len);
@@ -493,7 +492,6 @@ static value global_env_ref(value sym) {
     }
 }
 
-extern void init_symbols(void);
 extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
 extern value get_global_env(void);

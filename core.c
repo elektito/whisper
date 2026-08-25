@@ -607,7 +607,7 @@ static struct pool *add_pool(struct pool *pool) {
     return new_pool;
 }
 
-void init_memory(void) {
+static void init_memory(void) {
     symbols_heap = create_heap(sizeof(struct symbol), SYMBOL_TAG);
     pairs_heap = create_heap(sizeof(struct pair), PAIR_TAG);
     objects_heap = create_heap(sizeof(struct object), OBJECT_TAG);
@@ -1859,7 +1859,7 @@ void env_delegate(value env, value sym, value target) {
 
 /************ global environment functions ***********/
 
-void init_symbols(void) {
+static void init_symbols(void) {
     hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);
 
     /* intern symbols needed by the runtime */
@@ -1905,7 +1905,7 @@ value get_global_env(void) {
 
 /************ port init functions ***********/
 
-void init_ports() {
+static void init_ports() {
     struct object *in = alloc_object();
     in->type = OBJ_PORT;
     in->port.direction = PORT_DIR_READ;
@@ -1992,6 +1992,14 @@ void run_static_libs(value env) {
     for (struct static_lib *p = lib_list; p; p = p->next) {
         run_static_lib(p, env);
     }
+}
+
+/************ general runtime routines ***********/
+
+void init_runtime(void) {
+    init_memory();
+    init_symbols();
+    init_ports();
 }
 
 /************ primcall functions ***********/
