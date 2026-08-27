@@ -77,7 +77,10 @@
                          ((char=? #\, ch) (read-unquoted-form port))
                          ((char=? #\| ch) (read-piped-symbol port))
                          ((char=? #\. ch) (read-dot-or-identifier port))
-                         ((char=? #\) ch) (read-error "extra closing parenthesis"))
+                         ((char=? #\) ch) (read-error "extra closing parenthesis, in file ~a, line ~a, column ~a"
+                                                      (reader-state-filename (reader-state))
+                                                      (reader-state-line (reader-state))
+                                                      (reader-state-column (reader-state))))
                          (else (stateful-read-char port) ; read-identifier-or-number expects first character already read and passed to it
                                (read-identifier-or-number port ch)))))
       (if (and (not (eof-object? result))
