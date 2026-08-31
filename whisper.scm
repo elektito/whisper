@@ -976,8 +976,8 @@
           (binding-owner-set! (identifier-binding rest-param) new-func))
 
         (if rest-param
-            (gen-code new-func 1 "if (nargs < ~a) raise_error(\"too few arguments for function: %s\", find_func_name(~a));\n" (length params) (func-name new-func))
-            (gen-code new-func 1 "if (nargs != ~a) raise_error(\"argument count mismatch: %s\", find_func_name(~a));\n" (length params) (func-name new-func)))
+            (gen-code new-func 1 "if (nargs < ~a) raise_error(\"too few arguments for function: %s (expected at least %d, got %d)\", find_func_name(~a), ~a, nargs);\n" (length params) (func-name new-func) (length params))
+            (gen-code new-func 1 "if (nargs != ~a) raise_error(\"argument count mismatch: %s (expected %d, got %d)\", find_func_name(~a), ~a, nargs);\n" (length params) (func-name new-func) (length params)))
 
         ;; generate code for reading arguments
         (gen-code new-func 1 "init_args();\n")
