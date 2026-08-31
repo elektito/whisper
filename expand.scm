@@ -637,6 +637,14 @@
   (when *replace-form*
     (*replace-form* form1 form2)))
 
+;; replace all identifiers with plain symbols in the given form
+(define (de-identifier form)
+  (cond ((identifier? form) (identifier-name form))
+        ((vector? form) (vector-map de-identifier form))
+        ((atom? form) form)
+        (else (cons (de-identifier (car form))
+                    (de-identifier (cdr form))))))
+
 ;;;;;; libraries ;;;;;;
 
 (define-record-type <library>
@@ -1195,13 +1203,13 @@
                    (loop (cdr formals)
                          (begin
                            (unless (symbol-or-identifier? (car formals))
-                             (compile-error "bad formal: ~s" (car formals)))
+                             (compile-error "bad formal `~s` in: ~s" (car formals) (de-identifier form)))
                            (cons (lexical-binder (car formals)) ids)))
                    (if (null? formals)
                        (reverse ids)
                        (begin
                          (unless (symbol-or-identifier? formals)
-                           (compile-error "bad formal: ~s" formals))
+                           (compile-error "bad formal `~s` in: ~s" formals (de-identifier form)))
                          (reverse (cons (lexical-binder formals) ids))))))))
     ;; then create a child environment with those ids
     (let ((new-env (make-expand-env ids env)))

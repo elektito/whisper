@@ -939,7 +939,7 @@
 
 (define (compile-quote func indent form)
   (if (!= (length form) 2)
-      (compile-error "quote expects a single argument: ~s" form)
+      (compile-error "quote expects a single argument: ~s" (de-identifier form))
       (compile-quoted-item func indent (cadr form))))
 
 (define (parse-lambda-params form)
@@ -1341,7 +1341,7 @@
           ((lexical global alias) (compile-call func indent form tail? discard?))
           ((primcall) (compile-primcall func indent form (lookup-primcall meaning) tail? discard?))
           ((special) (compile-special func indent form meaning tail? discard?))
-          ((aux) (compile-error "invalid use of aux keyword `~a`: ~s" (identifier-name (car form)) form))
+          ((aux) (compile-error "invalid use of aux keyword `~a`: ~s" (identifier-name (car form)) (de-identifier form)))
           (else (compile-error "internal error: unhandled identifier kind: ~a" meaning))))))
 
 (define (var-is-modified? var)
@@ -1380,11 +1380,11 @@
        (intern (func-program func) (identifier-name form))
        (gen-code func indent "value x~a = GET_SYMBOL(symb~a)->value;\n"
                  varnum (mangle-name form)))
-      ((special) (compile-error "invalid use of special `~a`: form" (identifier-name form) form))
+      ((special) (compile-error "invalid use of special `~a`: form" (identifier-name form) (de-identifier form)))
 
-      ((macro) (compile-error "invalid use of macro name `~a`: ~s" (identifier-name form) form))
+      ((macro) (compile-error "invalid use of macro name `~a`: ~s" (identifier-name form) (de-identifier form)))
 
-      ((aux) (compile-error "invalid use of aux keyword `~a`: ~s" (identifier-name form) form))
+      ((aux) (compile-error "invalid use of aux keyword `~a`: ~s" (identifier-name form) (de-identifier form)))
 
       (else (compile-error "internal error: unknown identifier kind: ~a" (binding-kind b))))
     varnum))
@@ -1407,7 +1407,7 @@
         ((char? form) (compile-char func indent form))
         ((pair? form) (compile-list func indent form tail? discard?))
         ((vector? form) (compile-vector func indent form))
-        (else (compile-error "don't know how to compile form: ~s" form))))
+        (else (compile-error "don't know how to compile form: ~s" (de-identifier form)))))
 
 (define (compile-error fmt . args)
   (error (apply format fmt args)))
