@@ -15,7 +15,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode library-paths include-paths core-path)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode library-paths include-paths core-path expand-form)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -30,7 +30,8 @@
   (library-mode cmdline-library-mode cmdline-library-mode-set!)
   (library-paths cmdline-library-paths cmdline-library-paths-set!)
   (include-paths cmdline-include-paths cmdline-include-paths-set!)
-  (core-path cmdline-core-path cmdline-core-path-set!))
+  (core-path cmdline-core-path cmdline-core-path-set!)
+  (expand-form cmdline-expand-form cmdline-expand-form-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
@@ -47,6 +48,7 @@
                 '() ; library paths
                 '() ; include paths
                 "." ; core path
+                #f  ; expand form
                 ))
 
 (define (command-line-error fmt . args)
@@ -107,6 +109,12 @@
                  (begin
                    (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
+            ((string=? (car cl) "-e")
+             (if (null? (cdr cl))
+                 (command-line-error "missing argument to -e")
+                 (begin
+                   (cmdline-expand-form-set! args (cadr cl))
+                   (loop (cddr cl)))))
             (else (if (cmdline-input-file args)
                       (command-line-error "unexpected argument: ~a" (car cl))
                       (begin
@@ -138,7 +146,7 @@
         (cmdline-executable-file-set! args (cmdline-output-file args)))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g]
+  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g] [-e expr]
 
  -r\tcompile and run the program
  -c\tonly compile to a c file
@@ -154,6 +162,7 @@
  -f\tuse the given options when invoking the C compiler
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
+ -e\texpand the given expression and print the expanded form.
  if no input file is given, a repl is started.
 " (car (command-line)))
   (exit 0)
@@ -193,10 +202,24 @@
   (init-read-included-file (resolve-include-search-path
                             (reverse (cmdline-include-paths args))))
   (init-source-location-tracking)
+
+  (when (cmdline-expand-form args)
+    (let* ((port (open-input-string (cmdline-expand-form args)))
+           (form (read port))
+           (runtime-env (environment '(whisper)))
+           (expand-env (new-expand-root-env runtime-env #f))
+           (expanded-forms (expand-top-level-form form expand-env #f)))
+      (for-each (lambda (form)
+                  (write (de-identifier form))
+                  (newline))
+                expanded-forms)
+      (exit 0)))
+
   (when (not (cmdline-input-file args))
     (repl (environment '(whisper) '(scheme eval)))
     (exit 0))
   (postprocess-cmdline args)
+
   (let ((port (open-input-file (cmdline-input-file args))))
     (let ((program (create-program port (cmdline-input-file args)
                                    (make-empty-environment) #t)))
