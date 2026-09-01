@@ -4370,12 +4370,15 @@ value primcall_environment_lookup(environment env, enum call_flags flags, int na
     if (!IS_SYMBOL(sym)) { raise_error("environment-lookup second argument is not a symbol"); }
 
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == NULL) { raise_error("environment-lookup does not support the global environment"); }
-
-    struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
-    if (binding == SENTINEL || binding->kind == sym_unbound) { return FALSE; }
-
-    return make_pair(sym_kind_to_symbol(binding->kind), binding->value);
+    if (ht) {
+        struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
+        if (binding == SENTINEL || binding->kind == sym_unbound) { return FALSE; }
+        return make_pair(sym_kind_to_symbol(binding->kind), binding->value);
+    } else {
+        struct symbol *s = GET_SYMBOL(sym);
+        if (s->kind == sym_unbound) { return FALSE; }
+        return make_pair(sym_kind_to_symbol(s->kind), s->value);
+    }
 }
 
 value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...) {
@@ -4390,9 +4393,6 @@ value primcall_environment_bind_b(environment env, enum call_flags flags, int na
     if (!IS_SYMBOL(sym)) { raise_error("environment-bind! second argument is not a symbol"); }
     if (!IS_SYMBOL(kind)) { raise_error("environment-bind! third argument is not a symbol"); }
 
-    struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == NULL) { raise_error("environment-bind! does not support the sentinel environment"); }
-
     env_define(e, sym, val, symbol_to_sym_kind(kind));
     return VOID;
 }
@@ -4403,6 +4403,14 @@ value primcall_environment_q(environment env, enum call_flags flags, int nargs, 
     value v = next_arg();
     free_args();
     return BOOL(IS_ENVIRONMENT(v));
+}
+
+value primcall_global_environment(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("global-environment takes no arguments"); }
+    struct object *obj = alloc_object();
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = NULL;
+    return OBJECT(obj);
 }
 
 value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
