@@ -7,7 +7,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries sealed-globals)
+  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries sealed-globals c-includes c-exports)
   program?
   (env program-env program-env-set!)
   (port program-port program-port-set!)
@@ -30,7 +30,14 @@
   ;; only place sealed bindings survive long enough for
   ;; gen-sealed-globals to see them all at once, after every unit is
   ;; done.
-  (sealed-globals program-sealed-globals program-sealed-globals-set!))
+  (sealed-globals program-sealed-globals program-sealed-globals-set!)
+
+  ;; list of files to #include in the generated c output
+  (c-includes program-c-includes program-c-includes-set!)
+
+  ;; a list of (lib-name . c-exports) pairs, where c-exports is a list
+  ;; of (scheme-name "c_name" min-args max-args) lists itself.
+  (c-exports program-c-exports program-c-exports-set!))
 
 (define *form-spans* (make-eq-hash-table))
 
@@ -258,6 +265,8 @@
                 #f  ; library mode
                 '() ; libraries
                 '() ; sealed globals
+                '() ; c includes
+                '() ; c exports
                 ))
 
 (define (program-add-function program func)
@@ -267,6 +276,9 @@
   (let ((n (program-funcnum program)))
     (program-funcnum-set! program (+ n 1))
     n))
+
+(define (program-add-c-include program filename)
+  (program-c-includes-set! program (cons filename (program-c-includes program))))
 
 (define (gen-func-prototypes program output)
   (let loop ((funcs (program-funcs program)))
@@ -298,11 +310,42 @@
                   (hash-table-keys (program-symbols program)))
              (lambda (a b) (string<? (car a) (car b))))))
 
-(define (gen-symbol-defines symbols output)
+;; c-exports are (lib-name . exports) pairs. we first sort this list
+;; based on lib-name, and then sort each "exports" list (which is in the
+;; form (scheme-name "c_name" min-args max-args)) on scheme-names
+(define (sorted-program-c-exports program)
+  (let* ((c-exports (program-c-exports program))
+         (sorted-on-lib-names (sort c-exports
+                                    (lambda (a b)
+                                      (let ((lib-name-a (car a))
+                                            (lib-name-b (car b)))
+                                        (string<? (format #f "~s" lib-name-a)
+                                                  (format #f "~s" lib-name-b)))))))
+    (map (lambda (x)
+           (let ((lib-name (car x))
+                 (exports (cdr x)))
+             (cons lib-name (sort exports
+                                  (lambda (a b)
+                                    (string<? (symbol->string (car a))
+                                              (symbol->string (car b))))))))
+         sorted-on-lib-names)))
+
+(define (gen-symbol-defines symbols c-exports output)
   (for-each
    (lambda (symbol)
      (format output "static value symb~a;\n" (mangle-name symbol)))
-   symbols))
+   symbols)
+  (for-each
+   (lambda (c-export-info)
+     (let ((lib-name (car c-export-info))
+           (exports (cdr c-export-info)))
+       (for-each (lambda (sym-info)
+                   (let* ((scheme-name (car sym-info))
+                          (library-mangled-name (library-mangle-name lib-name scheme-name))
+                          (c-mangled-name (mangle-name library-mangled-name)))
+                     (format output "static value symb~a;\n" c-mangled-name)))
+                 exports)))
+   c-exports))
 
 ;; for each sealed global (one that's never mutated or redefined) define
 ;; a static varaible.
@@ -352,10 +395,21 @@
         (format output "    &symb~a,\n" (mangle-name (library-mangle-name (library-name lib) name))))
       (library-defines lib)))
    (program-libraries program))
+  (for-each
+   (lambda (lib-export-info)
+     (let ((lib-name (car lib-export-info))
+           (exports (cdr lib-export-info)))
+       (for-each (lambda (sym-info)
+                   (let* ((scheme-name (car sym-info))
+                          (library-mangled-name (library-mangle-name lib-name scheme-name))
+                          (c-mangled-name (mangle-name library-mangled-name)))
+                     (format output "    &symb~a,\n" c-mangled-name)))
+                 exports)))
+   (program-c-exports program))
   (format output "    NULL,\n")
   (format output "};\n"))
 
-(define (gen-register-globals symbols output)
+(define (gen-register-globals symbols c-exports output)
   (display "static void register_globals() {\n" output)
   (for-each
    (lambda (sym)
@@ -375,21 +429,46 @@
                    (mangle-name sym) c-name min-args c-max-args)
            (format output "    }\n")))))
    symbols)
+  (for-each
+   (lambda (lib-export-info)
+     (let ((lib-name (car lib-export-info))
+           (exports (cdr lib-export-info)))
+       (for-each (lambda (sym-info)
+                   (let* ((scheme-name (car sym-info))
+                          (c-name (cadr sym-info))
+                          (min-args (caddr sym-info))
+                          (max-args (cadddr sym-info))
+                          (library-mangled-name (library-mangle-name lib-name scheme-name))
+                          (library-mangled-name-len (string-length (symbol->string library-mangled-name)))
+                          (c-mangled-name (mangle-name library-mangled-name)))
+                     (format output "    symb~a = extend_global_env(\"~a\", ~a, sym_value);\n"
+                             c-mangled-name library-mangled-name library-mangled-name-len)
+                     (format output "    GET_SYMBOL(symb~a)->value = make_closure(~a, ~a, ~a, 0);\n"
+                             c-mangled-name c-name min-args max-args)
+                     (format output "    GET_SYMBOL(symb~a)->kind = sym_value;\n"
+                             c-mangled-name)))
+                 exports)))
+   c-exports)
   (display "}\n" output))
 
 (define (output-program-code program filename)
   (intern-primcalls program)
   (let ((port (open-output-file filename))
-        (symbols (sorted-program-symbols program)))
-    (display "#include \"core.h\"\n\n" port)
-    (gen-symbol-defines symbols port)
+        (symbols (sorted-program-symbols program))
+        (c-exports (sorted-program-c-exports program)))
+    (display "#include \"core.h\"\n" port)
+    (for-each (lambda (filename)
+                (format port "#include \"~a\"\n" filename))
+              (program-c-includes program))
+    (newline port)
+    (gen-symbol-defines symbols c-exports port)
     (newline port)
     (gen-sealed-globals program port)
     (display "\nstatic value global_env;\n" port)
     (newline port)
     (gen-func-prototypes program port)
     (newline port)
-    (gen-register-globals symbols port)
+    (gen-register-globals symbols c-exports port)
     (newline port)
     (gen-func-bodies program port)
     (if (program-library-mode program)
@@ -587,6 +666,7 @@
                       (gensym "gensym" 0 1)
                       (get-output-string "get_output_string" 1 1)
                       (get-environment-variable "get_environment_variable" 1 1)
+                      (global-environment "global_environment" 0 0)
                       (hash "hash" 1 2)
                       (hash-by-identity "hash_by_identity" 1 2)
                       (hash-table? "hash_table_q" 1 1)
@@ -1482,6 +1562,7 @@
                                  (identifier 'primcall 'gensym 'gensym)
                                  (identifier 'primcall 'get-output-string 'get-output-string)
                                  (identifier 'primcall 'get-environment-variable 'get-environment-variable)
+                                 (identifier 'primcall 'global-environment 'global-environment)
                                  (identifier 'primcall 'hash 'hash)
                                  (identifier 'primcall 'hash-by-identity 'hash-by-identity)
                                  (identifier 'primcall 'hash-table? 'hash-table?)
@@ -1694,6 +1775,7 @@
                            (cddr form)))
                (imports '())
                (export-names '())
+               (c-exports '())
                (forms '()))
       (if (null? decls)
           (begin
@@ -1702,9 +1784,12 @@
             (mark-sealed-globals! program cu)
             (for-each (lambda (f) (compile-form func 1 f #f #f))
                       (reverse forms))
-            (let ((exports (map (lambda (spec)
-                                  (resolve-library-export lib-env (car spec) (cdr spec)))
-                                export-names))
+            (let ((exports (append (map (lambda (spec)
+                                          (resolve-library-export lib-env (car spec) (cdr spec)))
+                                        export-names)
+                                   (map (lambda (spec)
+                                          (list (car spec) 'value))
+                                        c-exports)))
                   (value-defines
                    (hash-table-fold (compilation-unit-defines cu)
                                     (lambda (name binding acc)
@@ -1712,6 +1797,10 @@
                                           (cons name acc)
                                           acc))
                                     '())))
+              (program-c-exports-set!
+               program
+               (cons (cons lib-name c-exports)
+                     (program-c-exports program)))
               (program-libraries-set!
                program
                (cons (make-library lib-name (reverse imports) exports
@@ -1725,25 +1814,42 @@
             (case (car decl)
               ((import)
                (process-import decl lib-env (program-filename program))
-               (loop (cdr decls) (cons decl imports) export-names forms))
+               (loop (cdr decls) (cons decl imports) export-names c-exports forms))
               ((export)
                (loop (cdr decls) imports
                      (append export-names (map parse-export-spec (cdr decl)))
-                     forms))
+                     c-exports forms))
               ((begin)
-               (loop (cdr decls) imports export-names
+               (loop (cdr decls) imports export-names c-exports
                      (expand-and-prepend (map (lambda (f) (cons f filename)) (cdr decl))
-                                          forms)))
+                                         forms)))
               ((include)
-               (loop (cdr decls) imports export-names
+               (loop (cdr decls) imports export-names c-exports
                      (expand-and-prepend (read-include-form decl filename) forms)))
               ((include-library-declarations)
                (loop (append (read-include-form decl filename) (cdr decls))
-                     imports export-names forms))
+                     imports export-names c-exports forms))
               ((include-ci)
                (compile-error "include-ci is not yet supported in define-library"))
               ((cond-expand)
                (compile-error "cond-expand is not yet supported in define-library"))
+              ((c-include)
+               (unless (and (= (length decl) 2)
+                            (string? (cadr decl)))
+                 (compile-error "invalid c-include form: ~s" decl))
+               (program-add-c-include program (cadr decl))
+               (loop (cdr decls) imports export-names c-exports forms))
+              ((c-export) ;; (export (strlen "strlen" 1 1) (strcmp "strcmp" 2 2))
+               (for-each (lambda (spec)
+                           (unless (and (list? spec)
+                                        (= (length spec) 4)
+                                        (symbol? (car spec))
+                                        (string? (cadr spec))
+                                        (fixnum? (caddr spec))
+                                        (fixnum? (cadddr spec)))
+                             (compile-error "invalid c-export: ~s" decl)))
+                         (cdr decl))
+               (loop (cdr decls) imports export-names (append c-exports (cdr decl)) forms))
               (else
                (compile-error "unknown define-library declaration: ~a" (car decl)))))))))
 
