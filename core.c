@@ -2190,7 +2190,6 @@ static void reinstate_stack(value cont) {
                GET_OBJECT(cont)->continuation.shadow_stack_size * sizeof(struct shadow_stack_frame));
     }
 
-    printf("CCCCCC\n");
     shadow_stack_size = GET_OBJECT(cont)->continuation.shadow_stack_size;
 #endif
 
@@ -2408,8 +2407,6 @@ value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int na
     int fd = fileno(fp);
     struct pollfd pfd = { .fd = fd, .events = POLLIN};
     int r = poll(&pfd, 1, 0);
-
-    printf("poll ret: %d, revents: 0x%x\n", r, pfd.revents);
 
     /* POLLHUP = EOF, which  still means we should return true */
     if (r > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
