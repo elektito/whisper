@@ -1,3 +1,6 @@
+#ifndef _WHISPER_CORE_H_
+#define _WHISPER_CORE_H_
+
 #include <assert.h>
 #include <limits.h>
 #include <setjmp.h>
@@ -664,3 +667,5 @@ extern void set_form_span(const char *filename, int start_line, int start_col, i
 #else
 #define set_form_span(f, sl, sc, el, ec)
 #endif
+
+#endif /* _WHISPER_CORE_H_ */
