@@ -1802,7 +1802,7 @@ value env_ref(value e, value sym) {
          * a real closure from program init. */
         return GET_SYMBOL(binding->value)->value;
     default:
-        panic("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case (%d)", binding->kind);
     }
 }
 
@@ -4341,7 +4341,7 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
     case sym_alias: return symbol_alias;
     case sym_env_alias: return symbol_env_alias;
     default:
-        panic("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case (%d)", kind);
     }
 }
 

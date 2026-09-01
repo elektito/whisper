@@ -488,7 +488,7 @@ static value global_env_ref(value sym) {
         /* this should be unreachable */
         raise_error("library environment alias in global environment");
     default:
-        panic("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case (%d)", s->kind);
     }
 }
 
