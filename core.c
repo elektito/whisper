@@ -64,6 +64,7 @@ static int n_heaps = 0;
 /* symbols used by the runtime */
 static value symbol_file;
 static value symbol_system;
+static value symbol_unbound;
 static value symbol_value;
 static value symbol_macro;
 static value symbol_special;
@@ -1869,6 +1870,7 @@ static void init_symbols(void) {
     symbol_system = extend_global_env("system", 6, sym_unbound);
 
     /* sym_kind symbolic names */
+    symbol_unbound = extend_global_env("unbound", 7, sym_unbound);
     symbol_value = extend_global_env("value", 5, sym_unbound);
     symbol_macro = extend_global_env("macro", 5, sym_unbound);
     symbol_special = extend_global_env("special", 7, sym_unbound);
@@ -4333,6 +4335,7 @@ value primcall_make_empty_environment(environment env, enum call_flags flags, in
  * never writes it. */
 static value sym_kind_to_symbol(enum sym_kind kind) {
     switch (kind) {
+    case sym_unbound: return symbol_unbound;
     case sym_value: return symbol_value;
     case sym_macro: return symbol_macro;
     case sym_special: return symbol_special;
@@ -4347,6 +4350,7 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
 
 /* the reverse of sym_kind_to_symbol */
 static enum sym_kind symbol_to_sym_kind(value sym) {
+    if (sym == symbol_unbound) return sym_unbound;
     if (sym == symbol_value) return sym_value;
     if (sym == symbol_macro) return sym_macro;
     if (sym == symbol_special) return sym_special;
