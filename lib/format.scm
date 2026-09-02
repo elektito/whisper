@@ -162,8 +162,8 @@ OPTION  [MNEMONIC]      DESCRIPTION     -- Implementation Assumes ASCII Text Enc
 
 
 (define (require-an-arg args)
-  (if (null? args)
-      (error "FORMAT: too few arguments" ))
+  (when (null? args)
+    (error "FORMAT: too few arguments" ))
   )
 
 (define (has-newline? whatever last-was-newline)
@@ -355,9 +355,9 @@ OPTION  [MNEMONIC]      DESCRIPTION     -- Implementation Assumes ASCII Text Enc
 (define (%format port format-string args)
   ;; format main
   (let ( (unused-args (format-help format-string args port)) )
-    (if (not (null? unused-args))
-        (error
-         (format "FORMAT: unused arguments ~s" unused-args)))))
+    (unless (null? unused-args)
+      (error
+       (format "FORMAT: unused arguments ~s" unused-args)))))
 
 (define (format . args)
   (cond ((null? args)
