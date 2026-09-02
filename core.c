@@ -4426,7 +4426,11 @@ value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
     char *filenamez = strz(filename);
     void *handle = dlopen(filenamez, RTLD_NOW | RTLD_LOCAL);
     free(filenamez);
-    if (!handle) { raise_error("run-so: cannot load file: %.*s", (int) GET_STRING(filename)->len, GET_STRING(filename)->s); }
+    if (!handle) {
+        raise_error("run-so: cannot load file: %.*s (dlopen: %s)",
+                    (int) GET_STRING(filename)->len, GET_STRING(filename)->s,
+                    dlerror());
+    }
 
     value (*whisper_main_sym)(value env) = dlsym(handle, "whisper_main");
     if (!whisper_main_sym) { raise_error("run-so: cannot find symbol whisper_main in shared object"); }
