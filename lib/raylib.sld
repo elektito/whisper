@@ -1,0 +1,6 @@
+(define-library (raylib)
+  (c-include "raylib.c")
+  (c-export (init-window "init_window" 3 3))
+  (c-archives "libraylib.a")
+  (c-static-flags "-lm -lX11 -lGL")
+  (c-so-flags "-lraylib -Wl,-rpath '$ORIGIN' -lm -lX11 -lGL"))

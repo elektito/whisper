@@ -19,6 +19,8 @@ LIB_EXPORT_FILES = lib/scheme-base-exports.scm \
 
 WHISPER_LIB_SRC = lib/stdlib.scm lib/format.scm lib/read.scm lib/whisper.sld $(LIB_EXPORT_FILES)
 
+RAYLIB_SRC = vendor/raylib/src
+
 all: $(CURRENT)
 
 # each bootstrap stage needs its own (whisper) library built by the
@@ -67,12 +69,24 @@ lib/scheme.manifest lib/scheme.so lib/scheme.a &: $(CURRENT) lib/scheme.sld lib/
 lib/eval.manifest lib/eval.so lib/eval.a &: $(CURRENT) lib/scheme-eval.sld $(COMPILER_SRC)
 	./$(CURRENT) lib/scheme-eval.sld -l -o lib/eval -L lib
 
-libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest
+lib/libraylib.a lib/libraylib.so lib/libraylib.so.600 &:
+	$(MAKE) -C $(RAYLIB_SRC) RAYLIB_LIBTYPE=STATIC
+	$(MAKE) -C $(RAYLIB_SRC) RAYLIB_LIBTYPE=SHARED
+
+	cp $(RAYLIB_SRC)/libraylib.a lib/
+	cp $(RAYLIB_SRC)/libraylib.so lib/
+	cp $(RAYLIB_SRC)/libraylib.so.600 lib/
+
+lib/raylib.manifest lib/raylib.so lib/raylib.a &: $(CURRENT) lib/raylib.sld lib/raylib.c lib/libraylib.a lib/libraylib.so
+	./$(CURRENT) lib/raylib.sld -l -o lib/raylib -f '-I lib -I $(RAYLIB_SRC)'
+
+libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest
 
 clean:
 	rm -rf $(CURRENT) stage0 stage1 libwhisper.a stage0-lib stage1-lib stage2-lib
 	rm -f lib/whisper.manifest lib/whisper.so lib/whisper.a
 	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
 	rm -f lib/eval.manifest lib/eval.so lib/eval.a
+	$(MAKE) -C $(RAYLIB_SRC) clean
 
 .PHONY: all clean test matrix libs
