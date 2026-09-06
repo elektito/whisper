@@ -236,7 +236,6 @@
             (let ((cc (if cc cc "gcc"))
                   (own-cflags (if (program-debug program) " -DDEBUG" "")))
               (let ((cmd (build-compile-cmd-from-args cc own-cflags args program)))
-                (display cmd)
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))
