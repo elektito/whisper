@@ -536,7 +536,7 @@
                                                      id)))))))
                           (let loop ((rules rules))
                             (if (null? rules)
-                                (compile-error "no rule matched input: ~s" input)
+                                (compile-error "no rule matched input: ~s" (de-identifier input))
                                 (let ((store (new-store))
                                       (pattern (caar rules))
                                       (template (cdar rules)))
