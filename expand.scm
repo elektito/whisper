@@ -648,11 +648,15 @@
 ;;;;;; libraries ;;;;;;
 
 (define-record-type <library>
-  (make-library name imports exports macros defines code-handle)
+  (make-library name filename imports exports macros defines extra-archives extra-flags code-handle)
   library?
 
   ;; the library name, e.g. (foo bar)
   (name library-name)
+
+  ;; the .manifest file or .sld file from which the library object was
+  ;; created, or #f if there's no file
+  (filename library-filename)
 
   ;; a list of import forms this library depends on
   (imports library-imports)
@@ -672,6 +676,12 @@
   ;; names, unmangled). exported macro templates may reference any of
   ;; these, so the importer must know they exist.
   (defines library-defines)
+
+  ;; extra archives needed by this library
+  (extra-archives library-extra-archives library-extra-archives-set!)
+
+  ;; extra compiler flags needed by this library
+  (extra-flags library-extra-flags library-extra-flags-set!)
 
   ;; opaque token the provider understands, or #f when there's no
   ;; artifact to provide (a builtin library, or a code-free one).

@@ -7,7 +7,7 @@
 ;;;;;; compiler ;;;;;;
 
 (define-record-type <program>
-  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries sealed-globals c-includes c-exports)
+  (make-program env port filename funcs funcnum interned-symbols init-func is-test-suite debug library-mode libraries sealed-globals c-includes c-exports so-extra-flags)
   program?
   (env program-env program-env-set!)
   (port program-port program-port-set!)
@@ -37,7 +37,14 @@
 
   ;; a list of (lib-name . c-exports) pairs, where c-exports is a list
   ;; of (scheme-name "c_name" min-args max-args) lists itself.
-  (c-exports program-c-exports program-c-exports-set!))
+  (c-exports program-c-exports program-c-exports-set!)
+
+  ;; extra compiler flags used when building the shared object version
+  ;; of the library (note there's no equivalent for this for the .a
+  ;; version of the library because this is mainly intended to pass
+  ;; -l<extra-lib> arguments to the compiler and those should be passed
+  ;; when compiling the final executable that uses the static lib)
+  (so-extra-flags program-so-extra-flags program-so-extra-flags-set!))
 
 (define *form-spans* (make-eq-hash-table))
 
@@ -94,6 +101,7 @@
 (define (find-library-core lib-name)
   (if (equal? lib-name '(whisper core))
       (make-library lib-name
+                    #f
                     '()
                     (map (lambda (id)
                            ;; we know root identifiers all have
@@ -109,6 +117,8 @@
                          *root-identifiers*)
                     '()
                     '()
+                    '()
+                    ""
                     #f)
       #f))
 
@@ -135,10 +145,13 @@
 
 (define (parse-library-entry manifest-path entry)
   (make-library (cadr entry)
+                manifest-path
                 (manifest-clause entry 'imports)
                 (manifest-clause entry 'exports)
                 (manifest-clause entry 'macros)
                 (manifest-clause entry 'defines)
+                (manifest-clause entry 'extra-archives)
+                (car (manifest-clause entry 'extra-flags))
                 (manifest-stem manifest-path)))
 
 ;; The paths of every *.manifest file directly inside dir, or '() if dir
@@ -267,6 +280,7 @@
                 '() ; sealed globals
                 '() ; c includes
                 '() ; c exports
+                '()  ; .so extra flags
                 ))
 
 (define (program-add-function program func)
@@ -1776,6 +1790,8 @@
                (imports '())
                (export-names '())
                (c-exports '())
+               (extra-archives '())
+               (extra-flags "")
                (forms '()))
       (if (null? decls)
           (begin
@@ -1803,9 +1819,9 @@
                      (program-c-exports program)))
               (program-libraries-set!
                program
-               (cons (make-library lib-name (reverse imports) exports
+               (cons (make-library lib-name (program-filename program) (reverse imports) exports
                                    (reverse (compilation-unit-syntax-defs cu))
-                                   value-defines #f)
+                                   value-defines extra-archives extra-flags #f)
                      (program-libraries program)))))
           (let ((decl (caar decls))
                 (filename (cdar decls)))
@@ -1814,21 +1830,21 @@
             (case (car decl)
               ((import)
                (process-import decl lib-env (program-filename program))
-               (loop (cdr decls) (cons decl imports) export-names c-exports forms))
+               (loop (cdr decls) (cons decl imports) export-names c-exports extra-archives extra-flags forms))
               ((export)
                (loop (cdr decls) imports
                      (append export-names (map parse-export-spec (cdr decl)))
-                     c-exports forms))
+                     c-exports extra-archives extra-flags forms))
               ((begin)
-               (loop (cdr decls) imports export-names c-exports
+               (loop (cdr decls) imports export-names c-exports extra-archives extra-flags
                      (expand-and-prepend (map (lambda (f) (cons f filename)) (cdr decl))
                                          forms)))
               ((include)
-               (loop (cdr decls) imports export-names c-exports
+               (loop (cdr decls) imports export-names c-exports extra-archives extra-flags
                      (expand-and-prepend (read-include-form decl filename) forms)))
               ((include-library-declarations)
                (loop (append (read-include-form decl filename) (cdr decls))
-                     imports export-names c-exports forms))
+                     imports export-names c-exports extra-archives extra-flags forms))
               ((include-ci)
                (compile-error "include-ci is not yet supported in define-library"))
               ((cond-expand)
@@ -1838,7 +1854,7 @@
                             (string? (cadr decl)))
                  (compile-error "invalid c-include form: ~s" decl))
                (program-add-c-include program (cadr decl))
-               (loop (cdr decls) imports export-names c-exports forms))
+               (loop (cdr decls) imports export-names c-exports extra-archives extra-flags forms))
               ((c-export) ;; (export (strlen "strlen" 1 1) (strcmp "strcmp" 2 2))
                (for-each (lambda (spec)
                            (unless (and (list? spec)
@@ -1849,7 +1865,23 @@
                                         (fixnum? (cadddr spec)))
                              (compile-error "invalid c-export: ~s" decl)))
                          (cdr decl))
-               (loop (cdr decls) imports export-names (append c-exports (cdr decl)) forms))
+               (loop (cdr decls) imports export-names (append c-exports (cdr decl)) extra-archives extra-flags forms))
+              ((c-archives)
+               (unless (all? (map string? (cdr decl)))
+                 (compile-error "invalid c-archives form: ~s" decl))
+               (loop (cdr decls) imports export-names c-exports (append extra-archives (cdr decl)) extra-flags forms))
+              ((c-static-flags)
+               (unless (and (= (length decl) 2)
+                            (string? (cadr decl)))
+                 (compile-error "invalid c-static-flags form: ~s" decl))
+               (loop (cdr decls) imports export-names c-exports extra-archives (cadr decl) forms))
+              ((c-so-flags)
+               (unless (and (= (length decl) 2)
+                            (string? (cadr decl)))
+                 (compile-error "invalid c-so-flags form: ~s" decl))
+               (program-so-extra-flags-set! program (cons (cadr decl)
+                                                          (program-so-extra-flags program)))
+               (loop (cdr decls) imports export-names c-exports extra-archives extra-flags forms))
               (else
                (compile-error "unknown define-library declaration: ~a" (car decl)))))))))
 
@@ -1901,7 +1933,9 @@
                          (imports ,@(library-imports lib))
                          (exports ,@(library-exports lib))
                          (defines ,@(library-defines lib))
-                         (macros ,@(library-macros lib))))
+                         (macros ,@(library-macros lib))
+                         (extra-archives ,@(library-extra-archives lib))
+                         (extra-flags ,(library-extra-flags lib))))
                     (reverse (program-libraries program))))
            port)
     (newline port)
@@ -1966,19 +2000,56 @@
   (map (lambda (handle) (string-append handle ".a"))
        (imported-artifacts (program-env program))))
 
-(define (build-compile-cmd cc library-mode cflags c-file out-file core-path archives)
-  (let ((archive-flags (all-archive-flags archives)))
+(define (program-extra-flags program)
+  (let* ((env (program-env program))
+         (cu (expand-root-env-compilation-unit env))
+         (libs (compilation-unit-imports cu)))
+    (string-join (map (lambda (lib)
+                        (library-extra-flags lib))
+                      libs)
+                 " ")))
+
+(define (program-extra-archives program)
+  (let* ((env (program-env program))
+         (cu (expand-root-env-compilation-unit env))
+         (libs (compilation-unit-imports cu)))
+    (apply append (map (lambda (lib)
+                         (let ((lib-file (library-filename lib)))
+                           (map (lambda (ar)
+                                  (if lib-file
+                                      (resolve-filename ar lib-file)
+                                      ar))
+                                (library-extra-archives lib))))
+                       libs))))
+
+;; resolves the given filename against the given parent-filename. e.g.
+;; if filename=foo/bar.txt and parent-filename=/spam/eggs/sth.txt the
+;; output is /spam/eggs/foo/bar.txt
+(define (resolve-filename filename parent-filename)
+  (if (path-absolute? filename)
+      (realpath filename)
+      (realpath (string-append (path-dirname parent-filename) "/" filename))))
+
+(define (build-compile-cmd cc library-mode cflags c-file out-file core-path program)
+  (let* ((archive-flags (all-archive-flags (program-import-archives program)))
+         (so-extra-flags (string-join (program-so-extra-flags program) " "))
+         (filename (program-filename program))
+         (here (if filename (path-dirname (realpath filename)) "."))
+         (extra-archives (program-extra-archives program))
+         (extra-archives (string-join extra-archives " "))
+         (extra-flags (program-extra-flags program)))
+    ;; what's "here"? it's where the .sld file resides
     (case library-mode
       ((so)
        (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
       ((library)
        (let* ((obj (string-append (temp-filename) ".o"))
-              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a" cc core-path cflags out-file c-file))
+              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a -L~a ~a" cc core-path cflags out-file c-file here so-extra-flags))
               (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
               (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
          (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
       (else
-       (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c" cc core-path cflags out-file c-file archive-flags core-path)))))
+       (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c ~a ~a" cc core-path cflags out-file c-file archive-flags core-path extra-archives extra-flags)))))
 
 (define (hex-encode s)
   (let loop ((i 0) (x ""))
@@ -2010,7 +2081,7 @@
     (output-program-code program c-file)
     (let ((cc (or (get-environment-variable "CC") "gcc"))
           (core-path (or (get-environment-variable "WHISPER_HOME") ".")))
-      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path '()))))
+      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path program))))
         (delete-file c-file)
         (unless (zero? ret)
           (compile-error "gcc returned non-zero exit code: ~a" ret))))

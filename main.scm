@@ -3,14 +3,14 @@
 
 (include "whisper.scm")
 
-(define (build-compile-cmd-from-args cc own-cflags args archives)
+(define (build-compile-cmd-from-args cc own-cflags args program)
   (build-compile-cmd cc
                      (cmdline-library-mode args)
                      (format "~a ~a" own-cflags (cmdline-cflags args))
                      (cmdline-c-file args)
                      (cmdline-executable-file args)
                      (cmdline-core-path args)
-                     archives))
+                     program))
 
 ;;;;;; command-line parsing ;;;;;;
 
@@ -235,7 +235,8 @@
           (let ((cc (get-environment-variable "CC")))
             (let ((cc (if cc cc "gcc"))
                   (own-cflags (if (program-debug program) " -DDEBUG" "")))
-              (let ((cmd (build-compile-cmd-from-args cc own-cflags args (program-import-archives program))))
+              (let ((cmd (build-compile-cmd-from-args cc own-cflags args program)))
+                (display cmd)
                 (let ((ret (system cmd)))
                   (delete-file (cmdline-c-file args))
                   (if (not (zero? ret))
