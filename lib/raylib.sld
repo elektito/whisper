@@ -11,7 +11,7 @@
     (define pink '(255 109 194 255))
     (define red '(230 41 55 255))
     (define maroon '(190 33 55 255))
-    (define gree '(0 228 48 255))
+    (define green '(0 228 48 255))
     (define lime '(0 158 47 255))
     (define dark-green '(0 117 44 255))
     (define sky-blue '(102 191 255 255))
@@ -39,7 +39,7 @@
           pink
           red
           maroon
-          gree
+          green
           lime
           dark-green
           sky-blue
@@ -65,7 +65,17 @@
 
             (clear-background "clear_background" 1 1)
             (begin-drawing "begin_drawing" 0 0)
-            (end-drawing "end_drawing" 0 0))
+            (end-drawing "end_drawing" 0 0)
+
+            (set-target-fps "set_target_fps" 1 1)
+
+            (draw-pixel "draw_pixel" 3 3)
+            (draw-line "draw_line" 5 5)
+            (draw-circle "draw_circle" 4 4)
+            (draw-rectangle "draw_rectangle" 5 5)
+
+            (draw-fps "draw_fps" 2 2)
+            (draw-text "draw_text" 5 5))
   (c-archives "libraylib.a")
   (c-static-flags "-lm -lX11 -lGL")
   (c-so-flags "-lraylib -Wl,-rpath '$ORIGIN' -lm -lX11 -lGL"))
