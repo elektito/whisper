@@ -196,6 +196,80 @@ value is_key_up(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(result);
 }
 
+value is_mouse_button_pressed(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-mouse-button-pressed takes a single argument"); }
+
+    init_args();
+    value button = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(button)) { raise_error("is-mouse-button-pressed argument is not an integer"); }
+
+    int result = IsMouseButtonPressed(GET_FIXNUM(button));
+    return BOOL(result);
+}
+
+value is_mouse_button_down(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-mouse-button-down takes a single argument"); }
+
+    init_args();
+    value button = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(button)) { raise_error("is-mouse-button-down argument is not an integer"); }
+
+    int result = IsMouseButtonDown(GET_FIXNUM(button));
+    return BOOL(result);
+}
+
+value is_mouse_button_released(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-mouse-button-released takes a single argument"); }
+
+    init_args();
+    value button = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(button)) { raise_error("is-mouse-button-released argument is not an integer"); }
+
+    int result = IsMouseButtonReleased(GET_FIXNUM(button));
+    return BOOL(result);
+}
+
+value is_mouse_button_up(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-mouse-button-up takes a single argument"); }
+
+    init_args();
+    value button = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(button)) { raise_error("is-mouse-button-up argument is not an integer"); }
+
+    int result = IsMouseButtonUp(GET_FIXNUM(button));
+    return BOOL(result);
+}
+
+value get_mouse_x(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-mouse-x accepts no arguments"); }
+    return FIXNUM(GetMouseX());
+}
+
+value get_mouse_y(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-mouse-y accepts no arguments"); }
+    return FIXNUM(GetMouseY());
+}
+
+value get_mouse_position(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-mouse-position accepts no arguments"); }
+    Vector2 pos = GetMousePosition();
+    return make_pair(FLONUM(pos.x), FLONUM(pos.y));
+}
+
+value get_mouse_delta(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-mouse-delta accepts no arguments"); }
+    Vector2 delta = GetMouseDelta();
+    return make_pair(FLONUM(delta.x), FLONUM(delta.y));
+}
+
 value draw_pixel(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 3) { raise_error("draw-pixel takes three arguments"); }
 

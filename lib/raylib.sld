@@ -150,6 +150,15 @@
     (define key-menu 5)         ; Key: Android menu button
     (define key-volume-up 24)   ; Key: Android volume up button
     (define key-volume-down 25) ; Key: Android volume down button
+
+    ;; mouse buttons
+    (define mouse-button-left 0)
+    (define mouse-button-right 1)
+    (define mouse-button-middle 2)
+    (define mouse-button-side 3)
+    (define mouse-button-extra 4)
+    (define mouse-button-forward 5)
+    (define mouse-button-back 6)
     )
 
   (export light-gray
@@ -293,6 +302,14 @@
           key-menu
           key-volume-up
           key-volume-down
+
+          mouse-button-left
+          mouse-button-right
+          mouse-button-middle
+          mouse-button-side
+          mouse-button-extra
+          mouse-button-forward
+          mouse-button-back
           )
 
   (c-include "raylib.c")
@@ -314,6 +331,15 @@
             (is-key-down "is_key_down" 1 1)
             (is-key-released "is_key_released" 1 1)
             (is-key-up "is_key_up" 1 1)
+
+            (is-mouse-button-pressed "is_mouse_button_pressed" 1 1)
+            (is-mouse-button-down "is_mouse_button_down" 1 1)
+            (is-mouse-button-released "is_mouse_button_released" 1 1)
+            (is-mouse-button-up "is_mouse_button_up" 1 1)
+            (get-mouse-x "get_mouse_x" 0 0)
+            (get-mouse-y "get_mouse_y" 0 0)
+            (get-mouse-position "get_mouse_position" 0 0)
+            (get-mouse-delta "get_mouse_delta" 0 0)
 
             (draw-pixel "draw_pixel" 3 3)
             (draw-line "draw_line" 5 5)
