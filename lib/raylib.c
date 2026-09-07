@@ -108,6 +108,71 @@ value set_target_fps(environment env, enum call_flags flags, int nargs, ...) {
     return VOID;
 }
 
+value is_key_pressed(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-key-pressed takes a single argument"); }
+
+    init_args();
+    value key = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(key)) { raise_error("is-key-pressed argument is not an integer"); }
+
+    int result = IsKeyPressed(GET_FIXNUM(key));
+    return BOOL(result);
+}
+
+value is_key_pressed_repeat(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-key-pressed-repeat takes a single argument"); }
+
+    init_args();
+    value key = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(key)) { raise_error("is-key-pressed-repeat argument is not an integer"); }
+
+    int result = IsKeyPressedRepeat(GET_FIXNUM(key));
+    return BOOL(result);
+}
+
+value is_key_down(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-key-down takes a single argument"); }
+
+    init_args();
+    value key = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(key)) { raise_error("is-key-down argument is not an integer"); }
+
+    int result = IsKeyDown(GET_FIXNUM(key));
+    return BOOL(result);
+}
+
+value is_key_released(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-key-released takes a single argument"); }
+
+    init_args();
+    value key = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(key)) { raise_error("is-key-released argument is not an integer"); }
+
+    int result = IsKeyReleased(GET_FIXNUM(key));
+    return BOOL(result);
+}
+
+value is_key_up(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-key-up takes a single argument"); }
+
+    init_args();
+    value key = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(key)) { raise_error("is-key-up argument is not an integer"); }
+
+    int result = IsKeyUp(GET_FIXNUM(key));
+    return BOOL(result);
+}
+
 value draw_pixel(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 3) { raise_error("draw-pixel takes three arguments"); }
 
