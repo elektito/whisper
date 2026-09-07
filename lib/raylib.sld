@@ -305,6 +305,9 @@
             (end-drawing "end_drawing" 0 0)
 
             (set-target-fps "set_target_fps" 1 1)
+            (get-frame-time "get_frame_time" 0 0)
+            (get-time-us "get_time_us" 0 0)
+            (get-fps "get_fps" 0 0)
 
             (is-key-pressed "is_key_pressed" 1 1)
             (is-key-pressed-repeat "is_key_pressed_repeat" 1 1)

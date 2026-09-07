@@ -2,6 +2,8 @@
 
 #include <raylib.h>
 
+#include <time.h>
+
 Color color_from_list(value color_scm, const char *caller_name) {
     const char *error_msg = "color must be a list of four values (r g b a), each from in range [0, 255]";
     if (!IS_PAIR(color_scm)) { raise_error("%s: %s", caller_name, error_msg); }
@@ -106,6 +108,27 @@ value set_target_fps(environment env, enum call_flags flags, int nargs, ...) {
     SetTargetFPS(GET_FIXNUM(fps));
 
     return VOID;
+}
+
+value get_frame_time(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-frame-time accepts no arguments"); }
+    return FLONUM(GetFrameTime());
+}
+
+value get_time_us(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-time-us accepts no arguments"); }
+
+    struct timespec ts;
+    int ret = clock_gettime(CLOCK_MONOTONIC, &ts);
+    if (ret) { raise_error("error reading time"); }
+
+    uint64_t usecs = ts.tv_sec * 1000000 + ts.tv_nsec * 1000;
+    return FIXNUM(usecs);
+}
+
+value get_fps(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-fps accepts no arguments"); }
+    return FIXNUM(GetFPS());
 }
 
 value is_key_pressed(environment env, enum call_flags flags, int nargs, ...) {
