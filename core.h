@@ -210,6 +210,7 @@ enum object_type {
     OBJ_ERROR,
     OBJ_VECTOR,
     OBJ_WRAPPED,
+    OBJ_C_WRAPPED,
     OBJ_BOX,
     OBJ_HASH_TABLE,
     OBJ_ENVIRONMENT,
@@ -261,6 +262,11 @@ struct object {
             value value;
             value kind;
         } wrapped;
+        struct {
+            int kind;
+            void *data;
+            void (*free_data)(void*);
+        } c_wrapped;
         struct {
             value value;
         } box;
@@ -319,6 +325,7 @@ struct object {
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 #define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
 #define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
+#define IS_C_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_C_WRAPPED)
 #define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
 #define IS_HASH_TABLE(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_HASH_TABLE)
 #define IS_ENVIRONMENT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ENVIRONMENT)
@@ -378,6 +385,10 @@ extern value call_with_args(value closure, int accepts_mvalues, int nargs, value
 extern value call(value closure, int nargs, ...);
 extern value tail_call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
 extern value resume_tail_call(value r);
+
+/* assign a unique value to be used as the "kind" field of the objects
+ * of OBJ_C_WRAPPED type */
+extern int assign_c_wrapped_kind(void);
 
 /************ memory management ***********/
 

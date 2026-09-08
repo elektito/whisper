@@ -930,6 +930,9 @@ static void gc_free_block(void *p, struct pool *heap) {
                 free(obj->environment.hash_table);
             }
             break;
+        case OBJ_C_WRAPPED:
+            obj->c_wrapped.free_data(obj->c_wrapped.data);
+            break;
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
 #ifdef DEBUG
@@ -1419,6 +1422,10 @@ static void print_unprintable(value v, value port) {
             _write(GET_OBJECT(v)->wrapped.value, port);
             GET_OBJECT(port)->port.printf(port, ">");
         }
+    } else if (IS_C_WRAPPED(v)) {
+        GET_OBJECT(port)->port.printf(port, "#<c-wrapped kind=%d data=%p>",
+                                      GET_OBJECT(v)->c_wrapped.kind,
+                                      GET_OBJECT(v)->c_wrapped.data);
     } else if (IS_BOX(v)) {
         GET_OBJECT(port)->port.printf(port, "#<box value=");
         _write(GET_OBJECT(v)->box.value, port);
@@ -1738,6 +1745,13 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
         }
     }
     return 0;
+}
+
+/************ c-wrapped helper functions ***********/
+
+static int c_wrapped_kind_counter = 0;
+int assign_c_wrapped_kind(void) {
+    return ++c_wrapped_kind_counter;
 }
 
 /************ environment functions ***********/
