@@ -20,3 +20,10 @@ Since I intend to play with _Whisper_ and try some gamedev in it, I've
 also added some basic raylib bindings. You can simply `(import
 (raylib))`. Many of raylib features are missing atm. I will be adding
 those as I need them for my own gamedev projects.
+
+## Bootstrapping
+
+A `bootstrap.sh` script is included that allows you to bootstrap the
+compiler using gcc. It builds the full version history of the compiler
+starting from v1 which can be built from C and then proceeds to v2 and
+so on which are written in scheme.
