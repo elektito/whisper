@@ -9,7 +9,13 @@ mkdir -p bootstrap
 cd bootstrap
 rm -rf *
 
+# ensure local branch exists in parent repo before cloning from it
+ensure_local_branch() {
+  git -C .. branch "$1" "origin/$1" >/dev/null 2>&1 || true
+}
+
 echo "==== v1 ===="
+ensure_local_branch v1
 git clone .. --branch=v1 v1 >/dev/null 2>&1
 cd v1
 make
@@ -18,6 +24,7 @@ cd ..
 for i in $(seq 2 "$LAST_V"); do
   prev=$((i - 1))
   echo "==== v$i ===="
+  ensure_local_branch "v$i"
   git clone .. --branch=v$i v$i >/dev/null 2>&1
   cd v$i
   cp ../v$prev/whisper-v$prev .
