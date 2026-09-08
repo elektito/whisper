@@ -589,3 +589,19 @@ value draw_texture_pro(environment env, enum call_flags flags, int nargs, ...) {
 
     return VOID;
 }
+
+value set_config_flags(environment env, enum call_flags flags, int nargs, ...) {
+    unsigned int fs = 0;
+
+    init_args();
+    for (int i = 0; i < nargs; ++i) {
+        value f = next_arg();
+        if (!IS_FIXNUM(f)) { raise_error("set-config-flags arguments must be integers"); }
+        fs |= GET_FIXNUM(f);
+    }
+    free_args();
+
+    SetConfigFlags(fs);
+
+    return VOID;
+}

@@ -2,6 +2,24 @@
   (import (whisper core))
 
   (begin
+    ;; system/window flags
+    (define flag-vsync-hint #x00000040)         ; set to try enabling v-sync on gpu
+    (define flag-fullscreen-mode #x00000002)    ; Set to run program in fullscreen
+    (define flag-window-resizable #x00000004)   ; Set to allow resizable window
+    (define flag-window-undecorated #x00000008) ; Set to disable window decoration (frame and buttons)
+    (define flag-window-hidden #x00000080)      ; Set to hide window
+    (define flag-window-minimized #x00000200)   ; Set to minimize window (iconify)
+    (define flag-window-maximized #x00000400)   ; Set to maximize window (expanded to monitor)
+    (define flag-window-unfocused #x00000800)   ; Set to window non focused
+    (define flag-window-topmost #x00001000)     ; Set to window always on top
+    (define flag-window-always-run #x00000100)  ; Set to allow windows running while minimized
+    (define flag-window-transparent #x00000010) ; set to allow transparent framebuffer
+    (define flag-window-highdpi #x00002000)     ; set to support highdpi
+    (define flag-window-mouse-passthrough #x00004000) ; set to support mouse passthrough, only supported when flag-window-undecorated
+    (define flag-borderless-windowed-mode #x00008000) ; Set to run program in borderless windowed mode
+    (define flag-msaa-4x-hint #x00000020)       ; Set to try enabling MSAA 4X
+    (define flag-interlaced-hint #x00010000)    ; Set to try enabling interlaced video format (for V3D)
+
     ;; colors
     (define light-gray '(200 200 200 255))
     (define gray '(130 130 130 255))
@@ -161,7 +179,24 @@
     (define mouse-button-back 6)
     )
 
-  (export light-gray
+  (export flag-vsync-hint
+          flag-fullscreen-mode
+          flag-window-resizable
+          flag-window-undecorated
+          flag-window-hidden
+          flag-window-minimized
+          flag-window-maximized
+          flag-window-unfocused
+          flag-window-topmost
+          flag-window-always-run
+          flag-window-transparent
+          flag-window-highdpi
+          flag-window-mouse-passthrough
+          flag-borderless-windowed-mode
+          flag-msaa-4x-hint
+          flag-interlaced-hint
+
+          light-gray
           gray
           dark-gray
           yellow
@@ -354,7 +389,9 @@
             (unload-texture "unload_texture" 1 1)
 
             (draw-texture "draw_texture" 4 4)
-            (draw-texture-pro "draw_texture_pro" 6 6))
+            (draw-texture-pro "draw_texture_pro" 6 6)
+
+            (set-config-flags "set_config_flags" 0 -1))
   (c-archives "libraylib.a")
   (c-static-flags "-lm -lX11 -lGL")
   (c-so-flags "-lraylib -Wl,-rpath '$ORIGIN' -lm -lX11 -lGL"))
