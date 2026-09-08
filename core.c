@@ -1136,10 +1136,6 @@ static struct pair *alloc_pair(void) {
     return alloc_from_heap(pairs_heap);
 }
 
-static struct object *alloc_object(void) {
-    return alloc_from_heap(objects_heap);
-}
-
 static struct string *alloc_string(size_t len, char fill) {
     struct string *str = alloc_from_heap(strings_heap);
     str->len = len;
@@ -1177,6 +1173,10 @@ static struct closure *alloc_closure(int nfreevars) {
         closure->freevars = calloc(1, nfreevars * sizeof(value));
         return closure;
     }
+}
+
+struct object *alloc_object(void) {
+    return alloc_from_heap(objects_heap);
 }
 
 /************ pair/vector/string/symbol functions ***********/

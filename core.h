@@ -439,6 +439,7 @@ extern value make_closure(funcptr func, int min_args, int max_args, int nfreevar
 extern value make_string(const char *s, size_t len);
 extern value make_vector(size_t len, value fill);
 extern value make_pair(value car, value cdr);
+extern struct object* alloc_object(void);
 extern value reverse_list(value list, value acc);
 extern void  print_stacktrace(void);
 extern const char *find_func_name(funcptr func);
