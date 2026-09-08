@@ -4,6 +4,13 @@
 
 #include <time.h>
 
+static int wrapped_kind_texture2d;
+
+__attribute__((constructor))
+static void init_lib(void) {
+    wrapped_kind_texture2d = assign_c_wrapped_kind();
+}
+
 Color color_from_list(value color_scm, const char *caller_name) {
     const char *error_msg = "color must be a list of four values (r g b a), each from in range [0, 255]";
     if (!IS_PAIR(color_scm)) { raise_error("%s: %s", caller_name, error_msg); }
@@ -37,6 +44,84 @@ Color color_from_list(value color_scm, const char *caller_name) {
     color.a = a;
 
     return color;
+}
+
+Rectangle rect_from_list(value rect_scm, const char *caller_name) {
+    const char *error_msg = "rectangle must be a list of four values (x y w h), each a flonum";
+    if (!IS_PAIR(rect_scm)) { raise_error("%s: %s", caller_name, error_msg); }
+    struct pair *first_pair = GET_PAIR(rect_scm);
+    if (!IS_PAIR(first_pair->cdr)) { raise_error("%s: %s", caller_name, error_msg); }
+    struct pair *second_pair = GET_PAIR(first_pair->cdr);
+    if (!IS_PAIR(second_pair->cdr)) { raise_error("%s: %s", caller_name, error_msg); }
+    struct pair *third_pair = GET_PAIR(second_pair->cdr);
+    if (!IS_PAIR(third_pair->cdr)) { raise_error("%s: %s", caller_name, error_msg); }
+    struct pair *fourth_pair = GET_PAIR(third_pair->cdr);
+
+    float x, y, w, h;
+
+    if (IS_FIXNUM(first_pair->car)) {
+        x = (float) GET_FIXNUM(first_pair->car);
+    } else if (IS_FLONUM(first_pair->car)) {
+        x = GET_FLONUM(first_pair->car);
+    } else {
+        raise_error("%s: %s", caller_name, error_msg);
+    }
+
+    if (IS_FIXNUM(second_pair->car)) {
+        y = (float) GET_FIXNUM(second_pair->car);
+    } else if (IS_FLONUM(second_pair->car)) {
+        y = GET_FLONUM(second_pair->car);
+    } else {
+        raise_error("%s: %s", caller_name, error_msg);
+    }
+
+    if (IS_FIXNUM(third_pair->car)) {
+        w = (float) GET_FIXNUM(third_pair->car);
+    } else if (IS_FLONUM(third_pair->car)) {
+        w = GET_FLONUM(third_pair->car);
+    } else {
+        raise_error("%s: %s", caller_name, error_msg);
+    }
+
+    if (IS_FIXNUM(fourth_pair->car)) {
+        h = (float) GET_FIXNUM(fourth_pair->car);
+    } else if (IS_FLONUM(fourth_pair->car)) {
+        h = GET_FLONUM(fourth_pair->car);
+    } else {
+        raise_error("%s: %s", caller_name, error_msg);
+    }
+
+    Rectangle rect;
+    rect.x = x;
+    rect.y = y;
+    rect.width = w;
+    rect.height = h;
+
+    return rect;
+}
+
+Vector2 vector2_from_pair(value pair, const char *caller_name, const char *value_name) {
+    if (!IS_PAIR(pair)) { raise_error("%s: %s must be a pair of floats", caller_name, value_name); }
+
+    Vector2 vec;
+
+    if (IS_FIXNUM(GET_PAIR(pair)->car)) {
+        vec.x = (float) GET_FIXNUM(GET_PAIR(pair)->car);
+    } else if (IS_FIXNUM(GET_PAIR(pair)->car)) {
+        vec.x = GET_FLONUM(GET_PAIR(pair)->car);
+    } else {
+        raise_error("%s: %s must be a pair of floats", caller_name, value_name);
+    }
+
+    if (IS_FIXNUM(GET_PAIR(pair)->cdr)) {
+        vec.y = (float) GET_FIXNUM(GET_PAIR(pair)->cdr);
+    } else if (IS_FIXNUM(GET_PAIR(pair)->cdr)) {
+        vec.y = GET_FLONUM(GET_PAIR(pair)->cdr);
+    } else {
+        raise_error("%s: %s must be a pair of floats", caller_name, value_name);
+    }
+
+    return vec;
 }
 
 value init_window(environment env, enum call_flags flags, int nargs, ...) {
@@ -389,6 +474,118 @@ value draw_text(environment env, enum call_flags flags, int nargs, ...) {
     text[GET_STRING(text_scm)->len] = 0;
     Color color = color_from_list(color_scm, "draw-text");
     DrawText(text, GET_FIXNUM(x), GET_FIXNUM(y), GET_FIXNUM(font_size), color);
+
+    return VOID;
+}
+
+value load_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("load-texture takes a single argument"); }
+
+    init_args();
+    value filename_scm = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename_scm)) { raise_error("load-texture argument is not a string"); }
+
+    char filename[GET_STRING(filename_scm)->len + 1];
+    memcpy(filename, GET_STRING(filename_scm)->s, GET_STRING(filename_scm)->len);
+    filename[GET_STRING(filename_scm)->len] = 0;
+
+    Texture2D *texture = malloc(sizeof(Texture2D));
+    *texture = LoadTexture(filename);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_texture2d;
+    obj->c_wrapped.data = texture;
+    obj->c_wrapped.free_data = free;
+
+    return OBJECT(obj);
+}
+
+value is_texture_valid(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-texture-valid takes a single argument"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("is-texture-valid argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("is-texture-valid argument is not a texture");
+    }
+
+    return BOOL(IsTextureValid(*(Texture2D*)texture_obj->c_wrapped.data));
+}
+
+value unload_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("unload-texture takes a single argument"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("unload-texture argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("unload-texture argument is not a texture");
+    }
+
+    UnloadTexture(*(Texture2D*)texture_obj->c_wrapped.data);
+
+    return VOID;
+}
+
+value draw_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 4) { raise_error("draw-texture takes four arguments"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    value x = next_arg();
+    value y = next_arg();
+    value tint_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("draw-texture first argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("draw-texture first argument is not a texture");
+    }
+
+    if (!IS_FIXNUM(x)) { raise_error("draw-texture second argument (x) is not an integer"); }
+    if (!IS_FIXNUM(y)) { raise_error("draw-texture third argument (y) is not an integer"); }
+
+    Color tint = color_from_list(tint_scm, "draw-texture");
+    DrawTexture(*(Texture2D*)texture_obj->c_wrapped.data, GET_FIXNUM(x), GET_FIXNUM(y), tint);
+
+    return VOID;
+}
+
+value draw_texture_pro(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 6) { raise_error("draw-texture-pro takes four arguments"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    value source_rect_scm = next_arg();
+    value dest_rect_scm = next_arg();
+    value origin_scm = next_arg();
+    value rotation = next_arg();
+    value tint_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("draw-texture-pro first argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("draw-texture-pro first argument is not a texture");
+    }
+
+    if (!IS_FLONUM(rotation)) { raise_error("draw-texture-pro fifth argument (rotation) is not a flonum"); }
+
+    Rectangle source_rect = rect_from_list(source_rect_scm, "draw-texture-pro");
+    Rectangle dest_rect = rect_from_list(source_rect_scm, "draw-texture-pro");
+    Vector2 origin = vector2_from_pair(origin_scm, "draw-texture-pro", "origin");
+    Color tint = color_from_list(tint_scm, "draw-texture-pro");
+    DrawTexturePro(*(Texture2D*)texture_obj->c_wrapped.data, source_rect, dest_rect, origin, GET_FLONUM(rotation), tint);
 
     return VOID;
 }

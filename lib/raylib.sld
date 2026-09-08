@@ -347,7 +347,14 @@
             (draw-rectangle "draw_rectangle" 5 5)
 
             (draw-fps "draw_fps" 2 2)
-            (draw-text "draw_text" 5 5))
+            (draw-text "draw_text" 5 5)
+
+            (load-texture "load_texture" 1 1)
+            (is-texture-valid "is_texture_valid" 1 1)
+            (unload-texture "unload_texture" 1 1)
+
+            (draw-texture "draw_texture" 4 4)
+            (draw-texture-pro "draw_texture_pro" 6 6))
   (c-archives "libraylib.a")
   (c-static-flags "-lm -lX11 -lGL")
   (c-so-flags "-lraylib -Wl,-rpath '$ORIGIN' -lm -lX11 -lGL"))
