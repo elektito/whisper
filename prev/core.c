@@ -62,15 +62,16 @@ static struct pool **heaps;
 static int n_heaps = 0;
 
 /* symbols used by the runtime */
-value symbol_file;
-value symbol_system;
-value symbol_value;
-value symbol_macro;
-value symbol_special;
-value symbol_aux;
-value symbol_primcall;
-value symbol_alias;
-value symbol_env_alias;
+static value symbol_file;
+static value symbol_system;
+static value symbol_unbound;
+static value symbol_value;
+static value symbol_macro;
+static value symbol_special;
+static value symbol_aux;
+static value symbol_primcall;
+static value symbol_alias;
+static value symbol_env_alias;
 
 /*************** non-static variables **************/
 
@@ -607,7 +608,7 @@ static struct pool *add_pool(struct pool *pool) {
     return new_pool;
 }
 
-void init_memory(void) {
+static void init_memory(void) {
     symbols_heap = create_heap(sizeof(struct symbol), SYMBOL_TAG);
     pairs_heap = create_heap(sizeof(struct pair), PAIR_TAG);
     objects_heap = create_heap(sizeof(struct object), OBJECT_TAG);
@@ -922,12 +923,18 @@ static void gc_free_block(void *p, struct pool *heap) {
         case OBJ_VECTOR:
             free(obj->vector.data);
             break;
+        case OBJ_BYTEVECTOR:
+            free(obj->bytevector.data);
+            break;
         case OBJ_ENVIRONMENT:
             if (obj->environment.hash_table != NULL) {
                 hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
                 hash_table_cleanup(obj->environment.hash_table);
                 free(obj->environment.hash_table);
             }
+            break;
+        case OBJ_C_WRAPPED:
+            obj->c_wrapped.free_data(obj->c_wrapped.data);
             break;
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
@@ -1135,10 +1142,6 @@ static struct pair *alloc_pair(void) {
     return alloc_from_heap(pairs_heap);
 }
 
-static struct object *alloc_object(void) {
-    return alloc_from_heap(objects_heap);
-}
-
 static struct string *alloc_string(size_t len, char fill) {
     struct string *str = alloc_from_heap(strings_heap);
     str->len = len;
@@ -1176,6 +1179,10 @@ static struct closure *alloc_closure(int nfreevars) {
         closure->freevars = calloc(1, nfreevars * sizeof(value));
         return closure;
     }
+}
+
+struct object *alloc_object(void) {
+    return alloc_from_heap(objects_heap);
 }
 
 /************ pair/vector/string/symbol functions ***********/
@@ -1238,6 +1245,15 @@ value make_vector(size_t len, value fill) {
     for (int i = 0; i < len; ++i) {
         obj->vector.data[i] = fill;
     }
+    return OBJECT(obj);
+}
+
+value make_bytevector(size_t len, uint8_t byte) {
+    struct object *obj = alloc_object();
+    obj->type = OBJ_BYTEVECTOR;
+    obj->bytevector.len = len;
+    obj->bytevector.data = malloc(obj->vector.len);
+    memset(obj->bytevector.data, byte, len);
     return OBJECT(obj);
 }
 
@@ -1418,6 +1434,10 @@ static void print_unprintable(value v, value port) {
             _write(GET_OBJECT(v)->wrapped.value, port);
             GET_OBJECT(port)->port.printf(port, ">");
         }
+    } else if (IS_C_WRAPPED(v)) {
+        GET_OBJECT(port)->port.printf(port, "#<c-wrapped kind=%d data=%p>",
+                                      GET_OBJECT(v)->c_wrapped.kind,
+                                      GET_OBJECT(v)->c_wrapped.data);
     } else if (IS_BOX(v)) {
         GET_OBJECT(port)->port.printf(port, "#<box value=");
         _write(GET_OBJECT(v)->box.value, port);
@@ -1497,8 +1517,7 @@ static void _display(value v, value port) {
     }
 }
 
-
-static void _write_flonum(float f, value port) {
+static void snprintf_flonum(char *buf, size_t buf_size, float f) {
     /* this function is much more complicated than it should be because
      * we want 1.0 to be printed as 1.0, not as 1.000000 (as %f would
      * do) and not as 1 (as %g would do).
@@ -1506,10 +1525,8 @@ static void _write_flonum(float f, value port) {
      * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
      * against libm for now */
 
-    char buf[64];
-
     /* format using %g into a buffer */
-    snprintf(buf, sizeof(buf), "%g", f);
+    snprintf(buf, buf_size, "%g", f);
 
     /* check for missing decimal point on numeric values */
     if (!strchr(buf, '.') && !strchr(buf, ',') &&
@@ -1528,8 +1545,11 @@ static void _write_flonum(float f, value port) {
             strcat(buf, ".0");
         }
     }
+}
 
-    /* output the modified buffer to the port */
+static void _write_flonum(float f, value port) {
+    char buf[64];
+    snprintf_flonum(buf, sizeof(buf), f);
     GET_OBJECT(port)->port.printf(port, "%s", buf);
 }
 
@@ -1555,6 +1575,17 @@ static void _write_vector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, "#(");
     for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
         _write(GET_OBJECT(vec)->vector.data[i], port);
+        if (i != GET_OBJECT(vec)->vector.len - 1) {
+            GET_OBJECT(port)->port.printf(port, " ");
+        }
+    }
+    GET_OBJECT(port)->port.printf(port, ")");
+}
+
+static void _write_bytevector(struct object *vec, value port) {
+    GET_OBJECT(port)->port.printf(port, "#u8(");
+    for (int i = 0; i < GET_OBJECT(vec)->bytevector.len; ++i) {
+        GET_OBJECT(port)->port.printf(port, "%d", GET_OBJECT(vec)->bytevector.data[i]);
         if (i != GET_OBJECT(vec)->vector.len - 1) {
             GET_OBJECT(port)->port.printf(port, " ");
         }
@@ -1661,6 +1692,8 @@ static void _write(value v, value port) {
         _write_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
         _write_vector(GET_OBJECT(v), port);
+    } else if (IS_BYTEVECTOR(v)) {
+        _write_bytevector(GET_OBJECT(v), port);
     } else if (IS_FLONUM(v)) {
         _write_flonum(GET_FLONUM(v), port);
     } else {
@@ -1739,6 +1772,13 @@ static int string_ci_cmp(struct string *s1, struct string *s2) {
     return 0;
 }
 
+/************ c-wrapped helper functions ***********/
+
+static int c_wrapped_kind_counter = 0;
+int assign_c_wrapped_kind(void) {
+    return ++c_wrapped_kind_counter;
+}
+
 /************ environment functions ***********/
 
 value make_environment(void) {
@@ -1802,7 +1842,7 @@ value env_ref(value e, value sym) {
          * a real closure from program init. */
         return GET_SYMBOL(binding->value)->value;
     default:
-        panic("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case (%d)", binding->kind);
     }
 }
 
@@ -1859,7 +1899,7 @@ void env_delegate(value env, value sym, value target) {
 
 /************ global environment functions ***********/
 
-void init_symbols(void) {
+static void init_symbols(void) {
     hash_table_init(&symbols, 128, symbol_name_hash, symbol_name_eq);
 
     /* intern symbols needed by the runtime */
@@ -1869,6 +1909,7 @@ void init_symbols(void) {
     symbol_system = extend_global_env("system", 6, sym_unbound);
 
     /* sym_kind symbolic names */
+    symbol_unbound = extend_global_env("unbound", 7, sym_unbound);
     symbol_value = extend_global_env("value", 5, sym_unbound);
     symbol_macro = extend_global_env("macro", 5, sym_unbound);
     symbol_special = extend_global_env("special", 7, sym_unbound);
@@ -1905,7 +1946,7 @@ value get_global_env(void) {
 
 /************ port init functions ***********/
 
-void init_ports() {
+static void init_ports() {
     struct object *in = alloc_object();
     in->type = OBJ_PORT;
     in->port.direction = PORT_DIR_READ;
@@ -1992,6 +2033,14 @@ void run_static_libs(value env) {
     for (struct static_lib *p = lib_list; p; p = p->next) {
         run_static_lib(p, env);
     }
+}
+
+/************ general runtime routines ***********/
+
+void init_runtime(void) {
+    init_memory();
+    init_symbols();
+    init_ports();
 }
 
 /************ primcall functions ***********/
@@ -2139,6 +2188,50 @@ value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(IS_BOX(v));
 }
 
+value primcall_bytevector_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("bytevector? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_BYTEVECTOR(v));
+}
+
+value primcall_bytevector_length(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("bytevector-length needs a single argument"); }
+    init_args();
+    value vec = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(vec)) { raise_error("bytevector-length argument is not a bytevector"); }
+    return FIXNUM(GET_OBJECT(vec)->bytevector.len);
+}
+
+value primcall_bytevector_u8_ref(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("bytevector-u8-ref needs two arguments"); }
+    init_args();
+    value vec = next_arg();
+    value idx = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(vec)) { raise_error("bytevector-u8-ref first argument is not a bytevector"); }
+    if (!IS_FIXNUM(idx)) { raise_error("bytevector-u8-ref second argument is not an integer"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->bytevector.len) { raise_error("bytevector-u8-ref index is out of range"); }
+    return FIXNUM(GET_OBJECT(vec)->bytevector.data[GET_FIXNUM(idx)]);
+}
+
+value primcall_bytevector_u8_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { raise_error("bytevector-u8-set! needs three arguments"); }
+    init_args();
+    value vec = next_arg();
+    value idx = next_arg();
+    value byte = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(vec)) { raise_error("bytevector-u8-set! first argument is not a bytevector"); }
+    if (!IS_FIXNUM(idx)) { raise_error("bytevector-u8-set! second argument is not an integer"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->bytevector.len) { raise_error("bytevector-u8-set! index is out of range"); }
+    if (!IS_FIXNUM(byte) || GET_FIXNUM(byte) < 0 || GET_FIXNUM(byte) > 255) { raise_error("bytevector-u8-set! third argument must be an integer in range [0, 255]"); }
+    GET_OBJECT(vec)->bytevector.data[GET_FIXNUM(idx)] = GET_FIXNUM(byte);
+    return VOID;
+}
+
 /* Copy a captured stack image back to the exact addresses it came from and
  * longjmp into it. The memcpy overwrites [base, stack_start], so this frame
  * must sit entirely below base first, otherwise the copy corrupts the very
@@ -2180,7 +2273,6 @@ static void reinstate_stack(value cont) {
                GET_OBJECT(cont)->continuation.shadow_stack_size * sizeof(struct shadow_stack_frame));
     }
 
-    printf("CCCCCC\n");
     shadow_stack_size = GET_OBJECT(cont)->continuation.shadow_stack_size;
 #endif
 
@@ -2398,8 +2490,6 @@ value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int na
     int fd = fileno(fp);
     struct pollfd pfd = { .fd = fd, .events = POLLIN};
     int r = poll(&pfd, 1, 0);
-
-    printf("poll ret: %d, revents: 0x%x\n", r, pfd.revents);
 
     /* POLLHUP = EOF, which  still means we should return true */
     if (r > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
@@ -2631,7 +2721,7 @@ value primcall_integer_to_char(environment env, enum call_flags flags, int nargs
     init_args();
     value n = next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not an integer"); }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { raise_error("integer->char argument is out of range"); }
     return CHAR((char) GET_FIXNUM(n));
 }
@@ -2686,13 +2776,25 @@ value primcall_list_to_vector(environment env, enum call_flags flags, int nargs,
     return vec;
 }
 
+value primcall_make_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { raise_error("make-bytevector needs one or two arguments"); }
+    init_args();
+    value n = next_arg();
+    value byte = nargs == 1 ? FIXNUM(0) : next_arg();
+    free_args();
+    if (!IS_FIXNUM(n)) { raise_error("make-bytevector first argument should be an integer"); }
+    if (GET_FIXNUM(n) < 0) { raise_error("make-bytevector first argument is negative"); }
+    if (!IS_FIXNUM(byte)) { raise_error("make-bytevector second argument should be an integer"); }
+    return make_bytevector(GET_FIXNUM(n), GET_FIXNUM(byte));
+}
+
 value primcall_make_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1 && nargs != 2) { raise_error("make-string needs one or two arguments"); }
     init_args();
     value n = next_arg();
     value ch = nargs == 1 ? CHAR(0) : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("make-string first argument should be a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("make-string first argument should be an integer"); }
     if (GET_FIXNUM(n) < 0) { raise_error("make-string first argument is negative"); }
     if (!IS_CHAR(ch)) { raise_error("make-string second argument should be a character"); }
     return STRING(alloc_string(GET_FIXNUM(n), GET_CHAR(ch)));
@@ -2704,7 +2806,7 @@ value primcall_make_vector(environment env, enum call_flags flags, int nargs, ..
     value n = next_arg();
     value fill = nargs == 1 ? VOID : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("make-vector first argument should be a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("make-vector first argument should be an integer"); }
     if (GET_FIXNUM(n) < 0) { raise_error("make-vector first argument is negative"); }
     return make_vector(GET_FIXNUM(n), fill);
 }
@@ -2751,19 +2853,27 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
     value n = next_arg();
     value base = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
-    if (!IS_FIXNUM(n)) { raise_error("number->string first argument should be a number"); }
-    if (!IS_FIXNUM(base)) { raise_error("number->string second argument should be a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) { raise_error("number->string first argument should be a number"); }
+    if (!IS_FIXNUM(base)) { raise_error("number->string second argument should be an integer"); }
+    if (IS_FLONUM(n) && base != FIXNUM(10)) { raise_error("number->string only supports base 10 with inexact numbers"); }
+
+    if (IS_FLONUM(n)) {
+        char buf[64];
+        snprintf_flonum(buf, sizeof(buf), GET_FLONUM(n));
+        return make_string(buf, strlen(buf));
+    }
+
     char buf[128];
     int start = 0;
     int64_t m = GET_FIXNUM(n);
     if (m < 0) { buf[0] = '-'; start = 1; m = -m; }
-    if (base == FIXNUM(10))
+    if (base == FIXNUM(10)) {
         snprintf(buf + start, sizeof(buf), "%ld", m);
-    else if (base == FIXNUM(16))
+    } else if (base == FIXNUM(16)) {
         snprintf(buf + start, sizeof(buf), "%lx", m);
-    else if (base == FIXNUM(8))
+    } else if (base == FIXNUM(8)) {
         snprintf(buf + start, sizeof(buf), "%lo", m);
-    else if (base == FIXNUM(2)) {
+    } else if (base == FIXNUM(2)) {
         while (m >= 2) { buf[start++] = '0' + (m % 2); m /= 2; }
         buf[start++] = '0' + m;
         buf[start] = 0;
@@ -2772,8 +2882,10 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
             buf[i] = buf[j];
             buf[j] = tmp;
         }
-    } else
+    } else {
         raise_error("radix not supported by number->string");
+    }
+
     return make_string(buf, strlen(buf));
 }
 
@@ -2993,7 +3105,7 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     value base_v = nargs == 1 ? FIXNUM(10) : next_arg();
     free_args();
     if (!IS_STRING(str_v)) { raise_error("string->number first argument must be a string"); }
-    if (!IS_FIXNUM(base_v)) { raise_error("string->number second argument must be a number"); }
+    if (!IS_FIXNUM(base_v)) { raise_error("string->number second argument must be an integer"); }
 
     int base = (int) GET_FIXNUM(base_v);
     if (base < 2 || base > 36) { raise_error("string->number radix is not valid"); }
@@ -3004,7 +3116,7 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     char *str = strz(str_v);
     char *start = str;
     int inexact = 0;
-    int exact = 1;
+    int exact = 0;
     int saw_exactness = 0;
     int saw_base = 0;
 
@@ -3039,7 +3151,6 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
                 saw_base = 1;
             } else if (prefix == 'i' || prefix == 'I') {
                 if (saw_exactness) { free(str); return FALSE; }
-                base = 10;
                 start += 2;
                 len -= 2;
                 inexact = 1;
@@ -3047,7 +3158,6 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
                 saw_exactness = 1;
             } else if (prefix == 'e' || prefix == 'E') {
                 if (saw_exactness) { free(str); return FALSE; }
-                base = 10;
                 start += 2;
                 len -= 2;
                 inexact = 0;
@@ -3066,14 +3176,7 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
         return FALSE;
     }
 
-    int contains_dot = 0;
-    for (char *c = start; *c; ++c) {
-        if (*c == '.') {
-            contains_dot = 1;
-            break;
-        }
-    }
-
+    int contains_dot = !!strpbrk(start, ".");
     char *endptr;
 
     if (inexact || contains_dot) {
@@ -3159,8 +3262,8 @@ value primcall_string_copy(environment env, enum call_flags flags, int nargs, ..
     value start = nargs > 1 ? next_arg() : FIXNUM(0);
     value end = nargs > 2 ? next_arg() : FIXNUM(GET_STRING(str)->len);
     free_args();
-    if (!IS_FIXNUM(start)) { raise_error("string-copy second argument is not a number"); }
-    if (!IS_FIXNUM(end)) { raise_error("string-copy third argument is not a number"); }
+    if (!IS_FIXNUM(start)) { raise_error("string-copy second argument is not an integer"); }
+    if (!IS_FIXNUM(end)) { raise_error("string-copy third argument is not an integer"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) >= GET_STRING(str)->len) { raise_error("string-copy start index is out of range"); }
     if (GET_FIXNUM(end) < 0 || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("string-copy end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
@@ -3184,7 +3287,7 @@ value primcall_string_ref(environment env, enum call_flags flags, int nargs, ...
     value idx = next_arg();
     free_args();
     if (!IS_STRING(str)) { raise_error("string-ref first argument is not a string"); }
-    if (!IS_FIXNUM(idx)) { raise_error("string-ref second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("string-ref second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { raise_error("string-ref index is out of range"); }
     return CHAR(GET_STRING(str)->s[GET_FIXNUM(idx)]);
 }
@@ -3197,7 +3300,7 @@ value primcall_string_set_b(environment env, enum call_flags flags, int nargs, .
     value ch = next_arg();
     free_args();
     if (!IS_STRING(str)) { raise_error("string-set! first argument is not a string"); }
-    if (!IS_FIXNUM(idx)) { raise_error("string-set! second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("string-set! second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_STRING(str)->len) { raise_error("string-set! index is out of range"); }
     if (!IS_CHAR(ch)) { raise_error("string-set! third argument is not a char"); }
     GET_STRING(str)->s[GET_FIXNUM(idx)] = GET_CHAR(ch);
@@ -3239,8 +3342,8 @@ value primcall_substring(environment env, enum call_flags flags, int nargs, ...)
     value end = next_arg();
     free_args();
     if (!IS_STRING(str)) { raise_error("substring first argument is not a string"); }
-    if (!IS_FIXNUM(start)) { raise_error("substring second argument is not a number"); }
-    if (!IS_FIXNUM(end)) { raise_error("substring third argument is not a number"); }
+    if (!IS_FIXNUM(start)) { raise_error("substring second argument is not an integer"); }
+    if (!IS_FIXNUM(end)) { raise_error("substring third argument is not an integer"); }
     if (GET_FIXNUM(start) < 0 || GET_FIXNUM(start) > GET_STRING(str)->len) { raise_error("substring start index is out of range"); }
     if (GET_FIXNUM(end) < GET_FIXNUM(start) || GET_FIXNUM(end) > GET_STRING(str)->len) { raise_error("substring end index is out of range"); }
     struct string *result = alloc_string(GET_FIXNUM(end) - GET_FIXNUM(start), '\0');
@@ -3285,7 +3388,7 @@ value primcall_urandom(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("urandom needs a single argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("urandom argument is not a number"); }
+    if (!IS_FIXNUM(n)) { raise_error("urandom argument is not an integer"); }
     free_args();
 
     FILE *fp = fopen("/dev/urandom", "r");
@@ -3340,7 +3443,7 @@ value primcall_vector_ref(environment env, enum call_flags flags, int nargs, ...
     value idx = next_arg();
     free_args();
     if (!IS_VECTOR(vec)) { raise_error("vector-ref first argument is not a vector"); }
-    if (!IS_FIXNUM(idx)) { raise_error("vector-ref second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("vector-ref second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector-ref index is out of range"); }
     return GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)];
 }
@@ -3353,7 +3456,7 @@ value primcall_vector_set_b(environment env, enum call_flags flags, int nargs, .
     value v = next_arg();
     free_args();
     if (!IS_VECTOR(vec)) { raise_error("vector-set! first argument is not a vector"); }
-    if (!IS_FIXNUM(idx)) { raise_error("vector-set! second argument is not a number"); }
+    if (!IS_FIXNUM(idx)) { raise_error("vector-set! second argument is not an integer"); }
     if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->vector.len) { raise_error("vector-set! index is out of range"); }
     GET_OBJECT(vec)->vector.data[GET_FIXNUM(idx)] = v;
     return VOID;
@@ -3445,81 +3548,233 @@ value primcall_percent_write_char(environment env, enum call_flags flags, int na
 }
 
 value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
-    value result = FIXNUM(0);
+    value result_fixnum = 0;
+    float result_flonum = 0.0;
+    int inexact = 0;
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("addition (+) argument is not a number"); }
-        result += (int64_t) v;
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum += (float) GET_FIXNUM(v);
+            } else {
+                /* fixnums have a zero tag, so they can be summed up
+                 * without untagging */
+                result_fixnum += (int64_t) v;
+            }
+        } else if (IS_FLONUM(v)) {
+            if (inexact) {
+                result_flonum += GET_FLONUM(v);
+            } else {
+                result_flonum = (float) GET_FIXNUM(result_fixnum);
+                result_flonum += GET_FLONUM(v);
+                inexact = 1;
+            }
+        } else {
+            free_args();
+            raise_error("addition (+) argument is not a number");
+        }
     }
-    return result;
+
+    free_args();
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return result_fixnum;
+    }
 }
 
 value primcall_div(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error("division (-) needs at least one argument"); }
+    if (nargs < 1) { raise_error("division (/) needs at least one argument"); }
     init_args();
-    value result_v = next_arg();
-    if (!IS_FIXNUM(result_v)) { raise_error("division (/) argument is not a number"); }
-    int64_t result = GET_FIXNUM(result_v);
+
     if (nargs == 1) {
-        if (result == 1)
-            return FIXNUM(1);
-        if (result == -1)
-            return FIXNUM(-1);
-        if (result == 0)
-            raise_error("division by zero");
-        return FIXNUM(0); /* we don't have fractionals, so 1/n is always zero */
-    }
-    for (int i = 1; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("division (/) argument is not a number"); }
-        if (GET_FIXNUM(v) == 0)
-            raise_error("division by zero");
-        result /= GET_FIXNUM(v);
+        if (IS_FIXNUM(v)) {
+            int64_t n = GET_FIXNUM(v);
+            if (n == 1) {
+                return FIXNUM(1);
+            } else if (n == -1) {
+                return FIXNUM(-1);
+            } else if (n == 0) {
+                free_args();
+                raise_error("division by zero");
+            }
+
+            free_args();
+            return FIXNUM(0); /* we don't have rationals so 1/n is always 0 */
+        } else if (IS_FLONUM(v)) {
+            if (GET_FLONUM(v) == 0.0) {
+                free_args();
+                raise_error("division by zero");
+            }
+
+            free_args();
+            return FLONUM(1.0 / GET_FLONUM(v));
+        } else {
+            free_args();
+            raise_error("division argument is not a number");
+        }
     }
 
-    free_args();
-    return FIXNUM(result);
+    int64_t result_fixnum = 0;
+    float result_flonum = 0.0;
+    int inexact = 0;
+
+    value v = next_arg();
+    if (IS_FIXNUM(v)) {
+        result_fixnum = GET_FIXNUM(v);
+    } else if (IS_FLONUM(v)) {
+        result_flonum = GET_FLONUM(v);
+        inexact = 1;
+    } else {
+        free_args();
+        raise_error("division argument is not a number");
+    }
+
+    for (int i = 1; i < nargs; ++i) {
+        value v = next_arg();
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum /= (float) GET_FIXNUM(v);
+            } else {
+                result_fixnum /= GET_FIXNUM(v);
+            }
+        } else if (IS_FLONUM(v)) {
+            if (!inexact) {
+                result_flonum = (float) result_fixnum;
+                inexact = 1;
+            }
+
+            result_flonum /= GET_FLONUM(v);
+        } else {
+            free_args();
+            raise_error("division argument is not a number");
+        }
+    }
+
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return FIXNUM(result_fixnum);
+    }
 }
 
 value primcall_mul(environment env, enum call_flags flags, int nargs, ...) {
-    int64_t result = 1;
+    int64_t result_fixnum = 1;
+    float result_flonum = 1.0;
+    int inexact = 0;
     init_args();
     for (int i = 0; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("multiplication (*) argument is not a number"); }
-        result *= GET_FIXNUM(v);
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum *= (float) GET_FIXNUM(v);
+            } else {
+                result_fixnum *= GET_FIXNUM(v);
+            }
+        } else if (IS_FLONUM(v)) {
+            if (!inexact) {
+                result_flonum = (float) result_fixnum;
+            }
+
+            result_flonum *= GET_FLONUM(v);
+            inexact = 1;
+        } else {
+            free_args();
+            raise_error("multiplication argument is not a number");
+        }
     }
 
     free_args();
-    return FIXNUM(result);
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return FIXNUM(result_fixnum);
+    }
 }
 
 value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("subtraction (-) needs at least one argument"); }
     init_args();
-    value result = next_arg();
-    if (!IS_FIXNUM(result)) { raise_error("subtraction (-) argument is not a number"); }
-    if (nargs == 1) return FIXNUM(-GET_FIXNUM(result));
+    value arg = next_arg();
+
+    value result_fixnum = 0;
+    float result_flonum = 0.0;
+    int inexact = 0;
+
+    if (IS_FIXNUM(arg)) {
+        result_fixnum = arg;
+    } else if (IS_FLONUM(arg)) {
+        result_flonum = GET_FLONUM(arg);
+        inexact = 1;
+    } else {
+        free_args();
+        raise_error("subtraction (-) argument is not a number");
+    }
+
+    if (nargs == 1) {
+        if (inexact) {
+            return FLONUM(-result_flonum);
+        } else {
+            return FIXNUM(-GET_FIXNUM(result_fixnum));
+        }
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value v = next_arg();
-        if (!IS_FIXNUM(v)) { raise_error("subtraction (-) argument is not a number"); }
-        result -= (int64_t) v;
+        if (IS_FIXNUM(v)) {
+            if (inexact) {
+                result_flonum -= (float) GET_FIXNUM(v);
+            } else {
+                result_fixnum -= (int64_t) v;
+            }
+        } else if (IS_FLONUM(v)) {
+            if (!inexact) {
+                result_flonum = (float) GET_FIXNUM(result_fixnum);
+                inexact = 1;
+            }
+
+            result_flonum -= GET_FLONUM(v);
+        } else {
+            free_args();
+            raise_error("subtraction (-) argument is not a number");
+        }
     }
 
     free_args();
-    return result;
+    if (inexact) {
+        return FLONUM(result_flonum);
+    } else {
+        return result_fixnum;
+    }
 }
 
 value primcall_num_eq(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("= argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("= argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("= argument is not a number"); }
-        if (GET_FIXNUM(n) != GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("= argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) != GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) != GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) != (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) != GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3530,11 +3785,27 @@ value primcall_num_lt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("< needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("< argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("< argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("< argument is not a number"); }
-        if (GET_FIXNUM(n) >= GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("< argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) >= GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) >= GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) >= (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) >= GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3545,11 +3816,26 @@ value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("> needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("> argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("> argument is not a number");
+    }
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("> argument is not a number"); }
-        if (GET_FIXNUM(n) <= GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("> argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) <= GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) <= GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) <= (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) <= GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3560,11 +3846,27 @@ value primcall_num_le(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error("<= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error("<= argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error("<= argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error("<= argument is not a number"); }
-        if (GET_FIXNUM(n) > GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error("<= argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) > GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) > GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) > (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) > GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -3575,11 +3877,27 @@ value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 1) { raise_error(">= needs at least one argument"); }
     init_args();
     value n = next_arg();
-    if (!IS_FIXNUM(n)) { raise_error(">= argument is not a number"); }
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
+        free_args();
+        raise_error(">= argument is not a number");
+    }
+
     for (int i = 1; i < nargs; ++i) {
         value m = next_arg();
-        if (!IS_FIXNUM(m)) { raise_error(">= argument is not a number"); }
-        if (GET_FIXNUM(n) < GET_FIXNUM(m)) return FALSE;
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
+            free_args();
+            raise_error(">= argument is not a number");
+        }
+
+        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+            if (GET_FIXNUM(n) < GET_FIXNUM(m)) { return FALSE; }
+        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
+            if ((float) GET_FIXNUM(n) < GET_FLONUM(m)) { return FALSE; }
+        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
+            if (GET_FLONUM(n) < (float) GET_FIXNUM(m)) { return FALSE; }
+        } else { /* both flonums */
+            if (GET_FLONUM(n) < GET_FLONUM(m)) { return FALSE; }
+        }
     }
 
     free_args();
@@ -4109,6 +4427,7 @@ value primcall_make_empty_environment(environment env, enum call_flags flags, in
  * never writes it. */
 static value sym_kind_to_symbol(enum sym_kind kind) {
     switch (kind) {
+    case sym_unbound: return symbol_unbound;
     case sym_value: return symbol_value;
     case sym_macro: return symbol_macro;
     case sym_special: return symbol_special;
@@ -4117,12 +4436,13 @@ static value sym_kind_to_symbol(enum sym_kind kind) {
     case sym_alias: return symbol_alias;
     case sym_env_alias: return symbol_env_alias;
     default:
-        panic("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case (%d)", kind);
     }
 }
 
 /* the reverse of sym_kind_to_symbol */
 static enum sym_kind symbol_to_sym_kind(value sym) {
+    if (sym == symbol_unbound) return sym_unbound;
     if (sym == symbol_value) return sym_value;
     if (sym == symbol_macro) return sym_macro;
     if (sym == symbol_special) return sym_special;
@@ -4145,12 +4465,15 @@ value primcall_environment_lookup(environment env, enum call_flags flags, int na
     if (!IS_SYMBOL(sym)) { raise_error("environment-lookup second argument is not a symbol"); }
 
     struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == NULL) { raise_error("environment-lookup does not support the global environment"); }
-
-    struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
-    if (binding == SENTINEL || binding->kind == sym_unbound) { return FALSE; }
-
-    return make_pair(sym_kind_to_symbol(binding->kind), binding->value);
+    if (ht) {
+        struct binding *binding = (struct binding *) hash_table_get(ht, 0, sym);
+        if (binding == SENTINEL || binding->kind == sym_unbound) { return FALSE; }
+        return make_pair(sym_kind_to_symbol(binding->kind), binding->value);
+    } else {
+        struct symbol *s = GET_SYMBOL(sym);
+        if (s->kind == sym_unbound) { return FALSE; }
+        return make_pair(sym_kind_to_symbol(s->kind), s->value);
+    }
 }
 
 value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...) {
@@ -4165,9 +4488,6 @@ value primcall_environment_bind_b(environment env, enum call_flags flags, int na
     if (!IS_SYMBOL(sym)) { raise_error("environment-bind! second argument is not a symbol"); }
     if (!IS_SYMBOL(kind)) { raise_error("environment-bind! third argument is not a symbol"); }
 
-    struct hash_table *ht = GET_OBJECT(e)->environment.hash_table;
-    if (ht == NULL) { raise_error("environment-bind! does not support the sentinel environment"); }
-
     env_define(e, sym, val, symbol_to_sym_kind(kind));
     return VOID;
 }
@@ -4178,6 +4498,14 @@ value primcall_environment_q(environment env, enum call_flags flags, int nargs, 
     value v = next_arg();
     free_args();
     return BOOL(IS_ENVIRONMENT(v));
+}
+
+value primcall_global_environment(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("global-environment takes no arguments"); }
+    struct object *obj = alloc_object();
+    obj->type = OBJ_ENVIRONMENT;
+    obj->environment.hash_table = NULL;
+    return OBJECT(obj);
 }
 
 value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
@@ -4193,7 +4521,11 @@ value primcall_run_so(environment env, enum call_flags flags, int nargs, ...) {
     char *filenamez = strz(filename);
     void *handle = dlopen(filenamez, RTLD_NOW | RTLD_LOCAL);
     free(filenamez);
-    if (!handle) { raise_error("run-so: cannot load file: %.*s", (int) GET_STRING(filename)->len, GET_STRING(filename)->s); }
+    if (!handle) {
+        raise_error("run-so: cannot load file: %.*s (dlopen: %s)",
+                    (int) GET_STRING(filename)->len, GET_STRING(filename)->s,
+                    dlerror());
+    }
 
     value (*whisper_main_sym)(value env) = dlsym(handle, "whisper_main");
     if (!whisper_main_sym) { raise_error("run-so: cannot find symbol whisper_main in shared object"); }

@@ -1,3 +1,6 @@
+#ifndef _WHISPER_CORE_H_
+#define _WHISPER_CORE_H_
+
 #include <assert.h>
 #include <limits.h>
 #include <setjmp.h>
@@ -206,7 +209,9 @@ enum object_type {
     OBJ_PORT,
     OBJ_ERROR,
     OBJ_VECTOR,
+    OBJ_BYTEVECTOR,
     OBJ_WRAPPED,
+    OBJ_C_WRAPPED,
     OBJ_BOX,
     OBJ_HASH_TABLE,
     OBJ_ENVIRONMENT,
@@ -255,9 +260,18 @@ struct object {
             int64_t len;
         } vector;
         struct {
+            char *data;
+            int64_t len;
+        } bytevector;
+        struct {
             value value;
             value kind;
         } wrapped;
+        struct {
+            int kind;
+            void *data;
+            void (*free_data)(void*);
+        } c_wrapped;
         struct {
             value value;
         } box;
@@ -315,7 +329,9 @@ struct object {
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 #define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
+#define IS_BYTEVECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BYTEVECTOR)
 #define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
+#define IS_C_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_C_WRAPPED)
 #define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
 #define IS_HASH_TABLE(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_HASH_TABLE)
 #define IS_ENVIRONMENT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ENVIRONMENT)
@@ -376,6 +392,10 @@ extern value call(value closure, int nargs, ...);
 extern value tail_call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
 extern value resume_tail_call(value r);
 
+/* assign a unique value to be used as the "kind" field of the objects
+ * of OBJ_C_WRAPPED type */
+extern int assign_c_wrapped_kind(void);
+
 /************ memory management ***********/
 
 /* must be a power of two */
@@ -430,13 +450,13 @@ extern const char **cmdline_argv;
 
 /************ extern function declarations ***********/
 
-extern void init_memory(void);
-extern void init_ports(void);
+extern void init_runtime(void);
 extern value make_symbol(char *name, size_t len, enum sym_kind kind);
 extern value make_closure(funcptr func, int min_args, int max_args, int nfreevars, ...);
 extern value make_string(const char *s, size_t len);
 extern value make_vector(size_t len, value fill);
 extern value make_pair(value car, value cdr);
+extern struct object* alloc_object(void);
 extern value reverse_list(value list, value acc);
 extern void  print_stacktrace(void);
 extern const char *find_func_name(funcptr func);
@@ -489,11 +509,10 @@ static value global_env_ref(value sym) {
         /* this should be unreachable */
         raise_error("library environment alias in global environment");
     default:
-        panic("internal error: unhandled sym_kind case");
+        panic("internal error: unhandled sym_kind case (%d)", s->kind);
     }
 }
 
-extern void init_symbols(void);
 extern value extend_global_env(char *name, size_t name_len, enum sym_kind kind);
 
 extern value get_global_env(void);
@@ -507,6 +526,10 @@ extern value primcall_apply(environment env, enum call_flags flags, int nargs, .
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_length(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_u8_ref(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_u8_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_callcc(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_car(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cdr(environment env, enum call_flags flags, int nargs, ...);
@@ -540,6 +563,7 @@ extern value primcall_list(environment env, enum call_flags flags, int nargs, ..
 extern value primcall_list_directory(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_star(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_to_vector(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_make_bytevector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_newline(environment env, enum call_flags flags, int nargs, ...);
@@ -632,6 +656,7 @@ extern value primcall_make_empty_environment(environment env, enum call_flags fl
 extern value primcall_environment_lookup(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_bind_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_environment_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_global_environment(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_run_so(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gc(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gc_manual_mode_b(environment env, enum call_flags flags, int nargs, ...);
@@ -666,3 +691,5 @@ extern void set_form_span(const char *filename, int start_line, int start_col, i
 #else
 #define set_form_span(f, sl, sc, el, ec)
 #endif
+
+#endif /* _WHISPER_CORE_H_ */
