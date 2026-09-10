@@ -923,6 +923,9 @@ static void gc_free_block(void *p, struct pool *heap) {
         case OBJ_VECTOR:
             free(obj->vector.data);
             break;
+        case OBJ_BYTEVECTOR:
+            free(obj->bytevector.data);
+            break;
         case OBJ_ENVIRONMENT:
             if (obj->environment.hash_table != NULL) {
                 hash_table_each(obj->environment.hash_table, gc_sweep_env_ht_each, NULL);
@@ -1242,6 +1245,15 @@ value make_vector(size_t len, value fill) {
     for (int i = 0; i < len; ++i) {
         obj->vector.data[i] = fill;
     }
+    return OBJECT(obj);
+}
+
+value make_bytevector(size_t len, uint8_t byte) {
+    struct object *obj = alloc_object();
+    obj->type = OBJ_BYTEVECTOR;
+    obj->bytevector.len = len;
+    obj->bytevector.data = malloc(obj->vector.len);
+    memset(obj->bytevector.data, byte, len);
     return OBJECT(obj);
 }
 
@@ -1570,6 +1582,17 @@ static void _write_vector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, ")");
 }
 
+static void _write_bytevector(struct object *vec, value port) {
+    GET_OBJECT(port)->port.printf(port, "#u8(");
+    for (int i = 0; i < GET_OBJECT(vec)->bytevector.len; ++i) {
+        GET_OBJECT(port)->port.printf(port, "%d", GET_OBJECT(vec)->bytevector.data[i]);
+        if (i != GET_OBJECT(vec)->vector.len - 1) {
+            GET_OBJECT(port)->port.printf(port, " ");
+        }
+    }
+    GET_OBJECT(port)->port.printf(port, ")");
+}
+
 static void _write_char_literal(value v, value port) {
     char ch = GET_CHAR(v);
     char buf[16];
@@ -1669,6 +1692,8 @@ static void _write(value v, value port) {
         _write_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
         _write_vector(GET_OBJECT(v), port);
+    } else if (IS_BYTEVECTOR(v)) {
+        _write_bytevector(GET_OBJECT(v), port);
     } else if (IS_FLONUM(v)) {
         _write_flonum(GET_FLONUM(v), port);
     } else {
@@ -2161,6 +2186,50 @@ value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
     value v = next_arg();
     free_args();
     return BOOL(IS_BOX(v));
+}
+
+value primcall_bytevector_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("bytevector? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_BYTEVECTOR(v));
+}
+
+value primcall_bytevector_length(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("bytevector-length needs a single argument"); }
+    init_args();
+    value vec = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(vec)) { raise_error("bytevector-length argument is not a bytevector"); }
+    return FIXNUM(GET_OBJECT(vec)->bytevector.len);
+}
+
+value primcall_bytevector_u8_ref(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("bytevector-u8-ref needs two arguments"); }
+    init_args();
+    value vec = next_arg();
+    value idx = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(vec)) { raise_error("bytevector-u8-ref first argument is not a bytevector"); }
+    if (!IS_FIXNUM(idx)) { raise_error("bytevector-u8-ref second argument is not an integer"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->bytevector.len) { raise_error("bytevector-u8-ref index is out of range"); }
+    return FIXNUM(GET_OBJECT(vec)->bytevector.data[GET_FIXNUM(idx)]);
+}
+
+value primcall_bytevector_u8_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 3) { raise_error("bytevector-u8-set! needs three arguments"); }
+    init_args();
+    value vec = next_arg();
+    value idx = next_arg();
+    value byte = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(vec)) { raise_error("bytevector-u8-set! first argument is not a bytevector"); }
+    if (!IS_FIXNUM(idx)) { raise_error("bytevector-u8-set! second argument is not an integer"); }
+    if (GET_FIXNUM(idx) < 0 || GET_FIXNUM(idx) >= GET_OBJECT(vec)->bytevector.len) { raise_error("bytevector-u8-set! index is out of range"); }
+    if (!IS_FIXNUM(byte) || GET_FIXNUM(byte) < 0 || GET_FIXNUM(byte) > 255) { raise_error("bytevector-u8-set! third argument must be an integer in range [0, 255]"); }
+    GET_OBJECT(vec)->bytevector.data[GET_FIXNUM(idx)] = GET_FIXNUM(byte);
+    return VOID;
 }
 
 /* Copy a captured stack image back to the exact addresses it came from and
@@ -2705,6 +2774,18 @@ value primcall_list_to_vector(environment env, enum call_flags flags, int nargs,
     }
 
     return vec;
+}
+
+value primcall_make_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { raise_error("make-bytevector needs one or two arguments"); }
+    init_args();
+    value n = next_arg();
+    value byte = nargs == 1 ? FIXNUM(0) : next_arg();
+    free_args();
+    if (!IS_FIXNUM(n)) { raise_error("make-bytevector first argument should be an integer"); }
+    if (GET_FIXNUM(n) < 0) { raise_error("make-bytevector first argument is negative"); }
+    if (!IS_FIXNUM(byte)) { raise_error("make-bytevector second argument should be an integer"); }
+    return make_bytevector(GET_FIXNUM(n), GET_FIXNUM(byte));
 }
 
 value primcall_make_string(environment env, enum call_flags flags, int nargs, ...) {

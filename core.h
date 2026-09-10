@@ -209,6 +209,7 @@ enum object_type {
     OBJ_PORT,
     OBJ_ERROR,
     OBJ_VECTOR,
+    OBJ_BYTEVECTOR,
     OBJ_WRAPPED,
     OBJ_C_WRAPPED,
     OBJ_BOX,
@@ -258,6 +259,10 @@ struct object {
             value *data;
             int64_t len;
         } vector;
+        struct {
+            char *data;
+            int64_t len;
+        } bytevector;
         struct {
             value value;
             value kind;
@@ -324,6 +329,7 @@ struct object {
 #define IS_PORT(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_PORT)
 #define IS_ERROR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_ERROR)
 #define IS_VECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR)
+#define IS_BYTEVECTOR(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BYTEVECTOR)
 #define IS_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_WRAPPED)
 #define IS_C_WRAPPED(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_C_WRAPPED)
 #define IS_BOX(v) (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_BOX)
@@ -520,6 +526,10 @@ extern value primcall_apply(environment env, enum call_flags flags, int nargs, .
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_length(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_u8_ref(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_bytevector_u8_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_callcc(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_car(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cdr(environment env, enum call_flags flags, int nargs, ...);
@@ -553,6 +563,7 @@ extern value primcall_list(environment env, enum call_flags flags, int nargs, ..
 extern value primcall_list_directory(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_star(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_to_vector(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_make_bytevector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_make_vector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_newline(environment env, enum call_flags flags, int nargs, ...);
