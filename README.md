@@ -14,7 +14,6 @@ Supported:
 Missing:
  - Most of numeric tower. Only 61-bit fixnums and 32-bit flonums are supported.
  - Unicode. Strings are ASCII only.
- - Bytevectors
 
 Since I intend to play with _Whisper_ and try some gamedev in it, I've
 also added some basic raylib bindings. You can simply `(import
