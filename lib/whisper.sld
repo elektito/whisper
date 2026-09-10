@@ -20,6 +20,7 @@
           all?
           filter
           iota
+          let/cc
           pairwise
           !=
           string-join

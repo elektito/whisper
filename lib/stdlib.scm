@@ -238,6 +238,11 @@
        (call-with-values (lambda () expr)
          list)))))
 
+(define-syntax let/cc
+  (syntax-rules ()
+    ((_ k body1 body2 ...)
+     (call/cc (lambda (k) body1 body2 ...)))))
+
 (define (symbol=? x y)
   (eq? x y))
 
@@ -252,6 +257,13 @@
          (all? (vector->list (vector-map (lambda (a b)
                                            (equal? a b))
                                          x y))))
+        ((bytevector? x)
+         (let/cc return
+          (do ((i 0 (+ i 1)))
+              ((= i (bytevector-length x)) #t)
+            (unless (equal? (bytevector-u8-ref x i)
+                            (bytevector-u8-ref y i))
+              (return #f)))))
         ((not (and (pair? x) (pair? y))) #f)
         (else (and (equal? (car x) (car y))
                    (equal? (cdr x) (cdr y))))))
@@ -923,6 +935,54 @@
    ((to at from) (%vector-copy! to at from 0 (vector-length from)))
    ((to at from start) (%vector-copy! to at from start (vector-length from)))
    ((to at from start end) (%vector-copy! to at from start end))))
+
+(define (bytevector . bytes)
+  (let ((bv (make-bytevector (length bytes))))
+    (do ((i 0 (+ i 1))
+         (bytes bytes (cdr bytes)))
+        ((null? bytes) bv)
+      (bytevector-u8-set! bv i (car bytes)))))
+
+(define (%bv-copy bv start end)
+  (let ((n (- end start)))
+    (do ((r (make-bytevector n))
+         (vidx start (+ vidx 1))
+         (ridx 0 (+ ridx 1)))
+        ((= ridx n) r)
+      (bytevector-u8-set! r ridx (bytevector-u8-ref bv vidx)))))
+
+(define bytevector-copy
+  (case-lambda
+   ((bv) (%bv-copy bv 0 (bytevector-length bv)))
+   ((bv start) (%bv-copy bv start (bytevector-length bv)))
+   ((bv start end) (%bv-copy bv start end))))
+
+(define (%bv-copy! to at from start end)
+  (let ((n (- end start)))
+    (do ((from-idx start (+ from-idx 1))
+         (to-idx at (+ to-idx 1)))
+        ((= from-idx end) to)
+      (bytevector-u8-set! to to-idx (bytevector-u8-ref from from-idx)))))
+
+(define bytevector-copy!
+  (case-lambda
+   ((to at from) (%bv-copy! to at from 0 (bytevector-length from)))
+   ((to at from start) (%bv-copy! to at from start (bytevector-length from)))
+   ((to at from start end) (%bv-copy! to at from start end))))
+
+(define (%bv-append bv1 bv2)
+  (let ((result (make-bytevector (+ (bytevector-length bv1)
+                                    (bytevector-length bv2)))))
+    (bytevector-copy! result 0 bv1)
+    (bytevector-copy! result (bytevector-length bv1) bv2)))
+
+(define bytevector-append
+  (case-lambda
+   (() (make-bytevector 0))
+   ((bv) (bytevector-copy bv))
+   ((bv1 bv2) (%bv-append bv1 bv2))
+   ((bv1 bv2 . rest) (%bv-append (%bv-append bv1 bv2)
+                                 (apply bytevector-append rest)))))
 
 (define (%string->vector str start end)
   (let ((n (- end start)))

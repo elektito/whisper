@@ -20,6 +20,14 @@
         begin
         boolean=?
         boolean?
+        bytevector
+        bytevector-append
+        bytevector-copy
+        bytevector-copy!
+        bytevector-length
+        bytevector-u8-ref
+        bytevector-u8-set!
+        bytevector?
         caar
         cadr
         call-with-current-continuation
@@ -97,6 +105,7 @@
         list-set!
         list-tail
         list?
+        make-bytevector
         make-list
         make-parameter
         make-string

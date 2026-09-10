@@ -455,6 +455,7 @@ extern value make_symbol(char *name, size_t len, enum sym_kind kind);
 extern value make_closure(funcptr func, int min_args, int max_args, int nfreevars, ...);
 extern value make_string(const char *s, size_t len);
 extern value make_vector(size_t len, value fill);
+extern value make_bytevector(size_t len, uint8_t fill);
 extern value make_pair(value car, value cdr);
 extern struct object* alloc_object(void);
 extern value reverse_list(value list, value acc);

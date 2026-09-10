@@ -1010,6 +1010,7 @@
         ((char? form) (compile-form func indent form #f #f))
         ((string? form) (compile-form func indent form #f #f))
         ((vector? form) (compile-form func indent form #f #f))
+        ((bytevector? form) (compile-form func indent form #f #f))
         ((identifier? form) (let ((varnum (func-next-varnum func)))
                               (intern (func-program func) (identifier-name form))
                               (gen-code func indent "value x~a = symb~a;\n" varnum (mangle-name (identifier-name form)))
@@ -1498,6 +1499,15 @@
           (loop (+ i 1)))))
     varnum))
 
+(define (compile-bytevector func indent form)
+  (let ((varnum (func-next-varnum func)))
+    (gen-code func indent "value x~a = make_bytevector(~a, 0);\n" varnum (bytevector-length form))
+    (let loop ((i 0))
+      (when (< i (bytevector-length form))
+        (gen-code func indent "GET_OBJECT(x~a)->bytevector.data[~a] = ~a;\n" varnum i (bytevector-u8-ref form i))
+        (loop (+ i 1))))
+    varnum))
+
 (define (compile-form func indent form tail? discard?)
   (cond ((identifier? form) (compile-identifier func indent form))
         ((number? form) (compile-number func indent form))
@@ -1506,6 +1516,7 @@
         ((char? form) (compile-char func indent form))
         ((pair? form) (compile-list func indent form tail? discard?))
         ((vector? form) (compile-vector func indent form))
+        ((bytevector? form) (compile-bytevector func indent form))
         (else (compile-error "don't know how to compile form: ~s" (de-identifier form)))))
 
 (define (compile-error fmt . args)
