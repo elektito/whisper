@@ -12,6 +12,7 @@ Supported:
  - eval and REPL
  
 Missing:
+ - cyclic/shared structures
  - Most of numeric tower. Only 61-bit fixnums and 32-bit flonums are supported.
  - Unicode. Strings are ASCII only.
 
