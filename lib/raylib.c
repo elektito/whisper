@@ -156,6 +156,217 @@ value window_should_close(environment env, enum call_flags flags, int nargs, ...
     return BOOL(WindowShouldClose());
 }
 
+value is_window_ready(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-ready accepts no arguments"); }
+    return BOOL(IsWindowReady());
+}
+
+value is_window_fullscreen(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-fullscreen accepts no arguments"); }
+    return BOOL(IsWindowFullscreen());
+}
+
+value is_window_hidden(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-hidden accepts no arguments"); }
+    return BOOL(IsWindowHidden());
+}
+
+value is_window_minimized(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-minimized accepts no arguments"); }
+    return BOOL(IsWindowMinimized());
+}
+
+value is_window_maximized(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-maximized accepts no arguments"); }
+    return BOOL(IsWindowMaximized());
+}
+
+value is_window_focused(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-focused accepts no arguments"); }
+    return BOOL(IsWindowFocused());
+}
+
+value is_window_resized(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("is-window-resized accepts no arguments"); }
+    return BOOL(IsWindowResized());
+}
+
+value is_window_state(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-window-state takes a single argument"); }
+
+    init_args();
+    value flag = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(flag)) { raise_error("is-window-state argument is not an integer"); }
+
+    return BOOL(IsWindowState(GET_FIXNUM(flag)));
+}
+
+value set_window_state(environment env, enum call_flags flags, int nargs, ...) {
+    unsigned int fs = 0;
+
+    init_args();
+    for (int i = 0; i < nargs; ++i) {
+        value f = next_arg();
+        if (!IS_FIXNUM(f)) { raise_error("set-window-state arguments must be integers"); }
+        fs |= GET_FIXNUM(f);
+    }
+    free_args();
+
+    SetWindowState(fs);
+
+    return VOID;
+}
+
+value clear_window_state(environment env, enum call_flags flags, int nargs, ...) {
+    unsigned int fs = 0;
+
+    init_args();
+    for (int i = 0; i < nargs; ++i) {
+        value f = next_arg();
+        if (!IS_FIXNUM(f)) { raise_error("clear-window-state arguments must be integers"); }
+        fs |= GET_FIXNUM(f);
+    }
+    free_args();
+
+    ClearWindowState(fs);
+
+    return VOID;
+}
+
+value toggle_fullscreen(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("toggle-fullscreen accepts no arguments"); }
+    ToggleFullscreen();
+    return VOID;
+}
+
+value toggle_borderless_windowed(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("toggle-borderless-windowed accepts no arguments"); }
+    ToggleBorderlessWindowed();
+    return VOID;
+}
+
+value maximize_window(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("maximize-window accepts no arguments"); }
+    MaximizeWindow();
+    return VOID;
+}
+
+value minimize_window(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("minimize-window accepts no arguments"); }
+    MinimizeWindow();
+    return VOID;
+}
+
+value restore_window(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("restore-window accepts no arguments"); }
+    RestoreWindow();
+    return VOID;
+}
+
+value set_window_title(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("set-window-title takes a single argument"); }
+
+    init_args();
+    value title_scm = next_arg();
+    free_args();
+
+    if (!IS_STRING(title_scm)) { raise_error("set-window-title argument is not a string"); }
+
+    char title[GET_STRING(title_scm)->len + 1];
+    memcpy(title, GET_STRING(title_scm)->s, GET_STRING(title_scm)->len);
+    title[GET_STRING(title_scm)->len] = 0;
+
+    SetWindowTitle(title);
+
+    return VOID;
+}
+
+value set_window_position(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("set-window-position takes two arguments"); }
+
+    init_args();
+    value x = next_arg();
+    value y = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(x)) { raise_error("set-window-position first argument (x) is not an integer"); }
+    if (!IS_FIXNUM(y)) { raise_error("set-window-position second argument (y) is not an integer"); }
+
+    SetWindowPosition(GET_FIXNUM(x), GET_FIXNUM(y));
+
+    return VOID;
+}
+
+value set_window_min_size(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("set-window-min-size takes two arguments"); }
+
+    init_args();
+    value w = next_arg();
+    value h = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(w)) { raise_error("set-window-min-size first argument (width) is not an integer"); }
+    if (!IS_FIXNUM(h)) { raise_error("set-window-min-size second argument (height) is not an integer"); }
+
+    SetWindowMinSize(GET_FIXNUM(w), GET_FIXNUM(h));
+
+    return VOID;
+}
+
+value set_window_max_size(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("set-window-max-size takes two arguments"); }
+
+    init_args();
+    value w = next_arg();
+    value h = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(w)) { raise_error("set-window-max-size first argument (width) is not an integer"); }
+    if (!IS_FIXNUM(h)) { raise_error("set-window-max-size second argument (height) is not an integer"); }
+
+    SetWindowMaxSize(GET_FIXNUM(w), GET_FIXNUM(h));
+
+    return VOID;
+}
+
+value set_window_size(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("set-window-size takes two arguments"); }
+
+    init_args();
+    value w = next_arg();
+    value h = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(w)) { raise_error("set-window-size first argument (width) is not an integer"); }
+    if (!IS_FIXNUM(h)) { raise_error("set-window-size second argument (height) is not an integer"); }
+
+    SetWindowSize(GET_FIXNUM(w), GET_FIXNUM(h));
+
+    return VOID;
+}
+
+value get_screen_width(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-screen-width accepts no arguments"); }
+    return FIXNUM(GetScreenWidth());
+}
+
+value get_screen_height(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-screen-height accepts no arguments"); }
+    return FIXNUM(GetScreenHeight());
+}
+
+value get_render_width(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-render-width accepts no arguments"); }
+    return FIXNUM(GetRenderWidth());
+}
+
+value get_render_height(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-render-height accepts no arguments"); }
+    return FIXNUM(GetRenderHeight());
+}
+
 value clear_background(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("clear-background takes a single argument"); }
 
