@@ -5,10 +5,12 @@
 #include <time.h>
 
 static int wrapped_kind_texture2d;
+static int wrapped_kind_rendertexture2d;
 
 __attribute__((constructor))
 static void init_lib(void) {
     wrapped_kind_texture2d = assign_c_wrapped_kind();
+    wrapped_kind_rendertexture2d = assign_c_wrapped_kind();
 }
 
 Color color_from_list(value color_scm, const char *caller_name) {
@@ -392,6 +394,30 @@ value end_drawing(environment env, enum call_flags flags, int nargs, ...) {
     return VOID;
 }
 
+value begin_texture_mode(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("begin-texture-mode takes a single argument"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("begin-texture-mode argument is not a render texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_rendertexture2d) {
+        raise_error("begin-texture-mode argument is not a render texture");
+    }
+
+    BeginTextureMode(*(RenderTexture2D*)texture_obj->c_wrapped.data);
+
+    return VOID;
+}
+
+value end_texture_mode(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("end-texture-mode accepts no arguments"); }
+    EndTextureMode();
+    return VOID;
+}
+
 value set_target_fps(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("set-target-fps takes a single argument"); }
 
@@ -713,6 +739,28 @@ value load_texture(environment env, enum call_flags flags, int nargs, ...) {
     return OBJECT(obj);
 }
 
+value load_render_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("load-render-texture takes two arguments"); }
+
+    init_args();
+    value w = next_arg();
+    value h = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(w)) { raise_error("load-render-texture first argument (width) is not an integer"); }
+    if (!IS_FIXNUM(h)) { raise_error("load-render-texture second argument (height) is not an integer"); }
+
+    RenderTexture2D *texture = malloc(sizeof(RenderTexture2D));
+    *texture = LoadRenderTexture(GET_FIXNUM(w), GET_FIXNUM(h));
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_rendertexture2d;
+    obj->c_wrapped.data = texture;
+    obj->c_wrapped.free_data = free;
+
+    return OBJECT(obj);
+}
+
 value is_texture_valid(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("is-texture-valid takes a single argument"); }
 
@@ -727,6 +775,22 @@ value is_texture_valid(environment env, enum call_flags flags, int nargs, ...) {
     }
 
     return BOOL(IsTextureValid(*(Texture2D*)texture_obj->c_wrapped.data));
+}
+
+value is_render_texture_valid(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-render-texture-valid takes a single argument"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("is-render-texture-valid argument is not a render texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_rendertexture2d) {
+        raise_error("is-render-texture-valid argument is not a render texture");
+    }
+
+    return BOOL(IsRenderTextureValid(*(RenderTexture2D*)texture_obj->c_wrapped.data));
 }
 
 value unload_texture(environment env, enum call_flags flags, int nargs, ...) {
@@ -745,6 +809,47 @@ value unload_texture(environment env, enum call_flags flags, int nargs, ...) {
     UnloadTexture(*(Texture2D*)texture_obj->c_wrapped.data);
 
     return VOID;
+}
+
+value unload_render_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("unload-render-texture takes a single argument"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("unload-render-texture argument is not a render texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_rendertexture2d) {
+        raise_error("unload-render-texture argument is not a render texture");
+    }
+
+    UnloadRenderTexture(*(RenderTexture2D*)texture_obj->c_wrapped.data);
+
+    return VOID;
+}
+
+value get_render_texture_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("get-render-texture-texture takes a single argument"); }
+
+    init_args();
+    value render_texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(render_texture_scm)) { raise_error("get-render-texture-texture argument is not a render texture"); }
+    struct object *render_texture_obj = GET_OBJECT(render_texture_scm);
+    if (render_texture_obj->type != OBJ_C_WRAPPED || render_texture_obj->c_wrapped.kind != wrapped_kind_rendertexture2d) {
+        raise_error("get-render-texture-texture argument is not a render texture");
+    }
+
+    Texture2D *texture = &((RenderTexture2D*) render_texture_obj->c_wrapped.data)->texture;
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_texture2d;
+    obj->c_wrapped.data = texture;
+    obj->c_wrapped.free_data = NULL;
+
+    return OBJECT(obj);
 }
 
 value draw_texture(environment env, enum call_flags flags, int nargs, ...) {

@@ -934,7 +934,9 @@ static void gc_free_block(void *p, struct pool *heap) {
             }
             break;
         case OBJ_C_WRAPPED:
-            obj->c_wrapped.free_data(obj->c_wrapped.data);
+            if (obj->c_wrapped.free_data) {
+                obj->c_wrapped.free_data(obj->c_wrapped.data);
+            }
             break;
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);

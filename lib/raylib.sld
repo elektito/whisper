@@ -378,6 +378,8 @@
             (clear-background "clear_background" 1 1)
             (begin-drawing "begin_drawing" 0 0)
             (end-drawing "end_drawing" 0 0)
+            (begin-texture-mode "begin_texture_mode" 1 1)
+            (end-texture-mode "end_texture_mode" 0 0)
 
             (set-target-fps "set_target_fps" 1 1)
             (get-frame-time "get_frame_time" 0 0)
@@ -408,8 +410,12 @@
             (draw-text "draw_text" 5 5)
 
             (load-texture "load_texture" 1 1)
+            (load-render-texture "load_render_texture" 2 2)
             (is-texture-valid "is_texture_valid" 1 1)
+            (is-render-texture-valid "is_render_texture_valid" 1 1)
             (unload-texture "unload_texture" 1 1)
+            (unload-render-texture "unload_texture" 1 1)
+            (get-render-texture-texture "get_render_texture_texture" 1 1)
 
             (draw-texture "draw_texture" 4 4)
             (draw-texture-pro "draw_texture_pro" 6 6)
