@@ -793,7 +793,7 @@ value draw_texture_pro(environment env, enum call_flags flags, int nargs, ...) {
     if (!IS_FLONUM(rotation)) { raise_error("draw-texture-pro fifth argument (rotation) is not a flonum"); }
 
     Rectangle source_rect = rect_from_list(source_rect_scm, "draw-texture-pro");
-    Rectangle dest_rect = rect_from_list(source_rect_scm, "draw-texture-pro");
+    Rectangle dest_rect = rect_from_list(dest_rect_scm, "draw-texture-pro");
     Vector2 origin = vector2_from_pair(origin_scm, "draw-texture-pro", "origin");
     Color tint = color_from_list(tint_scm, "draw-texture-pro");
     DrawTexturePro(*(Texture2D*)texture_obj->c_wrapped.data, source_rect, dest_rect, origin, GET_FLONUM(rotation), tint);
