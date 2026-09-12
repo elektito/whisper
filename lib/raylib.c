@@ -878,7 +878,7 @@ value draw_texture(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value draw_texture_pro(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 6) { raise_error("draw-texture-pro takes four arguments"); }
+    if (nargs != 6) { raise_error("draw-texture-pro takes six arguments"); }
 
     init_args();
     value texture_scm = next_arg();
