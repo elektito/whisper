@@ -380,15 +380,15 @@ and still a comment
 (not (odd? 2))
 (not (odd? -100))
 
-(eq? 10 ((lambda (x y) x) 10 20))
-(eq? 20 ((lambda (x y) y) 10 20))
+(= 10 ((lambda (x y) x) 10 20))
+(= 20 ((lambda (x y) y) 10 20))
 
-(eq? 3 (and 1 2 3))
-(eq? #f (and 1 2 #f 3))
-(eq? 1 (or 1 2 3))
-(eq? 1 (or #f #f 1 2 3))
+(= 3 (and 1 2 3))
+(not (and 1 2 #f 3))
+(= 1 (or 1 2 3))
+(= 1 (or #f #f 1 2 3))
 
-(eq? 100 (car (cons 100 '())))
+(= 100 (car (cons 100 '())))
 (eq? 'bar (cadr '(foo bar spam eggs)))
 
 ;; type predicates
