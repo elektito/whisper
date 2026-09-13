@@ -1016,6 +1016,11 @@ static void gc_mark(void) {
     gc_recurse(stdout_port);
     gc_recurse(stderr_port);
 
+    for (int i = 0; i < n_wrapped_print_procs; ++i) {
+        gc_recurse(wrapped_print_procs[i].kind);
+        gc_recurse(wrapped_print_procs[i].proc);
+    }
+
     gc_recurse(pending_tail_call.closure);
     for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
       gc_recurse(pending_tail_call.args[i]);
