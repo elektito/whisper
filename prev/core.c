@@ -934,7 +934,9 @@ static void gc_free_block(void *p, struct pool *heap) {
             }
             break;
         case OBJ_C_WRAPPED:
-            obj->c_wrapped.free_data(obj->c_wrapped.data);
+            if (obj->c_wrapped.free_data) {
+                obj->c_wrapped.free_data(obj->c_wrapped.data);
+            }
             break;
         case OBJ_CONTINUATION:
             free(obj->continuation.stack);
@@ -2427,6 +2429,29 @@ value primcall_cddr(environment env, enum call_flags flags, int nargs, ...) {
     return GET_PAIR(GET_PAIR(arg)->cdr)->cdr;
 }
 
+value primcall_ceiling(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("celing needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        float f = GET_FLONUM(n);
+        int64_t i = (int64_t) f;
+
+        /* if x is positive and has a non-zero fractional part, add 1 */
+        if (f > 0.0f && f != (float) i) {
+            return FLONUM((float)(i + 1));
+        }
+
+        return FLONUM((float) i);
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("ceiling argument is not a number");
+    }
+}
+
 value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("char-downcase needs a single argument"); }
     init_args();
@@ -2604,6 +2629,21 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+value primcall_exact(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("exact takes a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        return FIXNUM((int64_t) GET_FLONUM(n));
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("exact argument is not a number");
+    }
+}
+
 value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("fixnum? needs a single argument"); }
     init_args();
@@ -2620,6 +2660,29 @@ value primcall_flonum_q(environment env, enum call_flags flags, int nargs, ...) 
     free_args();
 
     return BOOL(IS_FLONUM(v));
+}
+
+value primcall_floor(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("floor needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        float f = GET_FLONUM(n);
+        int64_t i = (int64_t) f;
+
+        /* if x is negative and has a non-zero fractional part, subtract 1 */
+        if (f < 0.0f && f != (float) i) {
+            return FLONUM((float)(i - 1));
+        }
+
+        return FLONUM((float) i);
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("floor argument is not a number");
+    }
 }
 
 value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...) {
@@ -2706,6 +2769,21 @@ value primcall_get_output_string(environment env, enum call_flags flags, int nar
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { raise_error("argument is not an output string port"); }
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
+}
+
+value primcall_inexact(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("inexact takes a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FIXNUM(n)) {
+        return FLONUM((float) GET_FIXNUM(n));
+    } else if (IS_FLONUM(n)) {
+        return n;
+    } else {
+        raise_error("inexact argument is not a number");
+    }
 }
 
 value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -3032,6 +3110,26 @@ value primcall_read_line(environment env, enum call_flags flags, int nargs, ...)
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("read-line argument is not an input port"); }
     return GET_OBJECT(port)->port.read_line(port);
+}
+
+value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("round needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        float f = GET_FLONUM(n);
+        if (f >= 0.0f) {
+            return FLONUM((float)(int)(f + 0.5f));
+        } else {
+            return FLONUM((float)(int)(f - 0.5f));
+        }
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("round argument is not a number");
+    }
 }
 
 value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...) {
@@ -3369,6 +3467,21 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     int ret = system(cmdz);
     free(cmdz);
     return FIXNUM(ret);
+}
+
+value primcall_truncate(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("truncate needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        return FLONUM((int) GET_FLONUM(n));
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("truncate argument is not a number");
+    }
 }
 
 value primcall_percent_unread_char(environment env, enum call_flags flags, int nargs, ...) {
