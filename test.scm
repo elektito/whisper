@@ -380,6 +380,27 @@ and still a comment
 (not (odd? 2))
 (not (odd? -100))
 
+;; we use eqv? in the following comparisons, instead of =, because exactness
+;; matters.
+(eqv? -5.0 (floor -4.3))
+(eqv? -4.0 (ceiling -4.3))
+(eqv? -4.0 (truncate -4.3))
+(eqv? 4.0 (floor 4.3))
+(eqv? 5.0 (ceiling 4.3))
+(eqv? 4.0 (truncate 4.3))
+
+(eqv? -4.0 (round -4.3))
+(eqv? 5.0 (round 4.7))
+
+;; round towards even
+(eqv? -4.0 (round -4.5))
+(eqv? -4.0 (round -3.5))
+(eqv? 4.0 (round 4.5))
+(eqv? 4.0 (round 3.5))
+
+(eqv? 1 (exact 1.0))
+(eqv? 1.0 (inexact 1))
+
 (= 10 ((lambda (x y) x) 10 20))
 (= 20 ((lambda (x y) y) 10 20))
 
