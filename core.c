@@ -2606,6 +2606,21 @@ value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(v1 == v2);
 }
 
+value primcall_exact(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("exact takes a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        return FIXNUM((int64_t) GET_FLONUM(n));
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("exact argument is not a number");
+    }
+}
+
 value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("fixnum? needs a single argument"); }
     init_args();
@@ -2708,6 +2723,21 @@ value primcall_get_output_string(environment env, enum call_flags flags, int nar
     free_args();
     if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { raise_error("argument is not an output string port"); }
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
+}
+
+value primcall_inexact(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("inexact takes a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FIXNUM(n)) {
+        return FLONUM((float) GET_FIXNUM(n));
+    } else if (IS_FLONUM(n)) {
+        return n;
+    } else {
+        raise_error("inexact argument is not a number");
+    }
 }
 
 value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...) {
