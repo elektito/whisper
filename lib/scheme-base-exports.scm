@@ -38,6 +38,7 @@
         cdar
         cddr
         cdr
+        ceiling
         char->integer
         char-ready?
         char-whitespace?
@@ -71,8 +72,10 @@
         error-object-irritants
         error-object-message
         even?
+        exact
         expt
         file-error?
+        floor
         floor/
         floor-quotient
         floor-remainder
@@ -83,6 +86,7 @@
         guard
         if
         include
+        inexact
         input-port?
         integer->char
         integer?
@@ -173,6 +177,7 @@
         symbol=?
         symbol?
         syntax-rules
+        truncate
         truncate/
         truncate-quotient
         truncate-remainder
