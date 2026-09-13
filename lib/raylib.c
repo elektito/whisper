@@ -444,7 +444,7 @@ value get_time_us(environment env, enum call_flags flags, int nargs, ...) {
     int ret = clock_gettime(CLOCK_MONOTONIC, &ts);
     if (ret) { raise_error("error reading time"); }
 
-    uint64_t usecs = ts.tv_sec * 1000000 + ts.tv_nsec * 1000;
+    uint64_t usecs = (uint64_t) ts.tv_sec * 1000000ULL + ts.tv_nsec / 1000;
     return FIXNUM(usecs);
 }
 
