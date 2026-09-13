@@ -2429,6 +2429,29 @@ value primcall_cddr(environment env, enum call_flags flags, int nargs, ...) {
     return GET_PAIR(GET_PAIR(arg)->cdr)->cdr;
 }
 
+value primcall_ceiling(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("celing needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        float f = GET_FLONUM(n);
+        int64_t i = (int64_t) f;
+
+        /* if x is positive and has a non-zero fractional part, add 1 */
+        if (f > 0.0f && f != (float) i) {
+            return FLONUM((float)(i + 1));
+        }
+
+        return FLONUM((float) i);
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("ceiling argument is not a number");
+    }
+}
+
 value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("char-downcase needs a single argument"); }
     init_args();
@@ -2637,6 +2660,29 @@ value primcall_flonum_q(environment env, enum call_flags flags, int nargs, ...) 
     free_args();
 
     return BOOL(IS_FLONUM(v));
+}
+
+value primcall_floor(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("floor needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        float f = GET_FLONUM(n);
+        int64_t i = (int64_t) f;
+
+        /* if x is negative and has a non-zero fractional part, subtract 1 */
+        if (f < 0.0f && f != (float) i) {
+            return FLONUM((float)(i - 1));
+        }
+
+        return FLONUM((float) i);
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("floor argument is not a number");
+    }
 }
 
 value primcall_percent_exit(environment env, enum call_flags flags, int nargs, ...) {
@@ -3066,6 +3112,45 @@ value primcall_read_line(environment env, enum call_flags flags, int nargs, ...)
     return GET_OBJECT(port)->port.read_line(port);
 }
 
+value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("round needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        float f = GET_FLONUM(n);
+        int64_t i = (int64_t) f;
+        float diff = f - (float) i;
+
+        if (diff < 0.0f) {
+            diff = -diff;
+        }
+
+        /* 1. if fractional part is strictly greater than 0.5, round away from zero */
+        if (diff > 0.5f) {
+            return FLONUM((f > 0.0f) ? (float)(i + 1) : (float)(i - 1));
+        }
+
+        /* 2. if fractional part is strictly less than 0.5, truncate toward zero */
+        if (diff < 0.5f) {
+            return FLONUM((float) i);
+        }
+
+        /* 3. exact tie (diff == 0.5): round to nearest even integer */
+        if (i % 2 != 0) {
+            return FLONUM((f > 0.0f) ? (float)(i + 1) : (float)(i - 1));
+        }
+
+        /* if currently even, keep it */
+        return FLONUM((float) i);
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("round argument is not a number");
+    }
+}
+
 value primcall_set_box_b(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { raise_error("set-box! needs two arguments"); }
     init_args();
@@ -3401,6 +3486,21 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     int ret = system(cmdz);
     free(cmdz);
     return FIXNUM(ret);
+}
+
+value primcall_truncate(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("truncate needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FLONUM(n)) {
+        return FLONUM((int) GET_FLONUM(n));
+    } else if (IS_FIXNUM(n)) {
+        return n;
+    } else {
+        raise_error("truncate argument is not a number");
+    }
 }
 
 value primcall_percent_unread_char(environment env, enum call_flags flags, int nargs, ...) {
