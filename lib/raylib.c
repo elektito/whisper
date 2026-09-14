@@ -850,7 +850,7 @@ value draw_text_ex(environment env, enum call_flags flags, int nargs, ...) {
     value tint_scm = next_arg();
     free_args();
 
-    if (!IS_OBJECT(font_scm)) { raise_error("draw-font-ex first argument is not a font"); }
+    if (!IS_OBJECT(font_scm)) { raise_error("draw-text-ex first argument is not a font"); }
     struct object *font_obj = GET_OBJECT(font_scm);
     if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
         raise_error("draw-text-ex first argument is not a font");
