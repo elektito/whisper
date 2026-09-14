@@ -177,6 +177,20 @@
     (define mouse-button-extra 4)
     (define mouse-button-forward 5)
     (define mouse-button-back 6)
+
+    ;; texture parameters: filter mode
+    (define texture-filter-point 0)               ; No filter, pixel approximation
+    (define texture-filter-bilinear 1)            ; Linear filtering
+    (define texture-filter-trilinear 2)           ; Trilinear filtering (linear with mipmaps)
+    (define texture-filter-anisotropic-4x 3)      ; Anisotropic filtering 4x
+    (define texture-filter-anisotropic-8x 4)      ; Anisotropic filtering 8x
+    (define texture-filter-anisotropic-16x 5)     ; Anisotropic filtering 16x
+
+    ;; texture parameters: wrap mode
+    (define texture-wrap-repeat 0)                ; Repeats texture in tiled mode
+    (define texture-wrap-clamp 1)                 ; Clamps texture to edge pixel in tiled mode
+    (define texture-wrap-mirror-repeat 2)         ; Mirrors and repeats the texture in tiled mode
+    (define texture-wrap-mirror-clamp 3)          ; Mirrors and clamps to border the texture in tiled mode
     )
 
   (export flag-vsync-hint
@@ -345,6 +359,18 @@
           mouse-button-extra
           mouse-button-forward
           mouse-button-back
+
+          texture-filter-point
+          texture-filter-bilinear
+          texture-filter-trilinear
+          texture-filter-anisotropic-4x
+          texture-filter-anisotropic-8x
+          texture-filter-anisotropic-16x
+
+          texture-wrap-repeat
+          texture-wrap-clamp
+          texture-wrap-mirror-repeat
+          texture-wrap-mirror-clamp
           )
 
   (c-include "raylib.c")
@@ -406,8 +432,16 @@
             (draw-circle "draw_circle" 4 4)
             (draw-rectangle "draw_rectangle" 5 5)
 
+            (get-font-default "get_font_default" 0 0)
+            (load-font "load_font" 1 1)
+            (load-font-ex "load_font_ex" 2 2)
+            (is-font-valid "is_font_valid" 1 1)
+            (unload-font "unload_font" 1 1)
+            (get-font-texture "get_font_texture" 1 1)
+
             (draw-fps "draw_fps" 2 2)
             (draw-text "draw_text" 5 5)
+            (draw-text-ex "draw_text_ex" 6 6)
 
             (load-texture "load_texture" 1 1)
             (load-render-texture "load_render_texture" 2 2)
@@ -416,6 +450,10 @@
             (unload-texture "unload_texture" 1 1)
             (unload-render-texture "unload_texture" 1 1)
             (get-render-texture-texture "get_render_texture_texture" 1 1)
+
+            (gen-texture-mipmaps "gen_texture_mipmaps" 1 1)
+            (set-texture-filter "set_texture_filter" 2 2)
+            (set-texture-wrap "set_texture_wrap" 2 2)
 
             (draw-texture "draw_texture" 4 4)
             (draw-texture-pro "draw_texture_pro" 6 6)

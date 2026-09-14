@@ -6,11 +6,13 @@
 
 static int wrapped_kind_texture2d;
 static int wrapped_kind_rendertexture2d;
+static int wrapped_kind_font;
 
 __attribute__((constructor))
 static void init_lib(void) {
     wrapped_kind_texture2d = assign_c_wrapped_kind();
     wrapped_kind_rendertexture2d = assign_c_wrapped_kind();
+    wrapped_kind_font = assign_c_wrapped_kind();
 }
 
 Color color_from_list(value color_scm, const char *caller_name) {
@@ -674,6 +676,127 @@ value draw_rectangle(environment env, enum call_flags flags, int nargs, ...) {
     return VOID;
 }
 
+value get_font_default(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-font-default accepts no arguments"); }
+
+    Font *font = malloc(sizeof(Font));
+    *font = GetFontDefault();
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_font;
+    obj->c_wrapped.data = font;
+    obj->c_wrapped.free_data = free;
+
+    return OBJECT(font);
+}
+
+value load_font(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("load-font takes a single argument"); }
+
+    init_args();
+    value filename_scm = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename_scm)) { raise_error("load-font argument is not a string"); }
+
+    char filename[GET_STRING(filename_scm)->len + 1];
+    memcpy(filename, GET_STRING(filename_scm)->s, GET_STRING(filename_scm)->len);
+    filename[GET_STRING(filename_scm)->len] = 0;
+
+    Font *font = malloc(sizeof(Font));
+    *font = LoadFont(filename);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_font;
+    obj->c_wrapped.data = font;
+    obj->c_wrapped.free_data = free;
+
+    return OBJECT(font);
+}
+
+value load_font_ex(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("load-font-ex takes two arguments"); }
+
+    init_args();
+    value filename_scm = next_arg();
+    value font_size = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename_scm)) { raise_error("load-font-ex first argument (filename) is not a string"); }
+    if (!IS_FIXNUM(font_size)) { raise_error("load-font-ex second argument (font-size) is not an integer"); }
+
+    char filename[GET_STRING(filename_scm)->len + 1];
+    memcpy(filename, GET_STRING(filename_scm)->s, GET_STRING(filename_scm)->len);
+    filename[GET_STRING(filename_scm)->len] = 0;
+
+    Font *font = malloc(sizeof(Font));
+    *font = LoadFontEx(filename, GET_FIXNUM(font_size), 0, 0);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_font;
+    obj->c_wrapped.data = font;
+    obj->c_wrapped.free_data = free;
+
+    return OBJECT(obj);
+}
+
+value is_font_valid(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("is-font-valid takes a single argument"); }
+
+    init_args();
+    value font_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(font_scm)) { raise_error("is-font-valid argument is not a font"); }
+    struct object *font_obj = GET_OBJECT(font_scm);
+    if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
+        raise_error("is-font-valid argument is not a font");
+    }
+
+    return BOOL(IsFontValid(*(Font*)font_obj->c_wrapped.data));
+}
+
+value unload_font(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("unload-font takes a single argument"); }
+
+    init_args();
+    value font_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(font_scm)) { raise_error("unload-font argument is not a font"); }
+    struct object *font_obj = GET_OBJECT(font_scm);
+    if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
+        raise_error("unload-font argument is not a font");
+    }
+
+    UnloadFont(*(Font*)font_obj->c_wrapped.data);
+
+    return VOID;
+}
+
+value get_font_texture(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("get-font-texture takes a single argument"); }
+
+    init_args();
+    value font_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(font_scm)) { raise_error("get-font-texture argument is not a font"); }
+    struct object *font_obj = GET_OBJECT(font_scm);
+    if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
+        raise_error("get-font-texture argument is not a font");
+    }
+
+    Texture2D *texture = &((Font*) font_obj->c_wrapped.data)->texture;
+    struct object *obj = alloc_object();
+    obj->type = OBJ_C_WRAPPED;
+    obj->c_wrapped.kind = wrapped_kind_texture2d;
+    obj->c_wrapped.data = texture;
+    obj->c_wrapped.free_data = NULL;
+
+    return OBJECT(obj);
+}
+
 value draw_fps(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 2) { raise_error("draw-fps takes two arguments"); }
 
@@ -711,6 +834,42 @@ value draw_text(environment env, enum call_flags flags, int nargs, ...) {
     text[GET_STRING(text_scm)->len] = 0;
     Color color = color_from_list(color_scm, "draw-text");
     DrawText(text, GET_FIXNUM(x), GET_FIXNUM(y), GET_FIXNUM(font_size), color);
+
+    return VOID;
+}
+
+value draw_text_ex(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 6) { raise_error("draw-text-ex takes six arguments"); }
+
+    init_args();
+    value font_scm = next_arg();
+    value text_scm = next_arg();
+    value position_scm = next_arg();
+    value font_size = next_arg();
+    value spacing = next_arg();
+    value tint_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(font_scm)) { raise_error("draw-font-ex first argument is not a font"); }
+    struct object *font_obj = GET_OBJECT(font_scm);
+    if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
+        raise_error("draw-text-ex first argument is not a font");
+    }
+
+    if (!IS_STRING(text_scm)) { raise_error("draw-text-ex second argument (text) is not a string"); }
+    if (!IS_PAIR(position_scm)) { raise_error("draw-text-ex third argument (position) is not a pair"); }
+    if (!IS_FLONUM(font_size)) { raise_error("draw-text-ex fourth argument (font-size) is not an flonum"); }
+    if (!IS_FLONUM(spacing)) { raise_error("draw-text-ex fifth argument (spacing) is not an flonum"); }
+
+    Vector2 position = vector2_from_pair(position_scm, "draw-text-ex", "position");
+
+    char text[GET_STRING(text_scm)->len + 1];
+    memcpy(text, GET_STRING(text_scm)->s, GET_STRING(text_scm)->len);
+    text[GET_STRING(text_scm)->len] = 0;
+
+    Color tint = color_from_list(tint_scm, "draw-text-ex");
+
+    DrawTextEx(*(Font*)font_obj->c_wrapped.data, text, position, GET_FLONUM(font_size), GET_FLONUM(spacing), tint);
 
     return VOID;
 }
@@ -850,6 +1009,66 @@ value get_render_texture_texture(environment env, enum call_flags flags, int nar
     obj->c_wrapped.free_data = NULL;
 
     return OBJECT(obj);
+}
+
+value gen_texture_mipmaps(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("gen-texture-mipmaps takes a single argument"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("gen-texture-mipmaps argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("gen-texture-mipmaps argument is not a texture");
+    }
+
+    GenTextureMipmaps((Texture2D*)texture_obj->c_wrapped.data);
+
+    return VOID;
+}
+
+value set_texture_filter(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("set-texture-filter takes two arguments"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    value filter = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("set-texture-filter first argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("set-texture-filter first argument is not a texture");
+    }
+
+    if (!IS_FIXNUM(filter)) { raise_error("set-texture-filter second argument (filter) is not an integer"); }
+
+    SetTextureFilter(*(Texture2D*)texture_obj->c_wrapped.data, GET_FIXNUM(filter));
+
+    return VOID;
+}
+
+value set_texture_wrap(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("set-texture-wrap takes two arguments"); }
+
+    init_args();
+    value texture_scm = next_arg();
+    value wrap = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(texture_scm)) { raise_error("set-texture-wrap first argument is not a texture"); }
+    struct object *texture_obj = GET_OBJECT(texture_scm);
+    if (texture_obj->type != OBJ_C_WRAPPED || texture_obj->c_wrapped.kind != wrapped_kind_texture2d) {
+        raise_error("set-texture-wrap first argument is not a texture");
+    }
+
+    if (!IS_FIXNUM(wrap)) { raise_error("set-texture-wrap second argument (wrap) is not an integer"); }
+
+    SetTextureWrap(*(Texture2D*)texture_obj->c_wrapped.data, GET_FIXNUM(wrap));
+
+    return VOID;
 }
 
 value draw_texture(environment env, enum call_flags flags, int nargs, ...) {
