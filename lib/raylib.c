@@ -111,7 +111,7 @@ Vector2 vector2_from_pair(value pair, const char *caller_name, const char *value
 
     if (IS_FIXNUM(GET_PAIR(pair)->car)) {
         vec.x = (float) GET_FIXNUM(GET_PAIR(pair)->car);
-    } else if (IS_FIXNUM(GET_PAIR(pair)->car)) {
+    } else if (IS_FLONUM(GET_PAIR(pair)->car)) {
         vec.x = GET_FLONUM(GET_PAIR(pair)->car);
     } else {
         raise_error("%s: %s must be a pair of floats", caller_name, value_name);
@@ -119,7 +119,7 @@ Vector2 vector2_from_pair(value pair, const char *caller_name, const char *value
 
     if (IS_FIXNUM(GET_PAIR(pair)->cdr)) {
         vec.y = (float) GET_FIXNUM(GET_PAIR(pair)->cdr);
-    } else if (IS_FIXNUM(GET_PAIR(pair)->cdr)) {
+    } else if (IS_FLONUM(GET_PAIR(pair)->cdr)) {
         vec.y = GET_FLONUM(GET_PAIR(pair)->cdr);
     } else {
         raise_error("%s: %s must be a pair of floats", caller_name, value_name);
