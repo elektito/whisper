@@ -715,27 +715,43 @@ value load_font(environment env, enum call_flags flags, int nargs, ...) {
 }
 
 value load_font_ex(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { raise_error("load-font-ex takes two arguments"); }
+    if (nargs != 3) { raise_error("load-font-ex takes three arguments"); }
 
     init_args();
     value filename_scm = next_arg();
     value font_size = next_arg();
+    value codepoints = next_arg();
     free_args();
 
     if (!IS_STRING(filename_scm)) { raise_error("load-font-ex first argument (filename) is not a string"); }
     if (!IS_FIXNUM(font_size)) { raise_error("load-font-ex second argument (font-size) is not an integer"); }
+    if (codepoints != FALSE && !IS_VECTOR(codepoints)) { raise_error("load-font-ex third argument (codepoints) is not a vector (or #f)"); }
 
     char filename[GET_STRING(filename_scm)->len + 1];
     memcpy(filename, GET_STRING(filename_scm)->s, GET_STRING(filename_scm)->len);
     filename[GET_STRING(filename_scm)->len] = 0;
 
+    int *codepoints_ptr = NULL;
+    int codepoints_count = 0;
+    if (codepoints != FALSE) {
+        codepoints_count = GET_OBJECT(codepoints)->vector.len;
+        codepoints_ptr = malloc(codepoints_count * sizeof(int));
+        for (int i = 0; i < codepoints_count; ++i) {
+            value item = GET_OBJECT(codepoints)->vector.data[i];
+            if (!IS_FIXNUM(item)) { raise_error("load-font-ex third argument (codepoints) is not a vector of integers"); }
+            codepoints_ptr[i] = GET_FIXNUM(item);
+        }
+    }
+
     Font *font = malloc(sizeof(Font));
-    *font = LoadFontEx(filename, GET_FIXNUM(font_size), 0, 0);
+    *font = LoadFontEx(filename, GET_FIXNUM(font_size), codepoints_ptr, codepoints_count);
     struct object *obj = alloc_object();
     obj->type = OBJ_C_WRAPPED;
     obj->c_wrapped.kind = wrapped_kind_font;
     obj->c_wrapped.data = font;
     obj->c_wrapped.free_data = free;
+
+    free(codepoints_ptr);
 
     return OBJECT(obj);
 }
