@@ -442,6 +442,8 @@
             (draw-fps "draw_fps" 2 2)
             (draw-text "draw_text" 5 5)
             (draw-text-ex "draw_text_ex" 6 6)
+            (draw-text-codepoint "draw_text_codepoint" 5 5)
+            (draw-text-codepoints "draw_text_codepoints" 5 5)
 
             (load-texture "load_texture" 1 1)
             (load-render-texture "load_render_texture" 2 2)

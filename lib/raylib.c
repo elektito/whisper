@@ -874,6 +874,79 @@ value draw_text_ex(environment env, enum call_flags flags, int nargs, ...) {
     return VOID;
 }
 
+value draw_text_codepoint(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 5) { raise_error("draw-text-codepoint takes five arguments"); }
+
+    init_args();
+    value font_scm = next_arg();
+    value codepoint = next_arg();
+    value position_scm = next_arg();
+    value font_size = next_arg();
+    value tint_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(font_scm)) { raise_error("draw-text-codepoint first argument is not a font"); }
+    struct object *font_obj = GET_OBJECT(font_scm);
+    if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
+        raise_error("draw-text-codepoint first argument is not a font");
+    }
+
+    if (!IS_FIXNUM(codepoint)) { raise_error("draw-text-codepoint first argument (code-point) is not an integer"); }
+    if (!IS_FLONUM(font_size)) { raise_error("draw-text-codepoint fourth argument (font-size) is not an flonum"); }
+
+    Vector2 position = vector2_from_pair(position_scm, "draw-text-codepoint", "position");
+    Color tint = color_from_list(tint_scm, "draw-text-codepoint");
+
+    DrawTextCodepoint(*(Font*)font_obj->c_wrapped.data,
+                      GET_FIXNUM(codepoint),
+                      position,
+                      GET_FLONUM(font_size),
+                      tint);
+
+    return VOID;
+}
+
+value draw_text_codepoints(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 6) { raise_error("draw-text-codepoints takes six arguments"); }
+
+    init_args();
+    value font_scm = next_arg();
+    value codepoints = next_arg();
+    value position_scm = next_arg();
+    value font_size = next_arg();
+    value spacing = next_arg();
+    value tint_scm = next_arg();
+    free_args();
+
+    if (!IS_OBJECT(font_scm)) { raise_error("draw-text-codepoints first argument is not a font"); }
+    struct object *font_obj = GET_OBJECT(font_scm);
+    if (font_obj->type != OBJ_C_WRAPPED || font_obj->c_wrapped.kind != wrapped_kind_font) {
+        raise_error("draw-text-codepoint first argument is not a font");
+    }
+
+    if (!IS_BYTEVECTOR(codepoints)) { raise_error("draw-text-codepoints first argument (code-points) is not a bytevector"); }
+    if (!IS_FLONUM(font_size)) { raise_error("draw-text-codepoints fourth argument (font-size) is not an flonum"); }
+    if (!IS_FLONUM(spacing)) { raise_error("draw-text-codepoints fifth argument (spacing) is not an flonum"); }
+
+    Vector2 position = vector2_from_pair(position_scm, "draw-text-codepoints", "position");
+    Color tint = color_from_list(tint_scm, "draw-text-codepoints");
+
+    int codepoints_arr[GET_OBJECT(codepoints)->bytevector.len];
+    for (int i = 0; i < GET_OBJECT(codepoints)->bytevector.len; ++i) {
+        codepoints_arr[i] = GET_OBJECT(codepoints)->bytevector.data[i];
+    }
+
+    DrawTextCodepoints(*(Font*)font_obj->c_wrapped.data,
+                       codepoints_arr,
+                       GET_OBJECT(codepoints)->bytevector.len,
+                       position,
+                       GET_FLONUM(font_size),
+                       GET_FLONUM(spacing),
+                       tint);
+
+    return VOID;
+}
+
 value load_texture(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("load-texture takes a single argument"); }
 
