@@ -1888,7 +1888,7 @@
                  (compile-error "invalid c-include form: ~s" decl))
                (program-add-c-include program (cadr decl))
                (loop (cdr decls) imports export-names c-exports extra-archives extra-flags forms))
-              ((c-export) ;; (export (strlen "strlen" 1 1) (strcmp "strcmp" 2 2))
+              ((c-export) ;; (c-export (strlen "strlen" 1 1) (strcmp "strcmp" 2 2))
                (for-each (lambda (spec)
                            (unless (and (list? spec)
                                         (= (length spec) 4)
