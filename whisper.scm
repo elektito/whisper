@@ -1828,6 +1828,14 @@
                (forms '()))
       (if (null? decls)
           (begin
+            ;; add c-exports to compilation unit defines so we won't get
+            ;; an "undefined variable" error when a function defined in
+            ;; c is used in the scheme part of the same library.
+            (let ((defines (compilation-unit-defines cu)))
+              (let loop ((c-exports c-exports))
+                (unless (null? c-exports)
+                  (hash-table-set! defines (caar c-exports) (new-binding 'global (caar c-exports)))
+                  (loop (cdr c-exports)))))
             (raise-if-undefined
              (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
             (mark-sealed-globals! program cu)
