@@ -362,7 +362,7 @@
   (make-compilation-unit defines syntax-defs refs program-mode? past-imports? seen-import? library-name imports import-origins)
   compilation-unit?
 
-  ;; mapping name (binder key) to binding record, for defines/declares/
+  ;; mapping name (binder key) to binding record, for defines/
   ;; define-syntax seen textually earlier in this unit
   (defines compilation-unit-defines)
 
