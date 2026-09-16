@@ -80,7 +80,10 @@ lib/libraylib.a lib/libraylib.so lib/libraylib.so.600 &:
 lib/raylib.manifest lib/raylib.so lib/raylib.a &: $(CURRENT) lib/raylib.sld lib/raylib.c lib/libraylib.a lib/libraylib.so
 	./$(CURRENT) lib/raylib.sld -l -o lib/raylib -f '-I lib -I $(RAYLIB_SRC)'
 
-libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest
+lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a &: $(CURRENT) lib/srfi-151-bitwise.sld lib/bitwise.c lib/bitwise-33.scm lib/bitwise-60.scm lib/bitwise-other.scm
+	./$(CURRENT) lib/srfi-151-bitwise.sld -l -o lib/srfi-151 -f '-I lib'
+
+libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest lib/srfi-151.manifest
 
 clean:
 	rm -rf $(CURRENT) stage0 stage1 libwhisper.a stage0-lib stage1-lib stage2-lib
