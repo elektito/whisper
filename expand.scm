@@ -377,7 +377,7 @@
   ;; whether this compilation unit belongs to a program or not. in a
   ;; program, at least one import is required at the beginning. this is
   ;; set to #f for repl compilation units as well as inside libraries
-  ;; where imports are separte from library source.
+  ;; where imports are separate from library source.
   (program-mode? compilation-unit-program-mode?)
 
   ;; flag to indicate whether we've encountered the first non-import
