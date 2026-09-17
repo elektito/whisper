@@ -2498,6 +2498,10 @@ value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int na
     value port = next_arg();
     free_args();
 
+    if (GET_OBJECT(port)->port.closed) {
+        return FALSE;
+    }
+
     if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) {
         raise_error("%%char-ready? only works on input ports");
     }
