@@ -81,10 +81,16 @@ lib/libraylib.a lib/libraylib.so lib/libraylib.so.600 &:
 lib/raylib.manifest lib/raylib.so lib/raylib.a &: $(CURRENT) lib/raylib/raylib.sld lib/raylib/raylib.c lib/libraylib.a lib/libraylib.so
 	./$(CURRENT) lib/raylib/raylib.sld -l -o lib/raylib -f '-I lib -I $(RAYLIB_SRC)'
 
-lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a &: $(CURRENT) lib/srfi-151-bitwise/srfi-151-bitwise.sld lib/srfi-151-bitwise/bitwise.c lib/srfi-151-bitwise/bitwise-33.scm lib/srfi-151-bitwise/bitwise-60.scm lib/srfi-151-bitwise/bitwise-other.scm
-	./$(CURRENT) lib/srfi-151-bitwise/srfi-151-bitwise.sld -l -o lib/srfi-151 -f '-I lib'
+lib/srfi-1.manifest lib/srfi-1.so lib/srfi-1.a &: $(CURRENT) lib/srfi-8.manifest lib/srfi-1-list/srfi-1.sld lib/srfi-1-list/srfi-1.scm
+	./$(CURRENT) lib/srfi-1-list/srfi-1.sld -l -o lib/srfi-1 -f '-I lib'
 
-libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest lib/srfi-151.manifest
+lib/srfi-8.manifest lib/srfi-8.so lib/srfi-8.a &: $(CURRENT) lib/srfi-8-receive/srfi-8.sld lib/srfi-8-receive/srfi-8.scm
+	./$(CURRENT) lib/srfi-8-receive/srfi-8.sld -l -o lib/srfi-8 -f '-I lib'
+
+lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a &: $(CURRENT) lib/srfi-151-bitwise/srfi-151.sld lib/srfi-151-bitwise/bitwise.c lib/srfi-151-bitwise/bitwise-33.scm lib/srfi-151-bitwise/bitwise-60.scm lib/srfi-151-bitwise/bitwise-other.scm
+	./$(CURRENT) lib/srfi-151-bitwise/srfi-151.sld -l -o lib/srfi-151 -f '-I lib'
+
+libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-151.manifest
 
 clean:
 	rm -rf $(CURRENT) stage0 stage1 stage0-lib stage1-lib stage2-lib
