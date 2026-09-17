@@ -2075,7 +2075,7 @@
   (let* ((archive-flags (all-archive-flags (program-import-archives program)))
          (so-extra-flags (string-join (program-so-extra-flags program) " "))
          (filename (program-filename program))
-         (out-dir (path-dirname filename))
+         (out-dir (path-dirname out-file))
          (here (if filename (path-dirname (realpath filename)) "."))
          (extra-archives (program-extra-archives program))
          (extra-archives (string-join extra-archives " "))
