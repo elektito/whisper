@@ -247,6 +247,6 @@
       (if (cmdline-run args)
           (let ((cmd (format "$(realpath ~a)" (cmdline-executable-file args))))
             (let ((ret (system cmd)))
-              (if (cmdline-delete-executable args)
-                  (delete-file (cmdline-executable-file args)))
+              (when (cmdline-delete-executable args)
+                (delete-file (cmdline-executable-file args)))
               (exit ret)))))))
