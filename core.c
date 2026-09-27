@@ -1414,6 +1414,25 @@ static void file_unread_char(value port, value ch) {
     obj->port.file_buf[--obj->port.file_buf_pos] = GET_CHAR(ch);
 }
 
+/* reads up to n bytes from port into dest, stopping at EOF. returns the
+ * number of bytes actually read, from 0 (immediate EOF) up to n. */
+static size_t file_read_bytes(struct object *port, char *dest, size_t n) {
+    size_t total = 0;
+
+    while (total < n) {
+        ensure_buffer_filled(port);
+        size_t available = port->port.file_buf_size - port->port.file_buf_pos;
+        if (available == 0) { break; }
+
+        size_t bytes_read = available < n - total ? available : n - total;
+        memcpy(dest + total, port->port.file_buf + port->port.file_buf_pos, bytes_read);
+        port->port.file_buf_pos += bytes_read;
+        total += bytes_read;
+    }
+
+    return total;
+}
+
 /* call after appending buf/n to the port's buffer */
 static void flush_after_write(struct object *port, const char *buf, size_t n) {
     switch (port->port.file_buf_mode) {
@@ -3302,6 +3321,57 @@ value primcall_percent_read_char(environment env, enum call_flags flags, int nar
     return GET_OBJECT(port)->port.read_char(port);
 }
 
+value primcall_percent_read_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%%read-bytevector needs two arguments"); }
+    init_args();
+    value k = next_arg();
+    value port = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(k) || GET_FIXNUM(k) < 0) { raise_error("%%read-bytevector first argument must be a non-negative integer"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%read-bytevector second argument is not an input port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%read-bytevector only works on binary ports"); }
+
+    int64_t want = GET_FIXNUM(k);
+    if (want == 0) { return make_bytevector(0, 0); }
+
+    value bv = make_bytevector(want, 0);
+    size_t got = file_read_bytes(GET_OBJECT(port), GET_OBJECT(bv)->bytevector.data, want);
+    if (got == 0) { return EOFOBJ; }
+
+    if ((int64_t) got < want) {
+        GET_OBJECT(bv)->bytevector.data = realloc(GET_OBJECT(bv)->bytevector.data, got);
+        GET_OBJECT(bv)->bytevector.len = got;
+    }
+
+    return bv;
+}
+
+value primcall_percent_read_bytevector_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 4) { raise_error("%%read-bytevector! needs four arguments"); }
+    init_args();
+    value bv = next_arg();
+    value port = next_arg();
+    value start = next_arg();
+    value end = next_arg();
+    free_args();
+
+    if (!IS_BYTEVECTOR(bv)) { raise_error("%%read-bytevector! first argument is not a bytevector"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%read-bytevector! second argument is not an input port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%read-bytevector! only works on binary ports"); }
+    if (!IS_FIXNUM(start) || !IS_FIXNUM(end)) { raise_error("%%read-bytevector! start/end arguments must be integers"); }
+
+    int64_t len = GET_OBJECT(bv)->bytevector.len;
+    int64_t s = GET_FIXNUM(start);
+    int64_t e = GET_FIXNUM(end);
+    if (s < 0 || e > len || s > e) { raise_error("%%read-bytevector! start/end out of range"); }
+    if (s == e) { return FIXNUM(0); }
+
+    size_t got = file_read_bytes(GET_OBJECT(port), GET_OBJECT(bv)->bytevector.data + s, e - s);
+    if (got == 0) { return EOFOBJ; }
+    return FIXNUM(got);
+}
+
 value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("round needs a single argument"); }
     init_args();
@@ -3843,6 +3913,29 @@ value primcall_wrapped_set_print(environment env, enum call_flags flags, int nar
     wrapped_print_procs[n_wrapped_print_procs - 1].kind = kind;
     wrapped_print_procs[n_wrapped_print_procs - 1].proc = proc;
 
+    return VOID;
+}
+
+value primcall_percent_write_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 4) { raise_error("%%write-bytevector needs four arguments"); }
+    init_args();
+    value bv = next_arg();
+    value port = next_arg();
+    value start = next_arg();
+    value end = next_arg();
+    free_args();
+
+    if (!IS_BYTEVECTOR(bv)) { raise_error("%%write-bytevector first argument is not a bytevector"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write-bytevector second argument is not an output port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%write-bytevector only works on binary ports"); }
+    if (!IS_FIXNUM(start) || !IS_FIXNUM(end)) { raise_error("%%write-bytevector start/end arguments must be integers"); }
+
+    int64_t len = GET_OBJECT(bv)->bytevector.len;
+    int64_t s = GET_FIXNUM(start);
+    int64_t e = GET_FIXNUM(end);
+    if (s < 0 || e > len || s > e) { raise_error("%%write-bytevector start/end out of range"); }
+
+    file_write_bytes(port, GET_OBJECT(bv)->bytevector.data + s, e - s);
     return VOID;
 }
 
