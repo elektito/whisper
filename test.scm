@@ -2595,3 +2595,120 @@ and still a comment
        (result (input-port? port)))
   (close-input-port port)
   result)
+
+;; a helper for tests that need a real, self-contained filename
+(define (test-temp-path)
+  (let loop ((i 0) (bytes (urandom 6)) (hex ""))
+    (if (= i (string-length bytes))
+        (string-append "/tmp/whisper-test-" hex)
+        (let ((c (char->integer (string-ref bytes i))))
+          (loop (+ i 1) bytes
+                (string-append hex (if (< c 16) (format "0~x" c) (format "~x" c))))))))
+
+;; regression test: bytevector-u8-ref must not sign-extend bytes >= 128
+(let ((bv #u8(255 128 127 0)))
+  (equal? (list 255 128 127 0)
+          (list (bytevector-u8-ref bv 0)
+                (bytevector-u8-ref bv 1)
+                (bytevector-u8-ref bv 2)
+                (bytevector-u8-ref bv 3))))
+
+;; regression test: write/display print bytevectors as #u8(...), without
+;; sign-extending high bytes either
+(let ((out (open-output-string)))
+  (write #u8(1 2 3 255 0) out)
+  (equal? "#u8(1 2 3 255 0)" (get-output-string out)))
+
+(let ((out (open-output-string)))
+  (display #u8() out)
+  (equal? "#u8()" (get-output-string out)))
+
+;; write-string must copy an explicit byte range, not stop at an
+;; embedded NUL the way a c-string-oriented write would
+(let* ((s (string #\a #\b #\null #\c #\d))
+       (out (open-output-string)))
+  (write-string s out 0 5)
+  (let ((result (get-output-string out)))
+    (and (= 5 (string-length result))
+         (char=? #\null (string-ref result 2))
+         (char=? #\d (string-ref result 4)))))
+
+;; read-string reads up to k characters, fewer at eof, or the eof object
+;; if none are available
+(let ((in (open-input-string "hello world")))
+  (and (equal? "hello" (read-string 5 in))
+       (equal? " world" (read-string 100 in))
+       (eof-object? (read-string 1 in))))
+
+(equal? "" (read-string 0 (open-input-string "abc")))
+
+;; the bytevector i/o procedures only work on binary ports; a string
+;; port is textual and should be rejected
+(guard (e (#t #t))
+  (write-bytevector #u8(1 2 3) (open-output-string) 0 3)
+  #f)
+
+(guard (e (#t #t))
+  (read-bytevector 3 (open-input-string "abc"))
+  #f)
+
+(guard (e (#t #t))
+  (read-bytevector! (make-bytevector 3 0) (open-input-string "abc") 0 3)
+  #f)
+
+;; unread-char must still work right after a char that landed exactly on
+;; the read buffer's boundary and forced a refill
+(let* ((path (test-temp-path))
+       (fill (make-string 8191 #\a)))
+  (let ((out (open-output-file path)))
+    (write-string fill out)
+    (write-string "#t" out) ;; the '#' lands on byte 8192 (index 8191)
+    (close-port out))
+  (let* ((in (open-input-file path))
+         (result (begin
+                   (let loop ((n 8191))
+                     (when (> n 0) (read-char in) (loop (- n 1))))
+                   (let ((a (read-char in))  ;; the '#', last byte before a refill
+                         (b (read-char in))) ;; forces the refill, reads 't'
+                     (unread-char b in)
+                     (unread-char a in)
+                     (list a b (read-char in) (read-char in))))))
+    (close-port in)
+    (delete-file path)
+    (equal? (list #\# #\t #\# #\t) result)))
+
+;; a binary port round trip: write a bytevector out and read the exact
+;; same bytes back, including bytes >= 128
+(let* ((path (test-temp-path))
+       (data #u8(1 2 3 255 0 128 127)))
+  (let ((out (open-binary-output-file path)))
+    (write-bytevector data out)
+    (close-port out))
+  (let* ((in (open-binary-input-file path))
+         (got (read-bytevector (bytevector-length data) in))
+         (at-eof? (eof-object? (read-bytevector 1 in))))
+    (close-port in)
+    (delete-file path)
+    (and at-eof? (equal? data got))))
+
+;; read-bytevector! with an explicit start/end, including a request that
+;; runs past what the file actually has left
+(let ((path (test-temp-path)))
+  (let ((out (open-binary-output-file path)))
+    (write-bytevector #u8(10 20 30) out)
+    (close-port out))
+  (let* ((in (open-binary-input-file path))
+         (bv (make-bytevector 5 0))
+         (n (read-bytevector! bv in 1 5))) ;; asks for 4, only 3 remain
+    (close-port in)
+    (delete-file path)
+    (and (= n 3) (equal? #u8(0 10 20 30 0) bv))))
+
+;; a plain (textual) file port is rejected the same way a string port
+;; is: write-bytevector requires a binary port regardless of port kind
+(let* ((path (test-temp-path))
+       (out (open-output-file path))
+       (raised? (guard (e (#t #t)) (write-bytevector #u8(1) out 0 1) #f)))
+  (close-port out)
+  (delete-file path)
+  raised?)
