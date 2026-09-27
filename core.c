@@ -1663,21 +1663,9 @@ static void _display_pair(struct pair *v, value port, int in_the_middle) {
     }
 }
 
-/* vec is an untagged pointer. Safe only because _display never
-   allocates. If that changes, the conservative GC could miss the vector
-   and collect it. */
-static void _display_vector(struct object *vec, value port) {
-    GET_OBJECT(port)->port.printf(port, "#(");
-    for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
-        _display(GET_OBJECT(vec)->vector.data[i], port);
-        if (i != GET_OBJECT(vec)->vector.len - 1) {
-            GET_OBJECT(port)->port.printf(port, " ");
-        }
-    }
-    GET_OBJECT(port)->port.printf(port, ")");
-}
-
 static void _write_flonum(float f, value port);
+static void _write_vector(struct object *vec, value port);
+static void _write_bytevector(struct object *vec, value port);
 static void _display(value v, value port) {
     if (IS_FIXNUM(v)) {
         GET_OBJECT(port)->port.printf(port, "%ld", GET_FIXNUM(v));
@@ -1696,7 +1684,9 @@ static void _display(value v, value port) {
     } else if (IS_PAIR(v)) {
         _display_pair(GET_PAIR(v), port, 0);
     } else if (IS_VECTOR(v)) {
-        _display_vector(GET_OBJECT(v), port);
+        _write_vector(GET_OBJECT(v), port);
+    } else if (IS_BYTEVECTOR(v)) {
+        _write_bytevector(GET_OBJECT(v), port);
     } else if (IS_FLONUM(v)) {
         _write_flonum(GET_FLONUM(v), port);
     } else {
