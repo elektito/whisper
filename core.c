@@ -2,12 +2,23 @@
 
 #include <dirent.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <poll.h>
 
 #include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdint.h>
+#include <sys/poll.h>
+#include <unistd.h>
+
+#define FILE_BUFFER_SIZE 8192
+
+/* bytes of consumed input kept at the front of the buffer across a
+ * refill, so unread-char still works right after buffe refill */
+#define FILE_PUSHBACK 4
+
+static void cleanup(void);
 
 /*************** static variables **************/
 
@@ -207,7 +218,6 @@ __attribute__((noreturn, cold))
 static void terminate_with_message(const char *msg, size_t len) {
     print_stacktrace();
     fprintf(stderr, "exception: %.*s\n", (int) len, msg);
-    cleanup();
     exit(1);
 }
 
@@ -259,7 +269,6 @@ void panic(const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fprintf(stderr, "\n");
-    cleanup();
     exit(1);
 }
 
@@ -905,6 +914,7 @@ static void gc_sweep_env_ht_each(value k, value v, void *ctx) {
     free(binding);
 }
 
+static int try_flush_file_buffer(struct object *port);
 static void gc_free_block(void *p, struct pool *heap) {
     void *v = p + ALIGN8(sizeof(struct block));
     if (heap == symbols_heap) {
@@ -917,7 +927,13 @@ static void gc_free_block(void *p, struct pool *heap) {
         struct object *obj = (struct object *) v;
         switch (obj->type) {
         case OBJ_PORT:
+            if (!obj->port.is_closed && obj->port.fd >= 0) {
+                /* best effort flush. we can't raise here */
+                if (obj->port.file_buf && obj->port.is_output) { try_flush_file_buffer(obj); }
+                close(obj->port.fd);
+            }
             free(obj->port.filename);
+            free(obj->port.file_buf);
             free(obj->port.string);
             break;
         case OBJ_VECTOR:
@@ -1265,7 +1281,7 @@ value make_bytevector(size_t len, uint8_t byte) {
 }
 
 
-/************ display/write helper functions ***********/
+/************ port helper functions ***********/
 
 static char *strz(value str) {
     char *buf = malloc(GET_STRING(str)->len + 1);
@@ -1274,68 +1290,223 @@ static char *strz(value str) {
     return buf;
 }
 
-static value file_read_line(value port) {
-    FILE *fp = GET_OBJECT(port)->port.fp;
-    char buf[256];
-    char *r = fgets(buf, sizeof(buf), fp);
-    if (!r) {
-        if (feof(fp)) { return EOFOBJ; };
-        raise_error("cannot read from file: %s", strerror(errno));
+static void alloc_file_buf(struct object *port) {
+    if (!port->port.file_buf) {
+        port->port.file_buf = malloc(FILE_PUSHBACK + FILE_BUFFER_SIZE);
     }
+}
 
-    size_t len = strlen(buf);
-    if (buf[len-1] == '\n') len--;
-    struct string *str = GET_STRING(make_string(buf, len));
+/* returns 0 on success or -1 on failure with errno set. never raises,
+ * so it is safe to call from the GC sweep and from cleanup(). on
+ * failure the buffered data is dropped. */
+static int try_flush_file_buffer(struct object *port) {
+    size_t total_bytes_written = 0;
 
-    while (len == sizeof(buf) - 1) {
-        r = fgets(buf, sizeof(buf), fp);
-        if (!r && !feof(fp)) {
-            raise_error("cannot read from file: %s", strerror(errno));
+    while (total_bytes_written < port->port.file_buf_size) {
+        ssize_t bytes_written = write(port->port.fd,
+                                      port->port.file_buf + total_bytes_written,
+                                      port->port.file_buf_size - total_bytes_written);
+        if (bytes_written < 0) {
+            if (errno == EINTR) { continue; }
+            port->port.file_buf_size = 0;
+            return -1;
         }
 
-        len = strlen(buf);
-        if (buf[len-1] == '\n') len--;
-        str->s = realloc(str->s, str->len + len + 1);
-        memcpy(str->s + str->len, buf, len + 1);
-        str->len += len;
+        total_bytes_written += bytes_written;
     }
 
-    return STRING(str);
+    port->port.file_buf_size = 0;
+    return 0;
+}
+
+/* the standard ports have no filename */
+static const char *port_name(struct object *port) {
+    if (port->port.filename) { return port->port.filename; }
+
+    switch (port->port.fd) {
+    case STDIN_FILENO: return "<stdin>";
+    case STDOUT_FILENO: return "<stdout>";
+    case STDERR_FILENO: return "<stderr>";
+    default: return "<unnamed>";
+    }
+}
+
+static void flush_file_buffer(struct object *port) {
+    if (try_flush_file_buffer(port) < 0) {
+        raise_file_error("cannot write to file '%s': %s", port_name(port), strerror(errno));
+    }
+}
+
+/* runs at exit. flushes all buffered output, including file ports that
+ * were never closed. it never raises, and it is safe to call more than
+ * once. */
+static void cleanup(void) {
+    /* these two first, so they still get out if the heap walk below
+     * goes wrong on a corrupted heap */
+    if (stdout_port) { try_flush_file_buffer(GET_OBJECT(stdout_port)); }
+    if (stderr_port) { try_flush_file_buffer(GET_OBJECT(stderr_port)); }
+
+    for (struct pool *pool = objects_heap; pool; pool = pool->next) {
+        for (void *p = pool->start; p < pool->end; p += pool->block_size) {
+            struct block *block = p;
+            if (!block->in_use) { continue; }
+
+            struct object *obj = p + ALIGN8(sizeof(struct block));
+            if (obj->type == OBJ_PORT && obj->port.is_output && !obj->port.is_closed && obj->port.file_buf) {
+                try_flush_file_buffer(obj);
+            }
+        }
+    }
+}
+
+static void ensure_buffer_filled(struct object *port) {
+    if (port->port.is_closed) { raise_file_error("cannot read from a closed port"); }
+
+    if (port->port.file_buf_pos < port->port.file_buf_size) {
+        /* already some data in the buffer */
+        return;
+    }
+
+    alloc_file_buf(port);
+
+    /* we are about to block waiting for input. flush stdout first so
+     * that a prompt written without a trailing newline is visible. */
+    if (port->port.fd == STDIN_FILENO && stdout_port) {
+        try_flush_file_buffer(GET_OBJECT(stdout_port));
+    }
+
+    /* the buffer is fully consumed here (pos == size), so its tail is
+     * the most recently read input. keep some of it in front. */
+    size_t keep = port->port.file_buf_pos < FILE_PUSHBACK ? port->port.file_buf_pos : FILE_PUSHBACK;
+    memmove(port->port.file_buf, port->port.file_buf + port->port.file_buf_pos - keep, keep);
+
+    ssize_t bytes_read = read(port->port.fd, port->port.file_buf + keep, FILE_BUFFER_SIZE);
+    if (bytes_read < 0) {
+        raise_file_error("cannot read from file '%s': %s", port_name(port), strerror(errno));
+    }
+
+    port->port.file_buf_size = keep + bytes_read;
+    port->port.file_buf_pos = keep;
 }
 
 static value file_read_char(value port) {
-    FILE *fp = GET_OBJECT(port)->port.fp;
-    char ch = getc(fp);
-    if (ch == EOF) return EOFOBJ;
+    struct object *obj = GET_OBJECT(port);
+    ensure_buffer_filled(obj);
+    if (obj->port.file_buf_pos == obj->port.file_buf_size) { return EOFOBJ; }
+    char ch = GET_OBJECT(port)->port.file_buf[obj->port.file_buf_pos++];
     return CHAR(ch);
 }
 
 static value file_peek_char(value port) {
-    FILE *fp = GET_OBJECT(port)->port.fp;
-    char ch = getc(fp);
-    if (ch == EOF) return EOFOBJ;
-    ungetc(ch, fp);
+    struct object *obj = GET_OBJECT(port);
+    ensure_buffer_filled(obj);
+    if (obj->port.file_buf_pos == obj->port.file_buf_size) { return EOFOBJ; }
+    char ch = GET_OBJECT(port)->port.file_buf[obj->port.file_buf_pos];
     return CHAR(ch);
 }
 
 static void file_unread_char(value port, value ch) {
-    FILE *fp = GET_OBJECT(port)->port.fp;
-    int ret = ungetc(GET_CHAR(ch), fp);
-    if (ret == EOF) { raise_error("error unreading character"); }
+    struct object *obj = GET_OBJECT(port);
+    if (obj->port.file_buf_pos == 0) {
+        raise_file_error("unread-char without a preceding read-char");
+    }
+
+    obj->port.file_buf[--obj->port.file_buf_pos] = GET_CHAR(ch);
+}
+
+/* call after appending buf/n to the port's buffer */
+static void flush_after_write(struct object *port, const char *buf, size_t n) {
+    switch (port->port.file_buf_mode) {
+    case FILE_BUFFER_FULL:
+        break;
+    case FILE_BUFFER_LINE:
+        if (memchr(buf, '\n', n)) { flush_file_buffer(port); }
+        break;
+    case FILE_BUFFER_NONE:
+        flush_file_buffer(port);
+        break;
+    }
 }
 
 static void file_write_char(value port, value ch) {
-    FILE *fp = GET_OBJECT(port)->port.fp;
-    int ret = putc(GET_CHAR(ch), fp);
-    if (ret == EOF) { raise_error("error writing to file: %s", strerror(errno)); }
+    struct object *obj = GET_OBJECT(port);
+    char c = GET_CHAR(ch);
+
+    if (obj->port.is_closed) { raise_file_error("cannot write to a closed port"); }
+    alloc_file_buf(obj);
+
+    if (obj->port.file_buf_size == FILE_BUFFER_SIZE) {
+        flush_file_buffer(obj);
+    }
+
+    obj->port.file_buf[obj->port.file_buf_size++] = c;
+    flush_after_write(obj, &c, 1);
+}
+
+static void file_write_bytes(value port, const char *buf, size_t n) {
+    struct object *port_obj = GET_OBJECT(port);
+
+    if (port_obj->port.is_closed) { raise_file_error("cannot write to a closed port"); }
+    alloc_file_buf(port_obj);
+
+    if (port_obj->port.file_buf_size + n < FILE_BUFFER_SIZE) {
+        memcpy(port_obj->port.file_buf + port_obj->port.file_buf_size, buf, n);
+        port_obj->port.file_buf_size += n;
+    } else {
+        flush_file_buffer(port_obj);
+
+        size_t bytes_written = 0;
+        while (n - bytes_written >= FILE_BUFFER_SIZE) {
+            ssize_t n_written = write(port_obj->port.fd, buf + bytes_written, n - bytes_written);
+            if (n_written < 0) {
+                if (errno == EINTR) continue;
+                raise_file_error("cannot write to file '%s': %s", port_name(port_obj), strerror(errno));
+            }
+
+            bytes_written += n_written;
+        }
+
+        if (n > bytes_written) {
+            memcpy(port_obj->port.file_buf, buf + bytes_written, n - bytes_written);
+            port_obj->port.file_buf_size = n - bytes_written;
+        } else {
+            port_obj->port.file_buf_size = 0;
+        }
+    }
+
+    flush_after_write(port_obj, buf, n);
 }
 
 static void file_printf(value port, const char *fmt, ...) {
-    FILE *fp = GET_OBJECT(port)->port.fp;
+    char stack_buf[512]; /* for a no-alloc fast path */
+
     va_list args;
+    va_list args_copy;
+
     va_start(args, fmt);
-    vfprintf(fp, fmt, args);
+    va_copy(args_copy, args);
+    int n = vsnprintf(stack_buf, sizeof(stack_buf), fmt, args_copy);
+    va_end(args_copy);
+
+    if (n < 0) {
+        va_end(args);
+        raise_error("internal error: bad printf format string: '%s'", fmt);
+    }
+
+    /* fast path: string fits inside stack buffer */
+    if ((size_t) n < sizeof(stack_buf)) {
+        file_write_bytes(port, stack_buf, n);
+        va_end(args);
+        return;
+    }
+
+    /* slow path: allocate n+1 bytes (one extra for the null terminator) */
+    char *heap_buf = malloc(n + 1);
+    vsnprintf(heap_buf, n + 1, fmt, args);
     va_end(args);
+
+    file_write_bytes(port, heap_buf, n);
+    free(heap_buf);
 }
 
 static value string_read_char(value port) {
@@ -1346,16 +1517,6 @@ static value string_read_char(value port) {
 static value string_peek_char(value port) {
     if (GET_OBJECT(port)->port.string_pos >= GET_OBJECT(port)->port.string_len) return EOFOBJ;
     return CHAR(GET_OBJECT(port)->port.string[GET_OBJECT(port)->port.string_pos]);
-}
-
-static value string_read_line(value port) {
-    if (GET_OBJECT(port)->port.string_pos >= GET_OBJECT(port)->port.string_len) return EOFOBJ;
-    int64_t start = GET_OBJECT(port)->port.string_pos;
-    int64_t pos = start;
-    while (pos < GET_OBJECT(port)->port.string_len && GET_OBJECT(port)->port.string[pos] != '\n') pos++;
-    value str = make_string(GET_OBJECT(port)->port.string + start, pos - start);
-    GET_OBJECT(port)->port.string_pos = pos < GET_OBJECT(port)->port.string_len ? pos + 1 : pos;
-    return str;
 }
 
 static void string_unread_char(value port, value ch) {
@@ -1413,7 +1574,7 @@ static void print_unprintable(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "#<eof-object>");
     } else if (IS_PORT(v)) {
         struct object *op = GET_OBJECT(v);
-        const char *dir = op->port.direction == PORT_DIR_READ ? "input" : "output";
+        const char *dir = (op->port.is_input && op->port.is_output) ? "input/output" : (op->port.is_input ? "input" : "output");
         const char *kind = op->port.string ? "string-" : "";
         if (op->port.filename) {
             GET_OBJECT(port)->port.printf(port, "#<%s-%sport \"%s\">", dir, kind, op->port.filename);
@@ -1956,26 +2117,27 @@ value get_global_env(void) {
 static void init_ports() {
     struct object *in = alloc_object();
     in->type = OBJ_PORT;
-    in->port.direction = PORT_DIR_READ;
-    in->port.fp = stdin;
+    in->port.is_input = 1;
+    in->port.fd = STDIN_FILENO;
     in->port.read_char = file_read_char;
     in->port.peek_char = file_peek_char;
-    in->port.read_line = file_read_line;
     in->port.unread_char = file_unread_char;
     stdin_port = OBJECT(in);
 
     struct object *out = alloc_object();
     out->type = OBJ_PORT;
-    out->port.direction = PORT_DIR_WRITE;
-    out->port.fp = stdout;
+    out->port.is_output = 1;
+    out->port.fd = STDOUT_FILENO;
+    out->port.file_buf_mode = isatty(STDOUT_FILENO) ? FILE_BUFFER_LINE : FILE_BUFFER_FULL;
     out->port.printf = file_printf;
     out->port.write_char = file_write_char;
     stdout_port = OBJECT(out);
 
     struct object *err = alloc_object();
     err->type = OBJ_PORT;
-    err->port.direction = PORT_DIR_WRITE;
-    err->port.fp = stderr;
+    err->port.is_output = 1;
+    err->port.fd = STDERR_FILENO;
+    err->port.file_buf_mode = FILE_BUFFER_NONE;
     err->port.printf = file_printf;
     err->port.write_char = file_write_char;
     stderr_port = OBJECT(err);
@@ -2048,6 +2210,7 @@ void init_runtime(void) {
     init_memory();
     init_symbols();
     init_ports();
+    atexit(cleanup);
 }
 
 /************ primcall functions ***********/
@@ -2492,41 +2655,52 @@ value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
     return BOOL(IS_CHAR(x));
 }
 
+value primcall_percent_char_ready_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%char-ready? needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+
+    if (!IS_PORT(port)) { raise_error("%%char-ready argument is not a port"); }
+    if (GET_OBJECT(port)->port.is_closed) { return FALSE; }
+    if (!GET_OBJECT(port)->port.is_input || GET_OBJECT(port)->port.is_binary) { raise_error("%%char-ready? only works on textual ports"); }
+    if (GET_OBJECT(port)->port.string) { return TRUE; }
+    if (GET_OBJECT(port)->port.file_buf_pos < GET_OBJECT(port)->port.file_buf_size) { return TRUE; }
+
+    struct pollfd pfd = { .fd = GET_OBJECT(port)->port.fd, .events = POLLIN};
+    int r = poll(&pfd, 1, 0);
+
+    /* POLLHUP = EOF, which still means we should return true. we also
+     * return true on POLLERR so the user can then call a read function
+     * and get a proper error. we've also included POLLNVAL for
+     * robustness but the fd should never really be invalid. */
+    if (r > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("%%u8-ready? needs a single argument"); }
     init_args();
     value port = next_arg();
     free_args();
 
-    if (GET_OBJECT(port)->port.closed) {
-        return FALSE;
-    }
+    if (!IS_PORT(port)) { raise_error("%%u8-ready argument is not a port"); }
+    if (GET_OBJECT(port)->port.is_closed) { return FALSE; }
+    if (!GET_OBJECT(port)->port.is_input || !GET_OBJECT(port)->port.is_binary) { raise_error("%%u8-ready? only works on binary input ports"); }
+    if (GET_OBJECT(port)->port.string) { return TRUE; }
+    if (GET_OBJECT(port)->port.file_buf_pos < GET_OBJECT(port)->port.file_buf_size) { return TRUE; }
 
-    if (GET_OBJECT(port)->port.direction != PORT_DIR_READ) {
-        raise_error("%%u8-ready? only works on input ports");
-    }
-
-    if (GET_OBJECT(port)->port.string) {
-        return TRUE;
-    }
-
-    FILE *fp = GET_OBJECT(port)->port.fp;
-
-    /* FIXME check if there's any data buffered in the FILE. this is
-     * non-portable (glibc specific). the correct way to handle this is
-     * probably to not rely on FILE* and use OS system calls directly,
-     * and optionally implement our own buffering. */
-    int chars_in_buffer = (fp->_IO_read_ptr != NULL && (fp->_IO_read_ptr < fp->_IO_read_end));
-    if (chars_in_buffer) {
-        return TRUE;
-    }
-
-    int fd = fileno(fp);
-    struct pollfd pfd = { .fd = fd, .events = POLLIN};
+    struct pollfd pfd = { .fd = GET_OBJECT(port)->port.fd, .events = POLLIN};
     int r = poll(&pfd, 1, 0);
 
-    /* POLLHUP = EOF, which  still means we should return true */
-    if (r > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+    /* POLLHUP = EOF, which still means we should return true. we also
+     * return true on POLLERR so the user can then call a read function
+     * and get a proper error. we've also included POLLNVAL for
+     * robustness but the fd should never really be invalid. */
+    if (r > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) {
         return TRUE;
     }
 
@@ -2538,12 +2712,16 @@ value primcall_close_port(environment env, enum call_flags flags, int nargs, ...
     value port = next_arg();
     free_args();
     if (!IS_PORT(port)) { raise_error("close-port argument is not a port"); }
-    if (GET_OBJECT(port)->port.closed) return VOID;
+    if (GET_OBJECT(port)->port.is_closed) { return VOID; }
 
-    if (GET_OBJECT(port)->port.fp) {
-        int ret = fclose(GET_OBJECT(port)->port.fp);
-        if (ret) { raise_error("failed to close the port: %s", strerror(errno)); }
-        GET_OBJECT(port)->port.closed = 1;
+    if (GET_OBJECT(port)->port.is_output && GET_OBJECT(port)->port.file_buf) {
+        flush_file_buffer(GET_OBJECT(port));
+    }
+
+    if (GET_OBJECT(port)->port.fd >= 0) {
+        int ret = close(GET_OBJECT(port)->port.fd);
+        if (ret == -1) { raise_error("failed to close the port: %s", strerror(errno)); }
+        GET_OBJECT(port)->port.is_closed = 1;
     }
 
     return VOID;
@@ -2599,7 +2777,7 @@ value primcall_percent_display(environment env, enum call_flags flags, int nargs
     value port = next_arg();
     free_args();
     if (!IS_PORT(port)) { raise_error("writing to non-port"); }
-    if (GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("writing to non-output port"); }
+    if (!GET_OBJECT(port)->port.is_output) { raise_error("writing to non-output port"); }
     _display(v, port);
     return VOID;
 }
@@ -2700,7 +2878,6 @@ value primcall_percent_exit(environment env, enum call_flags flags, int nargs, .
     value code = next_arg();
     free_args();
     if (!IS_FIXNUM(code)) { raise_error("%%exit aregument is not an integer"); }
-    cleanup();
     exit(GET_FIXNUM(code));
     return VOID;
 }
@@ -2711,10 +2888,9 @@ value primcall_percent_flush_output_port(environment env, enum call_flags flags,
     value port = next_arg();
     free_args();
     if (!IS_PORT(port)) { raise_error("%%flush-output-port argument is not a port"); }
+    if (!GET_OBJECT(port)->port.is_output) { raise_error("%%flush-output-port argument is not an output port"); }
 
-    if (GET_OBJECT(port)->port.fp) {
-        fflush(GET_OBJECT(port)->port.fp);
-    }
+    flush_file_buffer(GET_OBJECT(port));
 
     return VOID;
 }
@@ -2776,7 +2952,7 @@ value primcall_get_output_string(environment env, enum call_flags flags, int nar
     init_args();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE || GET_OBJECT(port)->port.string == NULL) { raise_error("argument is not an output string port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output || GET_OBJECT(port)->port.string == NULL) { raise_error("argument is not an output string port"); }
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
 }
 
@@ -2800,7 +2976,7 @@ value primcall_input_port_q(environment env, enum call_flags flags, int nargs, .
     init_args();
     value v = next_arg();
     free_args();
-    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_READ);
+    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.is_input);
 }
 
 value primcall_integer_to_char(environment env, enum call_flags flags, int nargs, ...) {
@@ -2903,7 +3079,7 @@ value primcall_percent_newline(environment env, enum call_flags flags, int nargs
     init_args();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("%%newline argument is not an output port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%newline argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, CHAR('\n'));
     return VOID;
 }
@@ -2983,18 +3159,22 @@ value primcall_open_input_file(environment env, enum call_flags flags, int nargs
     free_args();
     if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
     struct object *obj = alloc_object();
+
+    /* make the object a valid port before open() can fail. otherwise
+     * the GC would later see a zeroed object, which looks like a port
+     * with fd 0 */
+    obj->type = OBJ_PORT;
+    obj->port.fd = -1;
     int filename_len = GET_STRING(filename)->len;
     obj->port.filename = malloc(filename_len + 1);
     snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
-    FILE *fp = fopen(obj->port.filename, "r");
-    if (!fp) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
+    int fd = open(obj->port.filename, O_RDONLY);
+    if (fd == -1) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
 
-    obj->type = OBJ_PORT;
-    obj->port.direction = PORT_DIR_READ;
-    obj->port.fp = fp;
+    obj->port.is_input = 1;
+    obj->port.fd = fd;
     obj->port.read_char = file_read_char;
     obj->port.peek_char = file_peek_char;
-    obj->port.read_line = file_read_line;
     obj->port.unread_char = file_unread_char;
     return OBJECT(obj);
 }
@@ -3007,15 +3187,14 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     if (!IS_STRING(str)) { raise_error("open-input-string argument is not a string"); }
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
-    obj->port.direction = PORT_DIR_READ;
+    obj->port.is_input = 1;
     obj->port.string_len = GET_STRING(str)->len;
     obj->port.string_pos = 0;
     obj->port.string = malloc(obj->port.string_len);
-    obj->port.fp = 0;
+    obj->port.fd = -1;
     memcpy(obj->port.string, GET_STRING(str)->s, obj->port.string_len);
     obj->port.read_char = string_read_char;
     obj->port.peek_char = string_peek_char;
-    obj->port.read_line = string_read_line;
     obj->port.unread_char = string_unread_char;
     return OBJECT(obj);
 }
@@ -3026,14 +3205,18 @@ value primcall_open_output_file(environment env, enum call_flags flags, int narg
     value filename = next_arg();
     free_args();
     if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
-    char *filenamez = strz(GET_STRING(filename));
-    FILE *fp = fopen(filenamez, "w");
-    if (!fp) { raise_file_error("error opening file '%s': %s", filenamez, strerror(errno)); }
-    free(filenamez);
     struct object *obj = alloc_object();
+
+    /* same as open-input-file. the port owns the filename from the
+     * start, so a failed open() does not leak it */
     obj->type = OBJ_PORT;
-    obj->port.direction = PORT_DIR_WRITE;
-    obj->port.fp = fp;
+    obj->port.fd = -1;
+    obj->port.filename = strz(GET_STRING(filename));
+    int fd = open(obj->port.filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
+
+    obj->port.fd = fd;
+    obj->port.is_output = 1;
     obj->port.printf = file_printf;
     obj->port.write_char = file_write_char;
     return OBJECT(obj);
@@ -3043,13 +3226,13 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     if (nargs != 0) { raise_error("open-output-string accepts no arguments"); }
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
-    obj->port.direction = PORT_DIR_WRITE;
+    obj->port.is_output = 1;
     obj->port.string = malloc(128);
     obj->port.string_cap = 128;
     obj->port.string_len = 0;
     obj->port.printf = string_printf;
     obj->port.write_char = string_write_char;
-    obj->port.fp = 0;
+    obj->port.fd = -1;
     return OBJECT(obj);
 }
 
@@ -3058,7 +3241,7 @@ value primcall_output_port_q(environment env, enum call_flags flags, int nargs, 
     init_args();
     value v = next_arg();
     free_args();
-    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.direction == PORT_DIR_WRITE);
+    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.is_output);
 }
 
 value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -3074,7 +3257,7 @@ value primcall_percent_peek_char(environment env, enum call_flags flags, int nar
     init_args();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%%peek-char argument is not an input port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%peek-char argument is not an input port"); }
     return GET_OBJECT(port)->port.peek_char(port);
 }
 
@@ -3099,26 +3282,8 @@ value primcall_percent_read_char(environment env, enum call_flags flags, int nar
     init_args();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%%read-char argument is not an input port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%read-char argument is not an input port"); }
     return GET_OBJECT(port)->port.read_char(port);
-}
-
-value primcall_percent_read_line(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("%%read-line needs a single argument"); }
-    init_args();
-    value port = next_arg();
-    free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%%read-line argument is not an input port"); }
-    return GET_OBJECT(port)->port.read_line(port);
-}
-
-value primcall_read_line(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0 && nargs != 1) { raise_error("read-line needs zero or one argument"); }
-    init_args();
-    value port = nargs == 1 ? next_arg() : stdin_port;
-    free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("read-line argument is not an input port"); }
-    return GET_OBJECT(port)->port.read_line(port);
 }
 
 value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
@@ -3520,7 +3685,7 @@ value primcall_percent_unread_char(environment env, enum call_flags flags, int n
     value port = next_arg();
     if (!IS_PORT(port)) { raise_error("%%unread-char second argument is not a port"); }
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_READ) { raise_error("%%unread-char argument is not an input port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%unread-char argument is not an input port"); }
     GET_OBJECT(port)->port.unread_char(port, ch);
     return VOID;
 }
@@ -3671,7 +3836,7 @@ value primcall_percent_write(environment env, enum call_flags flags, int nargs, 
     value v = next_arg();
     value port = next_arg();
     free_args();
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("%%write second argument is not an output port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write second argument is not an output port"); }
     _write(v, port);
     return VOID;
 }
@@ -3683,7 +3848,7 @@ value primcall_percent_write_char(environment env, enum call_flags flags, int na
     value port = next_arg();
     free_args();
     if (!IS_CHAR(ch)) { raise_error("%%write-char first argument is not a char"); }
-    if (!IS_PORT(port) || GET_OBJECT(port)->port.direction != PORT_DIR_WRITE) { raise_error("%%write-char second argument is not an output port"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write-char second argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, ch);
     return VOID;
 }

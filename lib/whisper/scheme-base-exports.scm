@@ -40,7 +40,7 @@
         cdr
         ceiling
         char->integer
-        char-ready?
+        ;char-ready?
         char-whitespace?
         char<=?
         char<?
@@ -181,6 +181,7 @@
         truncate/
         truncate-quotient
         truncate-remainder
+        u8-ready?
         unless
         unquote
         unquote-splicing

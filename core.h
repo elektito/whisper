@@ -219,9 +219,10 @@ enum object_type {
     OBJ_CONTINUATION,
 };
 
-enum port_direction {
-    PORT_DIR_READ,
-    PORT_DIR_WRITE,
+enum file_buffer_mode {
+    FILE_BUFFER_FULL, /* flush only when the buffer fills up, on flush or on close */
+    FILE_BUFFER_LINE, /* also flush after any output containing a newline */
+    FILE_BUFFER_NONE, /* flush after every write */
 };
 
 enum error_type {
@@ -236,17 +237,22 @@ struct object {
             struct hash_table ht;
         } hash_table;
         struct {
-            int direction;
-            int closed;
-            FILE *fp;
+            int is_input;
+            int is_output;
+            int is_binary;
+            int file_buf_mode; /* enum file_buffer_mode, output ports only */
+            int is_closed;
+            int fd;
             char *filename;
+            char *file_buf;
+            size_t file_buf_size;
+            size_t file_buf_pos;
             char *string;
             int64_t string_cap;
             int64_t string_len;
             int64_t string_pos;
             value (*read_char)(value port);
             value (*peek_char)(value port);
-            value (*read_line)(value port);
             void (*unread_char)(value port, value ch);
             void (*write_char)(value port, value ch);
             void (*printf)(value port, const char *fmt, ...);
@@ -432,8 +438,6 @@ struct pool {
 
 /************ small/inline static functions ***********/
 
-static void cleanup(void) {}
-
 static value envget(environment env, int index) {
     value *vars = env;
     return vars[index];
@@ -540,6 +544,7 @@ extern value primcall_cdar(environment env, enum call_flags flags, int nargs, ..
 extern value primcall_cddr(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_ceiling(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_downcase(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_percent_char_ready_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_upcase(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_to_integer(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_q(environment env, enum call_flags flags, int nargs, ...);

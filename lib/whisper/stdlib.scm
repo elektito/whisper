@@ -1461,8 +1461,24 @@
 
 (define read-line
   (case-lambda
-   (() (%read-line (current-input-port)))
-   ((port) (%read-line port))))
+   (() (read-line (current-input-port)))
+   ((port)
+    (let loop ((acc '()))
+      (let ((ch (read-char port)))
+        (cond ((eof-object? ch)
+               (if (null? acc)
+                   ch ; return eof object if no bytes read
+                   (list->string (reverse acc))))
+              ((char=? ch #\newline)
+               (list->string (reverse acc)))
+              ((char=? ch #\return)
+               (let ((next (peek-char port)))
+                 (when (and (not (eof-object? next))
+                            (char=? next #\newline))
+                   ;; consume the \n too
+                   (read-char port))
+                 (list->string (reverse acc))))
+              (else (loop (cons ch acc)))))))))
 
 (define unread-char
   (case-lambda
@@ -1486,9 +1502,14 @@
    ((str port start) (write-string str port start (string-length str)))
    ((str port start end) (%display (substring str start end) port))))
 
-(define char-ready?
+#;(define char-ready?
   (case-lambda
-   (() (char-ready? (current-input-port)))
+   (() (%char-ready? (current-input-port)))
+   ((port) (%char-ready? port))))
+
+(define u8-ready?
+  (case-lambda
+   (() (%u8-ready? (current-input-port)))
    ((port) (%u8-ready? port))))
 
 (define flush-output-port
