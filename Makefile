@@ -27,11 +27,11 @@ all: $(CURRENT)
 # each bootstrap stage needs its own (whisper) library built by the
 # previous stage before it can compile main.scm. stageN-lib is the
 # library used to build stageN's compiler.
-stage0-lib/whisper.manifest stage0-lib/whisper.so stage0-lib/whisper.a &: $(WHISPER_LIB_SRC)
+stage0-lib/whisper.manifest stage0-lib/whisper.so stage0-lib/whisper.a &: prev/core.h prev/core.c $(WHISPER_LIB_SRC)
 	mkdir -p stage0-lib
 	./$(PREV) lib/whisper/whisper.sld -l -o stage0-lib/whisper -C prev
 
-stage0: stage0-lib/whisper.manifest $(SRC_FILES)
+stage0: stage0-lib/whisper.manifest prev/core.h prev/core.c $(SRC_FILES)
 	./$(PREV) main.scm -o stage0 -C prev -L stage0-lib
 
 stage1-lib/whisper.manifest stage1-lib/whisper.so stage1-lib/whisper.a &: stage0 core.h $(WHISPER_LIB_SRC)
