@@ -1416,7 +1416,8 @@ static void file_unread_char(value port, value ch) {
 
 /* reads up to n bytes from port into dest, stopping at EOF. returns the
  * number of bytes actually read, from 0 (immediate EOF) up to n. */
-static size_t file_read_bytes(struct object *port, char *dest, size_t n) {
+static size_t file_read_bytes(struct object *port, void *dest, size_t n) {
+    char *d = dest;
     size_t total = 0;
 
     while (total < n) {
@@ -1425,7 +1426,7 @@ static size_t file_read_bytes(struct object *port, char *dest, size_t n) {
         if (available == 0) { break; }
 
         size_t bytes_read = available < n - total ? available : n - total;
-        memcpy(dest + total, port->port.file_buf + port->port.file_buf_pos, bytes_read);
+        memcpy(d + total, port->port.file_buf + port->port.file_buf_pos, bytes_read);
         port->port.file_buf_pos += bytes_read;
         total += bytes_read;
     }
@@ -1462,21 +1463,22 @@ static void file_write_char(value port, value ch) {
     flush_after_write(obj, &c, 1);
 }
 
-static void file_write_bytes(value port, const char *buf, size_t n) {
+static void file_write_bytes(value port, const void *buf, size_t n) {
     struct object *port_obj = GET_OBJECT(port);
+    const char *b = buf;
 
     if (port_obj->port.is_closed) { raise_file_error("cannot write to a closed port"); }
     alloc_file_buf(port_obj);
 
     if (port_obj->port.file_buf_size + n < FILE_BUFFER_SIZE) {
-        memcpy(port_obj->port.file_buf + port_obj->port.file_buf_size, buf, n);
+        memcpy(port_obj->port.file_buf + port_obj->port.file_buf_size, b, n);
         port_obj->port.file_buf_size += n;
     } else {
         flush_file_buffer(port_obj);
 
         size_t bytes_written = 0;
         while (n - bytes_written >= FILE_BUFFER_SIZE) {
-            ssize_t n_written = write(port_obj->port.fd, buf + bytes_written, n - bytes_written);
+            ssize_t n_written = write(port_obj->port.fd, b + bytes_written, n - bytes_written);
             if (n_written < 0) {
                 if (errno == EINTR) continue;
                 raise_file_error("cannot write to file '%s': %s", port_name(port_obj), strerror(errno));
@@ -1486,14 +1488,14 @@ static void file_write_bytes(value port, const char *buf, size_t n) {
         }
 
         if (n > bytes_written) {
-            memcpy(port_obj->port.file_buf, buf + bytes_written, n - bytes_written);
+            memcpy(port_obj->port.file_buf, b + bytes_written, n - bytes_written);
             port_obj->port.file_buf_size = n - bytes_written;
         } else {
             port_obj->port.file_buf_size = 0;
         }
     }
 
-    flush_after_write(port_obj, buf, n);
+    flush_after_write(port_obj, b, n);
 }
 
 static void file_printf(value port, const char *fmt, ...) {
@@ -1763,7 +1765,7 @@ static void _write_bytevector(struct object *vec, value port) {
     GET_OBJECT(port)->port.printf(port, "#u8(");
     for (int i = 0; i < GET_OBJECT(vec)->bytevector.len; ++i) {
         GET_OBJECT(port)->port.printf(port, "%d", GET_OBJECT(vec)->bytevector.data[i]);
-        if (i != GET_OBJECT(vec)->vector.len - 1) {
+        if (i != GET_OBJECT(vec)->bytevector.len - 1) {
             GET_OBJECT(port)->port.printf(port, " ");
         }
     }

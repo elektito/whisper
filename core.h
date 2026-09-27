@@ -266,7 +266,7 @@ struct object {
             int64_t len;
         } vector;
         struct {
-            char *data;
+            uint8_t *data;
             int64_t len;
         } bytevector;
         struct {
