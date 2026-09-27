@@ -1566,7 +1566,7 @@
   (case-lambda
    (() (%exit 0))
    ((exit-code) (%exit (if (integer? exit-code)
-                           (%exit exit-code)
+                           exit-code
                            (if exit-code 0 1))))))
 
 ;; capture a continuation that will exit the system when called again, and store
