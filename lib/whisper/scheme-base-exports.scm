@@ -40,7 +40,7 @@
         cdr
         ceiling
         char->integer
-        ;char-ready?
+        char-ready?
         char-whitespace?
         char<=?
         char<?
@@ -143,8 +143,11 @@
         quote
         raise
         raise-continuable
+        read-bytevector
+        read-bytevector!
         read-char
         read-line
+        read-string
         reverse
         (rename truncate-remainder remainder)
         round
@@ -201,6 +204,7 @@
         vector?
         when
         with-exception-handler
+        write-bytevector
         write-char
         write-string
         zero?)

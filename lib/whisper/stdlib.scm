@@ -1500,9 +1500,9 @@
    ((str) (write-string str (current-output-port) 0 (string-length str)))
    ((str port) (write-string str port 0 (string-length str)))
    ((str port start) (write-string str port start (string-length str)))
-   ((str port start end) (%display (substring str start end) port))))
+   ((str port start end) (%write-string str port start end))))
 
-#;(define char-ready?
+(define char-ready?
   (case-lambda
    (() (%char-ready? (current-input-port)))
    ((port) (%char-ready? port))))
@@ -1511,6 +1511,30 @@
   (case-lambda
    (() (%u8-ready? (current-input-port)))
    ((port) (%u8-ready? port))))
+
+(define read-string
+  (case-lambda
+   ((k) (%read-string k (current-input-port)))
+   ((k port) (%read-string k port))))
+
+(define read-bytevector
+  (case-lambda
+   ((k) (%read-bytevector k (current-input-port)))
+   ((k port) (%read-bytevector k port))))
+
+(define read-bytevector!
+  (case-lambda
+   ((bv) (read-bytevector! bv (current-input-port) 0 (bytevector-length bv)))
+   ((bv port) (read-bytevector! bv port 0 (bytevector-length bv)))
+   ((bv port start) (read-bytevector! bv port start (bytevector-length bv)))
+   ((bv port start end) (%read-bytevector! bv port start end))))
+
+(define write-bytevector
+  (case-lambda
+   ((bv) (write-bytevector bv (current-output-port) 0 (bytevector-length bv)))
+   ((bv port) (write-bytevector bv port 0 (bytevector-length bv)))
+   ((bv port start) (write-bytevector bv port start (bytevector-length bv)))
+   ((bv port start end) (%write-bytevector bv port start end))))
 
 (define flush-output-port
   (case-lambda
@@ -1564,17 +1588,21 @@
 
 (define emergency-exit
   (case-lambda
-   (() (%exit 0))
-   ((exit-code) (%exit (if (integer? exit-code)
-                           exit-code
-                           (if exit-code 0 1))))))
+   (() (%_exit 0))
+   ((exit-code) (%_exit (if (integer? exit-code)
+                            exit-code
+                            (if exit-code 0 1))))))
 
 ;; capture a continuation that will exit the system when called again, and store
 ;; it in exit-continuation. we exit this way to make sure all dynamic-wind
 ;; out-guards are called before we exit.
+;;
+;; this calls %exit directly rather than emergency-exit: by this point
+;; dynamic-wind has already been unwound, and a normal exit should still
+;; flush output, unlike emergency-exit's whole point of skipping that.
 (let* ((dont-exit (gensym))
        (code (call/cc (lambda (k)
                         (set! exit-continuation k)
                         dont-exit))))
   (unless (eq? code dont-exit)
-    (emergency-exit code)))
+    (%exit (if (integer? code) code (if code 0 1)))))
