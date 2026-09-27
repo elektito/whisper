@@ -1275,7 +1275,7 @@ value make_bytevector(size_t len, uint8_t byte) {
     struct object *obj = alloc_object();
     obj->type = OBJ_BYTEVECTOR;
     obj->bytevector.len = len;
-    obj->bytevector.data = malloc(obj->vector.len);
+    obj->bytevector.data = malloc(obj->bytevector.len);
     memset(obj->bytevector.data, byte, len);
     return OBJECT(obj);
 }
