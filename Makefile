@@ -34,14 +34,14 @@ stage0-lib/whisper.manifest stage0-lib/whisper.so stage0-lib/whisper.a &: $(WHIS
 stage0: stage0-lib/whisper.manifest $(SRC_FILES)
 	./$(PREV) main.scm -o stage0 -C prev -L stage0-lib
 
-stage1-lib/whisper.manifest stage1-lib/whisper.so stage1-lib/whisper.a &: stage0 $(WHISPER_LIB_SRC)
+stage1-lib/whisper.manifest stage1-lib/whisper.so stage1-lib/whisper.a &: stage0 core.h $(WHISPER_LIB_SRC)
 	mkdir -p stage1-lib
 	./stage0 lib/whisper/whisper.sld -l -o stage1-lib/whisper
 
 stage1: stage0 stage1-lib/whisper.manifest core.h core.c $(SRC_FILES)
 	./stage0 main.scm -o stage1 -f "-Wl,-s $(CFLAGS)" -L stage1-lib
 
-stage2-lib/whisper.manifest stage2-lib/whisper.so stage2-lib/whisper.a &: stage1 $(WHISPER_LIB_SRC)
+stage2-lib/whisper.manifest stage2-lib/whisper.so stage2-lib/whisper.a &: stage1 core.h $(WHISPER_LIB_SRC)
 	mkdir -p stage2-lib
 	./stage1 lib/whisper/whisper.sld -l -o stage2-lib/whisper
 
