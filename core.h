@@ -582,6 +582,8 @@ extern value primcall_not(environment env, enum call_flags flags, int nargs, ...
 extern value primcall_null_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_number_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_number_to_string(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_open_binary_input_file(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_open_binary_output_file(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_input_file(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_input_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_open_output_file(environment env, enum call_flags flags, int nargs, ...);

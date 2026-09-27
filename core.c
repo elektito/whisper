@@ -3162,31 +3162,60 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
     return make_string(buf, strlen(buf));
 }
 
+static value open_file_port(const char *func_name, value filename, int flags, int is_input, int is_binary) {
+    if (!IS_STRING(filename)) { raise_error("%s: filename is not a string", func_name); }
+    struct object *port = alloc_object();
+    port->type = OBJ_PORT;
+    port->port.fd = -1;
+    port->port.is_input = is_input;
+    port->port.is_output = !is_input;
+    port->port.is_binary = is_binary;
+    port->port.filename = strz(GET_STRING(filename));
+    int fd = open(port->port.filename, flags, 0644);
+    if (fd == -1) { raise_file_error("%s: error opening file '%s': %s", func_name, port->port.filename, strerror(errno)); }
+    port->port.fd = fd;
+    if (is_input) {
+        port->port.read_char = file_read_char;
+        port->port.peek_char = file_peek_char;
+        port->port.unread_char = file_unread_char;
+    } else {
+        port->port.printf = file_printf;
+        port->port.write_char = file_write_char;
+    }
+
+    return OBJECT(port);
+}
+
+value primcall_open_binary_input_file(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("open-binary-input-file needs a single argument"); }
+    init_args();
+    value filename = next_arg();
+    free_args();
+    return open_file_port("open-binary-input-file", filename, O_RDONLY, 1, 1);
+}
+
+value primcall_open_binary_output_file(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("open-binary-output-file needs a single argument"); }
+    init_args();
+    value filename = next_arg();
+    free_args();
+    return open_file_port("open-binary-output-file", filename, O_WRONLY | O_CREAT | O_TRUNC, 0, 1);
+}
+
 value primcall_open_input_file(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("open-input-file needs a single argument"); }
     init_args();
     value filename = next_arg();
     free_args();
-    if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
-    struct object *obj = alloc_object();
+    return open_file_port("open-input-file", filename, O_RDONLY, 1, 0);
+}
 
-    /* make the object a valid port before open() can fail. otherwise
-     * the GC would later see a zeroed object, which looks like a port
-     * with fd 0 */
-    obj->type = OBJ_PORT;
-    obj->port.fd = -1;
-    int filename_len = GET_STRING(filename)->len;
-    obj->port.filename = malloc(filename_len + 1);
-    snprintf(obj->port.filename, filename_len + 1, "%.*s", filename_len, GET_STRING(filename)->s);
-    int fd = open(obj->port.filename, O_RDONLY);
-    if (fd == -1) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
-
-    obj->port.is_input = 1;
-    obj->port.fd = fd;
-    obj->port.read_char = file_read_char;
-    obj->port.peek_char = file_peek_char;
-    obj->port.unread_char = file_unread_char;
-    return OBJECT(obj);
+value primcall_open_output_file(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("open-output-file needs a single argument"); }
+    init_args();
+    value filename = next_arg();
+    free_args();
+    return open_file_port("open-output-file", filename, O_WRONLY | O_CREAT | O_TRUNC, 0, 0);
 }
 
 value primcall_open_input_string(environment env, enum call_flags flags, int nargs, ...) {
@@ -3206,29 +3235,6 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     obj->port.read_char = string_read_char;
     obj->port.peek_char = string_peek_char;
     obj->port.unread_char = string_unread_char;
-    return OBJECT(obj);
-}
-
-value primcall_open_output_file(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 1) { raise_error("open-output-file needs a single argument"); }
-    init_args();
-    value filename = next_arg();
-    free_args();
-    if (!IS_STRING(filename)) { raise_error("filename is not a string"); }
-    struct object *obj = alloc_object();
-
-    /* same as open-input-file. the port owns the filename from the
-     * start, so a failed open() does not leak it */
-    obj->type = OBJ_PORT;
-    obj->port.fd = -1;
-    obj->port.filename = strz(GET_STRING(filename));
-    int fd = open(obj->port.filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd == -1) { raise_file_error("error opening file '%s': %s", obj->port.filename, strerror(errno)); }
-
-    obj->port.fd = fd;
-    obj->port.is_output = 1;
-    obj->port.printf = file_printf;
-    obj->port.write_char = file_write_char;
     return OBJECT(obj);
 }
 
