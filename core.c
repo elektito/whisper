@@ -2882,6 +2882,16 @@ value primcall_percent_exit(environment env, enum call_flags flags, int nargs, .
     return VOID;
 }
 
+value primcall_percent_underscore_exit(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%_exit needs a single argument"); }
+    init_args();
+    value code = next_arg();
+    free_args();
+    if (!IS_FIXNUM(code)) { raise_error("%%_exit aregument is not an integer"); }
+    _exit(GET_FIXNUM(code));
+    return VOID;
+}
+
 value primcall_percent_flush_output_port(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("%%flush-output-port needs a single argument"); }
     init_args();

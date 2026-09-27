@@ -633,6 +633,7 @@
 
 (define *primcalls* '((%char-ready? "percent_char_ready_q" 1 1)
                       (%display "percent_display" 2 2)
+                      (%_exit "percent_underscore_exit" 2 2)
                       (%exit "percent_exit" 2 2)
                       (%flush-output-port "percent_flush_output_port" 1 1)
                       (%gc-stats "percent_gc_stats" 0 0)
@@ -1551,6 +1552,7 @@
                                  (identifier 'aux 'unquote-splicing 'unquote-splicing)
                                  (identifier 'primcall '%char-ready? '%char-ready?)
                                  (identifier 'primcall '%display '%display)
+                                 (identifier 'primcall '%_exit '%_exit)
                                  (identifier 'primcall '%exit '%exit)
                                  (identifier 'primcall '%flush-output-port '%flush-output-port)
                                  (identifier 'primcall '%gc-stats '%gc-stats)
