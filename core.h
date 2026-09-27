@@ -256,6 +256,8 @@ struct object {
             void (*unread_char)(value port, value ch);
             void (*write_char)(value port, value ch);
             void (*printf)(value port, const char *fmt, ...);
+            size_t (*read_bytes)(value port, void *dest, size_t n);
+            void (*write_bytes)(value port, const void *buf, size_t n);
         } port;
         struct {
             enum error_type type;

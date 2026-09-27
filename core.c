@@ -1416,18 +1416,19 @@ static void file_unread_char(value port, value ch) {
 
 /* reads up to n bytes from port into dest, stopping at EOF. returns the
  * number of bytes actually read, from 0 (immediate EOF) up to n. */
-static size_t file_read_bytes(struct object *port, void *dest, size_t n) {
+static size_t file_read_bytes(value port, void *dest, size_t n) {
+    struct object *obj = GET_OBJECT(port);
     char *d = dest;
     size_t total = 0;
 
     while (total < n) {
-        ensure_buffer_filled(port);
-        size_t available = port->port.file_buf_size - port->port.file_buf_pos;
+        ensure_buffer_filled(obj);
+        size_t available = obj->port.file_buf_size - obj->port.file_buf_pos;
         if (available == 0) { break; }
 
         size_t bytes_read = available < n - total ? available : n - total;
-        memcpy(d + total, port->port.file_buf + port->port.file_buf_pos, bytes_read);
-        port->port.file_buf_pos += bytes_read;
+        memcpy(d + total, obj->port.file_buf + obj->port.file_buf_pos, bytes_read);
+        obj->port.file_buf_pos += bytes_read;
         total += bytes_read;
     }
 
@@ -1555,6 +1556,27 @@ static void string_write_char(value port, value ch) {
 
     GET_OBJECT(port)->port.string[GET_OBJECT(port)->port.string_len] = GET_CHAR(ch);
     GET_OBJECT(port)->port.string_len++;
+}
+
+static size_t string_read_bytes(value port, void *dest, size_t n) {
+    struct object *obj = GET_OBJECT(port);
+    size_t available = obj->port.string_len - obj->port.string_pos;
+    size_t got = available < n ? available : n;
+    memcpy(dest, obj->port.string + obj->port.string_pos, got);
+    obj->port.string_pos += got;
+    return got;
+}
+
+static void string_write_bytes(value port, const void *buf, size_t n) {
+    struct object *obj = GET_OBJECT(port);
+    int64_t needed = obj->port.string_len + n;
+    if (needed > obj->port.string_cap) {
+        while (obj->port.string_cap < needed) obj->port.string_cap *= 2;
+        obj->port.string = realloc(obj->port.string, obj->port.string_cap);
+    }
+
+    memcpy(obj->port.string + obj->port.string_len, buf, n);
+    obj->port.string_len += n;
 }
 
 static void string_printf(value port, const char *fmt, ...) {
@@ -2133,6 +2155,7 @@ static void init_ports() {
     in->port.read_char = file_read_char;
     in->port.peek_char = file_peek_char;
     in->port.unread_char = file_unread_char;
+    in->port.read_bytes = file_read_bytes;
     stdin_port = OBJECT(in);
 
     struct object *out = alloc_object();
@@ -2142,6 +2165,7 @@ static void init_ports() {
     out->port.file_buf_mode = isatty(STDOUT_FILENO) ? FILE_BUFFER_LINE : FILE_BUFFER_FULL;
     out->port.printf = file_printf;
     out->port.write_char = file_write_char;
+    out->port.write_bytes = file_write_bytes;
     stdout_port = OBJECT(out);
 
     struct object *err = alloc_object();
@@ -2151,6 +2175,7 @@ static void init_ports() {
     err->port.file_buf_mode = FILE_BUFFER_NONE;
     err->port.printf = file_printf;
     err->port.write_char = file_write_char;
+    err->port.write_bytes = file_write_bytes;
     stderr_port = OBJECT(err);
 }
 
@@ -3189,9 +3214,11 @@ static value open_file_port(const char *func_name, value filename, int flags, in
         port->port.read_char = file_read_char;
         port->port.peek_char = file_peek_char;
         port->port.unread_char = file_unread_char;
+        port->port.read_bytes = file_read_bytes;
     } else {
         port->port.printf = file_printf;
         port->port.write_char = file_write_char;
+        port->port.write_bytes = file_write_bytes;
     }
 
     return OBJECT(port);
@@ -3246,6 +3273,7 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     obj->port.read_char = string_read_char;
     obj->port.peek_char = string_peek_char;
     obj->port.unread_char = string_unread_char;
+    obj->port.read_bytes = string_read_bytes;
     return OBJECT(obj);
 }
 
@@ -3259,6 +3287,7 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     obj->port.string_len = 0;
     obj->port.printf = string_printf;
     obj->port.write_char = string_write_char;
+    obj->port.write_bytes = string_write_bytes;
     obj->port.fd = -1;
     return OBJECT(obj);
 }
@@ -3328,7 +3357,7 @@ value primcall_percent_read_bytevector(environment env, enum call_flags flags, i
     if (want == 0) { return make_bytevector(0, 0); }
 
     value bv = make_bytevector(want, 0);
-    size_t got = file_read_bytes(GET_OBJECT(port), GET_OBJECT(bv)->bytevector.data, want);
+    size_t got = GET_OBJECT(port)->port.read_bytes(port, GET_OBJECT(bv)->bytevector.data, want);
     if (got == 0) { return EOFOBJ; }
 
     if ((int64_t) got < want) {
@@ -3359,9 +3388,32 @@ value primcall_percent_read_bytevector_b(environment env, enum call_flags flags,
     if (s < 0 || e > len || s > e) { raise_error("%%read-bytevector! start/end out of range"); }
     if (s == e) { return FIXNUM(0); }
 
-    size_t got = file_read_bytes(GET_OBJECT(port), GET_OBJECT(bv)->bytevector.data + s, e - s);
+    size_t got = GET_OBJECT(port)->port.read_bytes(port, GET_OBJECT(bv)->bytevector.data + s, e - s);
     if (got == 0) { return EOFOBJ; }
     return FIXNUM(got);
+}
+
+value primcall_percent_read_string(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%%read-string needs two arguments"); }
+    init_args();
+    value k = next_arg();
+    value port = next_arg();
+    free_args();
+
+    if (!IS_FIXNUM(k) || GET_FIXNUM(k) < 0) { raise_error("%%read-string first argument must be a non-negative integer"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%read-string second argument is not an input port"); }
+    if (GET_OBJECT(port)->port.is_binary) { raise_error("%%read-string only works on textual ports"); }
+
+    int64_t want = GET_FIXNUM(k);
+    if (want == 0) { return make_string("", 0); }
+
+    char *buf = malloc(want);
+    size_t got = GET_OBJECT(port)->port.read_bytes(port, buf, want);
+    if (got == 0) { free(buf); return EOFOBJ; }
+
+    value str = make_string(buf, got);
+    free(buf);
+    return str;
 }
 
 value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
@@ -3927,7 +3979,30 @@ value primcall_percent_write_bytevector(environment env, enum call_flags flags, 
     int64_t e = GET_FIXNUM(end);
     if (s < 0 || e > len || s > e) { raise_error("%%write-bytevector start/end out of range"); }
 
-    file_write_bytes(port, GET_OBJECT(bv)->bytevector.data + s, e - s);
+    GET_OBJECT(port)->port.write_bytes(port, GET_OBJECT(bv)->bytevector.data + s, e - s);
+    return VOID;
+}
+
+value primcall_percent_write_string(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 4) { raise_error("%%write-string needs four arguments"); }
+    init_args();
+    value str = next_arg();
+    value port = next_arg();
+    value start = next_arg();
+    value end = next_arg();
+    free_args();
+
+    if (!IS_STRING(str)) { raise_error("%%write-string first argument is not a string"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write-string second argument is not an output port"); }
+    if (GET_OBJECT(port)->port.is_binary) { raise_error("%%write-string only works on textual ports"); }
+    if (!IS_FIXNUM(start) || !IS_FIXNUM(end)) { raise_error("%%write-string start/end arguments must be integers"); }
+
+    int64_t len = GET_STRING(str)->len;
+    int64_t s = GET_FIXNUM(start);
+    int64_t e = GET_FIXNUM(end);
+    if (s < 0 || e > len || s > e) { raise_error("%%write-string start/end out of range"); }
+
+    GET_OBJECT(port)->port.write_bytes(port, GET_STRING(str)->s + s, e - s);
     return VOID;
 }
 
