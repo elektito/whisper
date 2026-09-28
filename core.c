@@ -3025,6 +3025,15 @@ value primcall_inexact(environment env, enum call_flags flags, int nargs, ...) {
     }
 }
 
+value primcall_input_port_open_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("input-port-open? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    if (!IS_PORT(v)) { raise_error("input-port-open? argument is not a port"); }
+    return BOOL(GET_OBJECT(v)->port.is_input && !GET_OBJECT(v)->port.is_closed);
+}
+
 value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("input-port? needs a single argument"); }
     init_args();
@@ -3298,6 +3307,15 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     obj->port.write_bytes = string_write_bytes;
     obj->port.fd = -1;
     return OBJECT(obj);
+}
+
+value primcall_output_port_open_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("output-port-open? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    if (!IS_PORT(v)) { raise_error("output-port-open? argument is not a port"); }
+    return BOOL(GET_OBJECT(v)->port.is_output && !GET_OBJECT(v)->port.is_closed);
 }
 
 value primcall_output_port_q(environment env, enum call_flags flags, int nargs, ...) {
