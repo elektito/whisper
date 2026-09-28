@@ -4064,6 +4064,52 @@ value primcall_percent_write_char(environment env, enum call_flags flags, int na
     return VOID;
 }
 
+value primcall_percent_read_u8(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%read-u8 needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%read-u8 argument is not an input port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%read-u8 only works on binary ports"); }
+
+    /* we're reusing read_char here even though it returns a character,
+     * since we're ascii-only for now */
+    value ch = GET_OBJECT(port)->port.read_char(port);
+    if (!IS_CHAR(ch)) { return ch; /* EOFOBJ */ }
+    return FIXNUM((int)(uint8_t) GET_CHAR(ch));
+}
+
+value primcall_percent_peek_u8(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%peek-u8 needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%peek-u8 argument is not an input port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%peek-u8 only works on binary ports"); }
+
+    /* we're reusing peek_char here even though it returns a character,
+     * since we're ascii-only for now */
+    value ch = GET_OBJECT(port)->port.peek_char(port);
+    if (!IS_CHAR(ch)) { return ch; /* EOFOBJ */ }
+    return FIXNUM((int)(uint8_t) GET_CHAR(ch));
+}
+
+value primcall_percent_write_u8(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%%write-u8 needs two arguments"); }
+    init_args();
+    value byte = next_arg();
+    value port = next_arg();
+    free_args();
+    if (!IS_FIXNUM(byte) || GET_FIXNUM(byte) < 0 || GET_FIXNUM(byte) > 255) { raise_error("%%write-u8 first argument must be a byte (0-255)"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write-u8 second argument is not an output port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%write-u8 only works on binary ports"); }
+
+    /* we're reusing write_char here even though it writes a character,
+     * since we're ascii-only for now */
+    GET_OBJECT(port)->port.write_char(port, CHAR((char) GET_FIXNUM(byte)));
+    return VOID;
+}
+
 value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
     value result_fixnum = 0;
     float result_flonum = 0.0;
