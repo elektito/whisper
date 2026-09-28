@@ -2712,3 +2712,68 @@ and still a comment
   (close-port out)
   (delete-file path)
   raised?)
+
+;; input-port-open?/output-port-open?
+(let ((out (open-output-string)))
+  (and (not (input-port-open? out))
+       (output-port-open? out)
+       (begin
+         (close-port out)
+         (and (not (input-port-open? out))
+              (not (output-port-open? out))))))
+
+;; same, but for an input string port
+(let ((in (open-input-string "hello")))
+  (and (input-port-open? in)
+       (not (output-port-open? in))
+       (begin
+         (close-port in)
+         (and (not (input-port-open? in))
+              (not (output-port-open? in))))))
+
+;; and for a real files
+(let* ((path (test-temp-path))
+       (out (open-output-file path))
+       (before (output-port-open? out)))
+  (close-port out)
+  (delete-file path)
+  (and before (not (output-port-open? out))))
+
+;; both predicates reject a non-port argument
+(and (guard (e (#t #t)) (input-port-open? 5) #f)
+     (guard (e (#t #t)) (output-port-open? 5) #f))
+
+;; textual-port?/binary-port?: string ports are always textual
+(let ((out (open-output-string))
+      (in (open-input-string "hello")))
+  (and (textual-port? out) (not (binary-port? out))
+       (textual-port? in) (not (binary-port? in))))
+
+;; a plain file port (open-output-file/open-input-file) is textual
+(let* ((path (test-temp-path))
+       (out (open-output-file path))
+       (out-result (and (textual-port? out) (not (binary-port? out)))))
+  (close-port out)
+  (let* ((in (open-input-file path))
+         (in-result (and (textual-port? in) (not (binary-port? in)))))
+    (close-port in)
+    (delete-file path)
+    (and out-result in-result)))
+
+;; a binary file port (open-binary-output-file/open-binary-input-file)
+;; is binary, not textual
+(let* ((path (test-temp-path))
+       (out (open-binary-output-file path))
+       (out-result (and (binary-port? out) (not (textual-port? out)))))
+  (close-port out)
+  (let* ((in (open-binary-input-file path))
+         (in-result (and (binary-port? in) (not (textual-port? in)))))
+    (close-port in)
+    (delete-file path)
+    (and out-result in-result)))
+
+;; unlike input-port-open?/output-port-open?, these are plain type
+;; predicates (like input-port?/port?) and just return #f on a non-port
+;; argument rather than raising
+(and (not (textual-port? 5))
+     (not (binary-port? 5)))
