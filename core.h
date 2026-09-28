@@ -242,6 +242,7 @@ struct object {
             int is_binary;
             int file_buf_mode; /* enum file_buffer_mode, output ports only */
             int is_closed;
+            int at_eof;
             int fd;
             char *filename;
             char *file_buf;

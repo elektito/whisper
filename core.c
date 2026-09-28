@@ -1367,6 +1367,11 @@ static void ensure_buffer_filled(struct object *port) {
         return;
     }
 
+    /* a previous read already hit eof on this fd. don't block on
+     * another read, which a tty would happily do (its eof is a one-shot
+     * signal, not a sticky state like a closed pipe). */
+    if (port->port.at_eof) { return; }
+
     alloc_file_buf(port);
 
     /* we are about to block waiting for input. flush stdout first so
@@ -1384,6 +1389,8 @@ static void ensure_buffer_filled(struct object *port) {
     if (bytes_read < 0) {
         raise_file_error("cannot read from file '%s': %s", port_name(port), strerror(errno));
     }
+
+    if (bytes_read == 0) { port->port.at_eof = 1; }
 
     port->port.file_buf_size = keep + bytes_read;
     port->port.file_buf_pos = keep;
