@@ -3011,6 +3011,21 @@ value primcall_get_output_string(environment env, enum call_flags flags, int nar
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
 }
 
+value primcall_get_output_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("get-output-bytevector needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output || !GET_OBJECT(port)->port.is_binary || GET_OBJECT(port)->port.string == NULL) {
+        raise_error("get-output-bytevector argument is not an output bytevector port");
+    }
+
+    value bv = make_bytevector(GET_OBJECT(port)->port.string_len, 0);
+    memcpy(GET_OBJECT(bv)->bytevector.data, GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
+    return bv;
+}
+
 value primcall_inexact(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("inexact takes a single argument"); }
     init_args();
@@ -3295,11 +3310,55 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     return OBJECT(obj);
 }
 
+value primcall_open_input_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("open-input-bytevector needs a single argument"); }
+    init_args();
+    value bv = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(bv)) { raise_error("open-input-bytevector argument is not a bytevector"); }
+
+    /* we'll be reusing string port apparatus for bytevector ports
+     * because we're ascii only for now */
+    struct object *obj = alloc_object();
+    obj->type = OBJ_PORT;
+    obj->port.is_input = 1;
+    obj->port.is_binary = 1;
+    obj->port.string_len = GET_OBJECT(bv)->bytevector.len;
+    obj->port.string_pos = 0;
+    obj->port.string = malloc(obj->port.string_len);
+    obj->port.fd = -1;
+    memcpy(obj->port.string, GET_OBJECT(bv)->bytevector.data, obj->port.string_len);
+    obj->port.read_char = string_read_char;
+    obj->port.peek_char = string_peek_char;
+    obj->port.unread_char = string_unread_char;
+    obj->port.read_bytes = string_read_bytes;
+    return OBJECT(obj);
+}
+
 value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("open-output-string accepts no arguments"); }
     struct object *obj = alloc_object();
     obj->type = OBJ_PORT;
     obj->port.is_output = 1;
+    obj->port.string = malloc(128);
+    obj->port.string_cap = 128;
+    obj->port.string_len = 0;
+    obj->port.printf = string_printf;
+    obj->port.write_char = string_write_char;
+    obj->port.write_bytes = string_write_bytes;
+    obj->port.fd = -1;
+    return OBJECT(obj);
+}
+
+value primcall_open_output_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("open-output-bytevector accepts no arguments"); }
+
+    /* we'll be reusing string port apparatus for bytevector ports
+     * because we're ascii only for now */
+    struct object *obj = alloc_object();
+    obj->type = OBJ_PORT;
+    obj->port.is_output = 1;
+    obj->port.is_binary = 1;
     obj->port.string = malloc(128);
     obj->port.string_cap = 128;
     obj->port.string_len = 0;
