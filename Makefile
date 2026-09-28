@@ -1,4 +1,4 @@
-CURRENT_V = 32
+CURRENT_V = 33
 PREV_V = $(shell echo $$(($(CURRENT_V) - 1)))
 
 CURRENT = whisper-v$(CURRENT_V)

@@ -2367,6 +2367,14 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     return ret;
 }
 
+value primcall_binary_port_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("binary-port? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.is_binary);
+}
+
 value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("boolean? needs a single argument"); }
     init_args();
@@ -2757,8 +2765,9 @@ value primcall_close_port(environment env, enum call_flags flags, int nargs, ...
     if (GET_OBJECT(port)->port.fd >= 0) {
         int ret = close(GET_OBJECT(port)->port.fd);
         if (ret == -1) { raise_error("failed to close the port: %s", strerror(errno)); }
-        GET_OBJECT(port)->port.is_closed = 1;
     }
+
+    GET_OBJECT(port)->port.is_closed = 1;
 
     return VOID;
 }
@@ -3002,6 +3011,21 @@ value primcall_get_output_string(environment env, enum call_flags flags, int nar
     return make_string(GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
 }
 
+value primcall_get_output_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("get-output-bytevector needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output || !GET_OBJECT(port)->port.is_binary || GET_OBJECT(port)->port.string == NULL) {
+        raise_error("get-output-bytevector argument is not an output bytevector port");
+    }
+
+    value bv = make_bytevector(GET_OBJECT(port)->port.string_len, 0);
+    memcpy(GET_OBJECT(bv)->bytevector.data, GET_OBJECT(port)->port.string, GET_OBJECT(port)->port.string_len);
+    return bv;
+}
+
 value primcall_inexact(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("inexact takes a single argument"); }
     init_args();
@@ -3015,6 +3039,15 @@ value primcall_inexact(environment env, enum call_flags flags, int nargs, ...) {
     } else {
         raise_error("inexact argument is not a number");
     }
+}
+
+value primcall_input_port_open_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("input-port-open? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    if (!IS_PORT(v)) { raise_error("input-port-open? argument is not a port"); }
+    return BOOL(GET_OBJECT(v)->port.is_input && !GET_OBJECT(v)->port.is_closed);
 }
 
 value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -3277,6 +3310,31 @@ value primcall_open_input_string(environment env, enum call_flags flags, int nar
     return OBJECT(obj);
 }
 
+value primcall_open_input_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("open-input-bytevector needs a single argument"); }
+    init_args();
+    value bv = next_arg();
+    free_args();
+    if (!IS_BYTEVECTOR(bv)) { raise_error("open-input-bytevector argument is not a bytevector"); }
+
+    /* we'll be reusing string port apparatus for bytevector ports
+     * because we're ascii only for now */
+    struct object *obj = alloc_object();
+    obj->type = OBJ_PORT;
+    obj->port.is_input = 1;
+    obj->port.is_binary = 1;
+    obj->port.string_len = GET_OBJECT(bv)->bytevector.len;
+    obj->port.string_pos = 0;
+    obj->port.string = malloc(obj->port.string_len);
+    obj->port.fd = -1;
+    memcpy(obj->port.string, GET_OBJECT(bv)->bytevector.data, obj->port.string_len);
+    obj->port.read_char = string_read_char;
+    obj->port.peek_char = string_peek_char;
+    obj->port.unread_char = string_unread_char;
+    obj->port.read_bytes = string_read_bytes;
+    return OBJECT(obj);
+}
+
 value primcall_open_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("open-output-string accepts no arguments"); }
     struct object *obj = alloc_object();
@@ -3290,6 +3348,34 @@ value primcall_open_output_string(environment env, enum call_flags flags, int na
     obj->port.write_bytes = string_write_bytes;
     obj->port.fd = -1;
     return OBJECT(obj);
+}
+
+value primcall_open_output_bytevector(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("open-output-bytevector accepts no arguments"); }
+
+    /* we'll be reusing string port apparatus for bytevector ports
+     * because we're ascii only for now */
+    struct object *obj = alloc_object();
+    obj->type = OBJ_PORT;
+    obj->port.is_output = 1;
+    obj->port.is_binary = 1;
+    obj->port.string = malloc(128);
+    obj->port.string_cap = 128;
+    obj->port.string_len = 0;
+    obj->port.printf = string_printf;
+    obj->port.write_char = string_write_char;
+    obj->port.write_bytes = string_write_bytes;
+    obj->port.fd = -1;
+    return OBJECT(obj);
+}
+
+value primcall_output_port_open_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("output-port-open? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    if (!IS_PORT(v)) { raise_error("output-port-open? argument is not a port"); }
+    return BOOL(GET_OBJECT(v)->port.is_output && !GET_OBJECT(v)->port.is_closed);
 }
 
 value primcall_output_port_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -3792,6 +3878,14 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     return FIXNUM(ret);
 }
 
+value primcall_textual_port_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("textual-port? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_PORT(v) && !GET_OBJECT(v)->port.is_binary);
+}
+
 value primcall_truncate(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("truncate needs a single argument"); }
     init_args();
@@ -4026,6 +4120,52 @@ value primcall_percent_write_char(environment env, enum call_flags flags, int na
     if (!IS_CHAR(ch)) { raise_error("%%write-char first argument is not a char"); }
     if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write-char second argument is not an output port"); }
     GET_OBJECT(port)->port.write_char(port, ch);
+    return VOID;
+}
+
+value primcall_percent_read_u8(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%read-u8 needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%read-u8 argument is not an input port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%read-u8 only works on binary ports"); }
+
+    /* we're reusing read_char here even though it returns a character,
+     * since we're ascii-only for now */
+    value ch = GET_OBJECT(port)->port.read_char(port);
+    if (!IS_CHAR(ch)) { return ch; /* EOFOBJ */ }
+    return FIXNUM((int)(uint8_t) GET_CHAR(ch));
+}
+
+value primcall_percent_peek_u8(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("%%peek-u8 needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%peek-u8 argument is not an input port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%peek-u8 only works on binary ports"); }
+
+    /* we're reusing peek_char here even though it returns a character,
+     * since we're ascii-only for now */
+    value ch = GET_OBJECT(port)->port.peek_char(port);
+    if (!IS_CHAR(ch)) { return ch; /* EOFOBJ */ }
+    return FIXNUM((int)(uint8_t) GET_CHAR(ch));
+}
+
+value primcall_percent_write_u8(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("%%write-u8 needs two arguments"); }
+    init_args();
+    value byte = next_arg();
+    value port = next_arg();
+    free_args();
+    if (!IS_FIXNUM(byte) || GET_FIXNUM(byte) < 0 || GET_FIXNUM(byte) > 255) { raise_error("%%write-u8 first argument must be a byte (0-255)"); }
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_output) { raise_error("%%write-u8 second argument is not an output port"); }
+    if (!GET_OBJECT(port)->port.is_binary) { raise_error("%%write-u8 only works on binary ports"); }
+
+    /* we're reusing write_char here even though it writes a character,
+     * since we're ascii-only for now */
+    GET_OBJECT(port)->port.write_char(port, CHAR((char) GET_FIXNUM(byte)));
     return VOID;
 }
 
