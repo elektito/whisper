@@ -530,6 +530,7 @@ extern void leave_proc(void);
 extern value primcall_abort(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_append(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_apply(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_binary_port_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_box_q(environment env, enum call_flags flags, int nargs, ...);
@@ -621,6 +622,7 @@ extern value primcall_string_q(environment env, enum call_flags flags, int nargs
 extern value primcall_substring(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_symbol_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_system(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_textual_port_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_truncate(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_u8_ready_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_unread_char(environment env, enum call_flags flags, int nargs, ...);

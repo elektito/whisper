@@ -2367,6 +2367,14 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     return ret;
 }
 
+value primcall_binary_port_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("binary-port? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_PORT(v) && GET_OBJECT(v)->port.is_binary);
+}
+
 value primcall_boolean_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("boolean? needs a single argument"); }
     init_args();
@@ -3790,6 +3798,14 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     int ret = system(cmdz);
     free(cmdz);
     return FIXNUM(ret);
+}
+
+value primcall_textual_port_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("textual-port? needs a single argument"); }
+    init_args();
+    value v = next_arg();
+    free_args();
+    return BOOL(IS_PORT(v) && !GET_OBJECT(v)->port.is_binary);
 }
 
 value primcall_truncate(environment env, enum call_flags flags, int nargs, ...) {
