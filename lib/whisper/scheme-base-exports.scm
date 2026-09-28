@@ -64,6 +64,7 @@
         do
         dynamic-wind
         else
+        eof-object
         eof-object?
         eq?
         equal?
