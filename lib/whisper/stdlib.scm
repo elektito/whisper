@@ -1552,6 +1552,21 @@
    ((bv port start) (write-bytevector bv port start (bytevector-length bv)))
    ((bv port start end) (%write-bytevector bv port start end))))
 
+(define read-u8
+  (case-lambda
+   (() (%read-u8 (current-input-port)))
+   ((port) (%read-u8 port))))
+
+(define peek-u8
+  (case-lambda
+   (() (%peek-u8 (current-input-port)))
+   ((port) (%peek-u8 port))))
+
+(define write-u8
+  (case-lambda
+   ((byte) (%write-u8 byte (current-output-port)))
+   ((byte port) (%write-u8 byte port))))
+
 (define flush-output-port
   (case-lambda
    (() (flush-output-port (current-output-port)))

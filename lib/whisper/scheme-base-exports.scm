@@ -18,6 +18,7 @@
         assq
         assv
         begin
+        binary-port?
         boolean=?
         boolean?
         bytevector
@@ -82,11 +83,13 @@
         flush-output-port
         for-each
         gcd
+        get-output-bytevector
         get-output-string
         guard
         if
         include
         inexact
+        input-port-open?
         input-port?
         integer->char
         integer?
@@ -127,14 +130,18 @@
         null?
         number->string
         number?
+        open-input-bytevector
         open-input-string
+        open-output-bytevector
         open-output-string
         odd?
         or
+        output-port-open?
         output-port?
         pair?
         parameterize
         peek-char
+        peek-u8
         port?
         positive?
         procedure?
@@ -148,6 +155,7 @@
         read-char
         read-line
         read-string
+        read-u8
         reverse
         (rename truncate-remainder remainder)
         round
@@ -180,6 +188,7 @@
         symbol=?
         symbol?
         syntax-rules
+        textual-port?
         truncate
         truncate/
         truncate-quotient
@@ -207,4 +216,5 @@
         write-bytevector
         write-char
         write-string
+        write-u8
         zero?)
