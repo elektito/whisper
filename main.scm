@@ -184,7 +184,11 @@
                     (repl env)))
            (let ((expr (read (current-input-port))))
              (if (eof-object? expr)
-                 (exit 0)
+                 (begin
+                   ;; print a newline before exiting, so shell prompt
+                   ;; doesn't appear on the same line
+                   (newline)
+                   (exit 0))
                  (call-with-values (lambda () (eval expr env))
                    (lambda v
                      (let loop ((v v))
