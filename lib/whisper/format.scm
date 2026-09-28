@@ -4,7 +4,10 @@
 (define (imag-part z)
   0)
 
-(define pretty-print write) ; ugly but permitted
+(define pretty-print ; ugly but permitted
+  (case-lambda
+   ((obj) (write obj))
+   ((obj port) (write obj port))))
 
 (define (inexact-number->string x) (number->string x))
 (define (exact-number->string x)   (number->string x))

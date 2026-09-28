@@ -18,7 +18,7 @@ LIB_EXPORT_FILES = lib/whisper/scheme-base-exports.scm \
                    lib/whisper/scheme-write-exports.scm \
 				   lib/whisper/scheme-read-exports.scm
 
-WHISPER_LIB_SRC = lib/whisper/stdlib.scm lib/whisper/format.scm lib/whisper/read.scm lib/whisper/whisper.sld $(LIB_EXPORT_FILES)
+WHISPER_LIB_SRC = lib/whisper/stdlib.scm lib/whisper/format.scm lib/whisper/read.scm lib/whisper/write.scm lib/whisper/whisper.sld $(LIB_EXPORT_FILES)
 
 RAYLIB_SRC = vendor/raylib/src
 

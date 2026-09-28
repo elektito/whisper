@@ -1455,11 +1455,6 @@
 (define current-output-port (make-parameter (stdout)))
 (define current-error-port (make-parameter (stderr)))
 
-(define display
-  (case-lambda
-   ((obj) (%display obj (current-output-port)))
-   ((obj port) (%display obj port))))
-
 (define newline
   (case-lambda
    (() (%newline (current-output-port)))
@@ -1500,11 +1495,6 @@
   (case-lambda
    ((ch) (%unread-char ch (current-input-port)))
    ((ch port) (%unread-char ch port))))
-
-(define write
-  (case-lambda
-   ((obj) (%write obj (current-output-port)))
-   ((obj port) (%write obj port))))
 
 (define write-char
   (case-lambda

@@ -555,7 +555,6 @@ extern value primcall_close_port(environment env, enum call_flags flags, int nar
 extern value primcall_cons(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_command_line(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_delete_file(environment env, enum call_flags flags, int nargs, ...);
-extern value primcall_percent_display(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eof_object(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eof_object_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...);

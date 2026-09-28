@@ -3,6 +3,7 @@
   (include "stdlib.scm")
   (include "format.scm")
   (include "read.scm")
+  (include "write.scm")
 
   (include-library-declarations "scheme-base-exports.scm")
   (include-library-declarations "scheme-cxr-exports.scm")
