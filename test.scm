@@ -2554,6 +2554,14 @@ and still a comment
   (and (equal? "" (get-output-string redirected))
        (equal? "xyz\n" (get-output-string explicit))))
 
+;; open-output-bytevector/get-output-bytevector/write-u8
+(let ((out (open-output-bytevector)))
+  (parameterize ((current-output-port out))
+    (write-u8 1)
+    (write-u8 255)
+    (write-u8 0))
+  (equal? #u8(1 255 0) (get-output-bytevector out)))
+
 ;; peek-char/read-char/unread-char/read-line default to
 ;; (current-input-port)
 (let* ((in (open-input-string "ab\ncd\n"))
@@ -2578,6 +2586,25 @@ and still a comment
                  (read-char explicit))))
   (equal? #\Y result))
 
+;; peek-u8/read-u8 default to (current-input-port)
+(let* ((in (open-input-bytevector #u8(10 255 20)))
+       (results
+        (parameterize ((current-input-port in))
+          (let* ((b1 (peek-u8))
+                 (b2 (read-u8))
+                 (b3 (read-u8))
+                 (b4 (read-u8))
+                 (b5 (eof-object? (read-u8))))
+            (list b1 b2 b3 b4 b5)))))
+  (equal? (list 10 10 255 20 #t) results))
+
+;; an explicit input port argument bypasses (current-input-port)
+(let* ((redirected (open-input-bytevector #u8(1)))
+       (explicit (open-input-bytevector #u8(9)))
+       (result (parameterize ((current-input-port redirected))
+                 (read-u8 explicit))))
+  (equal? 9 result))
+
 ;; write-string with implicit and explicit port
 (let ((out (open-output-string)))
   (parameterize ((current-output-port out))
@@ -2592,6 +2619,16 @@ and still a comment
   result)
 
 (let* ((port (open-input-string "foo"))
+       (result (input-port? port)))
+  (close-input-port port)
+  result)
+
+(let* ((port (open-output-bytevector))
+       (result (output-port? port)))
+  (close-output-port port)
+  result)
+
+(let* ((port (open-input-bytevector #u8(1 2 3)))
        (result (input-port? port)))
   (close-input-port port)
   result)
@@ -2654,6 +2691,28 @@ and still a comment
 
 (guard (e (#t #t))
   (read-bytevector! (make-bytevector 3 0) (open-input-string "abc") 0 3)
+  #f)
+
+;; read-u8/peek-u8/write-u8 only work on binary ports
+(guard (e (#t #t))
+  (write-u8 1 (open-output-string))
+  #f)
+
+(guard (e (#t #t))
+  (read-u8 (open-input-string "abc"))
+  #f)
+
+(guard (e (#t #t))
+  (peek-u8 (open-input-string "abc"))
+  #f)
+
+;; open-input-bytevector/get-output-bytevector reject the wrong types
+(guard (e (#t #t))
+  (open-input-bytevector "not a bytevector")
+  #f)
+
+(guard (e (#t #t))
+  (get-output-bytevector (open-output-string))
   #f)
 
 ;; unread-char must still work right after a char that landed exactly on
@@ -2731,6 +2790,15 @@ and still a comment
          (and (not (input-port-open? in))
               (not (output-port-open? in))))))
 
+;; same, but for a bytevector port
+(let ((out (open-output-bytevector)))
+  (and (not (input-port-open? out))
+       (output-port-open? out)
+       (begin
+         (close-port out)
+         (and (not (input-port-open? out))
+              (not (output-port-open? out))))))
+
 ;; and for a real files
 (let* ((path (test-temp-path))
        (out (open-output-file path))
@@ -2771,6 +2839,12 @@ and still a comment
     (close-port in)
     (delete-file path)
     (and out-result in-result)))
+
+;; a bytevector port is binary, not textual
+(let ((out (open-output-bytevector))
+      (in (open-input-bytevector #u8(1 2 3))))
+  (and (binary-port? out) (not (textual-port? out))
+       (binary-port? in) (not (textual-port? in))))
 
 ;; unlike input-port-open?/output-port-open?, these are plain type
 ;; predicates (like input-port?/port?) and just return #f on a non-port
