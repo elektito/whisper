@@ -2765,8 +2765,9 @@ value primcall_close_port(environment env, enum call_flags flags, int nargs, ...
     if (GET_OBJECT(port)->port.fd >= 0) {
         int ret = close(GET_OBJECT(port)->port.fd);
         if (ret == -1) { raise_error("failed to close the port: %s", strerror(errno)); }
-        GET_OBJECT(port)->port.is_closed = 1;
     }
+
+    GET_OBJECT(port)->port.is_closed = 1;
 
     return VOID;
 }
