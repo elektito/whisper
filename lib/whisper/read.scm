@@ -75,10 +75,15 @@
         (parameterize ((reader-labels (make-eq-hash-table)))
           (let ((datum (read-datum port)))
             (patch-labels datum (reader-labels))
-            ;; something like #0=#0# would not be patched by
-            ;; patch-labels and would leak here, so we check for it
+            ;; something like #0=#0# with no enclosing pair/vector for
+            ;; patch-labels to patch a slot of would leak here
+            ;; unresolved. resolve it the same way a slot inside a
+            ;; container would be, so "unknown label" and "self
+            ;; reference" are reported accurately here too.
             (if (datum-label? datum)
-                (read-error "datum label #~a# refers to itself" (datum-label-number datum))
+                (resolve-label (datum-label-number datum)
+                                (list (datum-label-number datum))
+                                (reader-labels))
                 datum)))))))
 
 (define (read-datum port)
@@ -403,30 +408,40 @@
             (stateful-read-char port)
             (loop (peek-char port) (string-append s (make-string 1 ch))))))))
 
+;; resolves label n to its concrete value, by looking it up in labels
+;; and, if what's stored there is itself a reference to another label
+;; (e.g. #1=#0#), chasing through as many further labels as needed to
+;; reach something concrete. chain tracks the labels seen so far on
+;; this chase, to catch a pure alias cycle (labels referring to each
+;; other with no concrete datum at all) rather than looping forever.
+(define (resolve-label n chain labels)
+  (unless (hash-table-exists? labels n)
+    (read-error "unknown datum label: #~a#" n))
+  (let ((v (hash-table-ref labels n)))
+    (if (datum-label? v)
+        (let ((m (datum-label-number v)))
+          (if (memv m chain)
+              (read-error "datum label #~a# refers to itself" m)
+              (resolve-label m (cons m chain) labels)))
+        v)))
+
 (define (patch-labels datum labels)
-  (define (check-label label)
-    (let ((n (datum-label-number label)))
-      (unless (hash-table-exists? labels n)
-        (read-error "unknown datum label: #~a#" n))))
   (cond ((pair? datum)
          (if (datum-label? (car datum))
-             (begin
-               (check-label (car datum))
-               (set-car! datum (hash-table-ref labels (datum-label-number (car datum)))))
+             (let ((n (datum-label-number (car datum))))
+               (set-car! datum (resolve-label n (list n) labels)))
              (patch-labels (car datum) labels))
          (if (datum-label? (cdr datum))
-             (begin
-               (check-label (cdr datum))
-               (set-cdr! datum (hash-table-ref labels (datum-label-number (cdr datum)))))
+             (let ((n (datum-label-number (cdr datum))))
+               (set-cdr! datum (resolve-label n (list n) labels)))
              (patch-labels (cdr datum) labels)))
         ((vector? datum)
          (let ((len (vector-length datum)))
            (let loop ((i 0))
              (unless (= i len)
                (if (datum-label? (vector-ref datum i))
-                   (begin
-                     (check-label (vector-ref datum i))
-                     (vector-set! datum i (hash-table-ref labels (datum-label-number (vector-ref datum i)))))
+                   (let ((n (datum-label-number (vector-ref datum i))))
+                     (vector-set! datum i (resolve-label n (list n) labels)))
                    (patch-labels (vector-ref datum i) labels))
                (loop (+ i 1))))))))
 
