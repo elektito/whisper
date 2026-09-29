@@ -63,6 +63,17 @@
           ((box? obj) (print-shared obj port #f %print-box))
           (else (write obj port))))))
 
+(define write-simple
+  (case-lambda
+   ((obj) (write-simple obj (current-output-port)))
+   ((obj port)
+    (unless (and (output-port? port) (textual-port? port))
+      (error "not a textual output port"))
+    (cond ((pair? obj) (print-simple obj port #f %print-list))
+          ((vector? obj) (print-simple obj port #f %print-vector))
+          ((box? obj) (print-simple obj port #f %print-box))
+          (else (write obj port))))))
+
 (define (quoted-string str quote-char optional-quotes)
   (let ((len (string-length str)))
     (let loop ((i 0) (need-quoting #f) (result '()))
@@ -189,6 +200,9 @@
                 (hash-table-set! labels item (hash-table-size labels)))
               (find-shared-items obj))
     (print obj port display? labels used-labels)))
+
+(define (print-simple obj port display? print)
+  (print obj port display? (make-eq-hash-table) (make-eq-hash-table)))
 
 (define (print-list ls port display?)
   (print-cyclic ls port display? %print-list))

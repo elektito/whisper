@@ -2725,6 +2725,15 @@ and still a comment
   (write-shared v out)
   (equal? "#0=#(1 2 #0#)" (get-output-string out)))
 
+(let ((out (open-output-string)))
+  (write-simple '(1 2 (3 . 4) #(5 6) "hi" #\a #u8(1 2 3)) out)
+  (equal? "(1 2 (3 . 4) #(5 6) \"hi\" #\\a #u8(1 2 3))" (get-output-string out)))
+
+(let* ((x (list 1 2))
+       (out (open-output-string)))
+  (write-simple (list x x) out)
+  (equal? "((1 2) (1 2))" (get-output-string out)))
+
 ;; open-output-bytevector/get-output-bytevector/write-u8
 (let ((out (open-output-bytevector)))
   (parameterize ((current-output-port out))
