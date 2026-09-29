@@ -47,7 +47,7 @@
           ((bytevector? obj)
            (print-bytevector obj port))
           ((box? obj)
-           (print-box obj port #t))
+           (print-box obj port #f))
           ((eof-object? obj)
            (write-string "#<eof-object>" port))
           (else (%write obj port))))))
