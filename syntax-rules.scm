@@ -1,7 +1,21 @@
+;; a matched pattern variable can hold a circular or shared quoted
+;; literal from the input program, so this walk tracks pairs it has
+;; already started copying in seen. allocating the copy pair and
+;; registering it before recursing into car/cdr means a cycle finds
+;; its own not-yet-finished copy instead of recursing forever, and a
+;; shared pair reached by two different paths is copied only once.
 (define (deep-copy x)
-  (if (pair? x)
-      (cons (deep-copy (car x)) (deep-copy (cdr x)))
-      x))
+  (let ((seen (make-eq-hash-table)))
+    (define (copy x)
+      (if (pair? x)
+          (or (hash-table-ref/default seen x #f)
+              (let ((new (cons #f #f)))
+                (hash-table-set! seen x new)
+                (set-car! new (copy (car x)))
+                (set-cdr! new (copy (cdr x)))
+                new))
+          x))
+    (copy x)))
 
 (define-record-type <sequence>
   (make-sequence)

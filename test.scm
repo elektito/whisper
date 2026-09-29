@@ -503,6 +503,13 @@ and still a comment
 ;; which must also detect circular lists instead of hanging
 (guard (e (#t #t)) (append '#0=(1 2 . #0#) '(9)) #f)
 (guard (e (#t #t)) (list->vector '#0=(1 2 . #0#)) #f)
+
+;; regression test: a circular literal captured by a pattern variable
+;; under a macro's ellipsis (guard's body forms here) used to crash the
+;; compiler: the store-copy deep-copy taken per ellipsis repetition had
+;; no cycle detection and recursed forever
+(eqv? 1 (guard (e (#t #t)) (car '#0=(1 2 . #0#))))
+
 (symbol? 'foo)
 (not (symbol? '()))
 (not (symbol? 1))
