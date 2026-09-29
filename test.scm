@@ -491,6 +491,18 @@ and still a comment
 (not (list? '(1 2 . 3)))
 (not (list? (lambda (x) x)))
 
+;; a self-referential element (list containing itself) has a finite,
+;; nil-terminated spine, so it is still a proper list
+(list? '#0=(1 2 #0#))
+
+;; a circular spine is not a proper list, and list? must terminate
+;; instead of looping forever
+(not (list? '#0=(1 2 . #0#)))
+
+;; append and list->vector call the C-side is_proper_list internally,
+;; which must also detect circular lists instead of hanging
+(guard (e (#t #t)) (append '#0=(1 2 . #0#) '(9)) #f)
+(guard (e (#t #t)) (list->vector '#0=(1 2 . #0#)) #f)
 (symbol? 'foo)
 (not (symbol? '()))
 (not (symbol? 1))

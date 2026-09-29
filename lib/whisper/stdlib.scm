@@ -422,12 +422,17 @@
 (define (cdddar x) (cdr (cdr (cdr (car x)))))
 (define (cddddr x) (cdr (cdr (cdr (cdr x)))))
 
+;; tortoise and hare algorithm. the same as proper-list? in
+;; lib/srfi-1-list/srfi-1.scm.
 (define (list? v)
-  (if (null? v)
-      #t
-      (if (pair? v)
-          (list? (cdr v))
-          #f)))
+  (let loop ((v v) (lag v))
+    (if (pair? v)
+        (let ((v (cdr v)))
+          (if (pair? v)
+              (let ((v (cdr v)) (lag (cdr lag)))
+                (and (not (eq? v lag)) (loop v lag)))
+              (null? v)))
+        (null? v))))
 
 (define (list-tail ls k)
   (if (zero? k)

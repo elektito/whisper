@@ -1723,15 +1723,19 @@ static value symbol_to_string(value v) {
 
 /************ list/pair helper functions ***********/
 
+/* tortoise and hare algorithm */
 static int is_proper_list(value v) {
-    value cur = v;
+    value slow = v;
+    value fast = v;
     for (;;) {
-        if (cur == NIL) { return 1; }
-        if (IS_PAIR(cur)) {
-            cur = GET_PAIR(cur)->cdr;
-        } else {
-            return 0;
-        }
+        if (fast == NIL) { return 1; }
+        if (!IS_PAIR(fast)) { return 0; }
+        fast = GET_PAIR(fast)->cdr;
+        if (fast == NIL) { return 1; }
+        if (!IS_PAIR(fast)) { return 0; }
+        fast = GET_PAIR(fast)->cdr;
+        slow = GET_PAIR(slow)->cdr;
+        if (fast == slow) { return 0; }
     }
 }
 
