@@ -1,3 +1,5 @@
+(include "shared.scm")
+
 (define display
   (case-lambda
    ((obj) (display obj (current-output-port)))
@@ -49,6 +51,17 @@
           ((eof-object? obj)
            (write-string "#<eof-object>" port))
           (else (%write obj port))))))
+
+(define write-shared
+  (case-lambda
+   ((obj) (write-shared obj (current-output-port)))
+   ((obj port)
+    (unless (and (output-port? port) (textual-port? port))
+      (error "not a textual output port"))
+    (cond ((pair? obj) (print-shared obj port #f %print-list))
+          ((vector? obj) (print-shared obj port #f %print-vector))
+          ((box? obj) (print-shared obj port #f %print-box))
+          (else (write obj port))))))
 
 (define (quoted-string str quote-char optional-quotes)
   (let ((len (string-length str)))
@@ -113,6 +126,11 @@
   (cond ((pair? obj) (%print-list obj port display? labels used-labels))
         ((vector? obj) (%print-vector obj port display? labels used-labels))
         ((box? obj) (%print-box obj port display? labels used-labels))
+        ((or (string? obj) (bytevector? obj))
+         (print-with-labels obj port labels used-labels (lambda ()
+                                                          (if display?
+                                                              (display obj port)
+                                                              (write obj port)))))
         (else (if display?
                   (display obj port)
                   (write obj port)))))
@@ -162,6 +180,14 @@
   (let ((labels (make-eq-hash-table))
         (used-labels (make-eq-hash-table)))
     (walk-for-cycles obj '() labels)
+    (print obj port display? labels used-labels)))
+
+(define (print-shared obj port display? print)
+  (let ((labels (make-eq-hash-table))
+        (used-labels (make-eq-hash-table)))
+    (for-each (lambda (item)
+                (hash-table-set! labels item (hash-table-size labels)))
+              (find-shared-items obj))
     (print obj port display? labels used-labels)))
 
 (define (print-list ls port display?)

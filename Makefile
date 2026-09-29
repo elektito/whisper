@@ -6,7 +6,7 @@ PREV = whisper-v$(PREV_V)
 
 CFLAGS ?=
 
-COMPILER_SRC = whisper.scm qq.scm expand.scm syntax-rules.scm
+COMPILER_SRC = whisper.scm qq.scm expand.scm syntax-rules.scm lib/whisper/shared.scm
 SRC_FILES = $(COMPILER_SRC) main.scm
 
 LIB_EXPORT_FILES = lib/whisper/scheme-base-exports.scm \
@@ -18,7 +18,7 @@ LIB_EXPORT_FILES = lib/whisper/scheme-base-exports.scm \
                    lib/whisper/scheme-write-exports.scm \
 				   lib/whisper/scheme-read-exports.scm
 
-WHISPER_LIB_SRC = lib/whisper/stdlib.scm lib/whisper/format.scm lib/whisper/read.scm lib/whisper/write.scm lib/whisper/whisper.sld $(LIB_EXPORT_FILES)
+WHISPER_LIB_SRC = lib/whisper/stdlib.scm lib/whisper/format.scm lib/whisper/read.scm lib/whisper/write.scm lib/whisper/shared.scm lib/whisper/whisper.sld $(LIB_EXPORT_FILES)
 
 RAYLIB_SRC = vendor/raylib/src
 

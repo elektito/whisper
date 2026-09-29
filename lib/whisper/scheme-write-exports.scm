@@ -1,1 +1,1 @@
-(export write display)
+(export display write write-shared)

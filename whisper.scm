@@ -1,6 +1,7 @@
 (include "qq.scm")
 (include "expand.scm")
 (include "syntax-rules.scm")
+(include "lib/whisper/shared.scm")
 
 (define *indent-size* 4)
 
@@ -1080,25 +1081,6 @@
                         varnum))
         ((pair? form) (compile-quoted-pair func indent form shared-items known-varnums))
         (else (compile-error "internal error: unknown quoted value: ~s" form))))
-
-(define (find-shared-items datum)
-  (let ((visited (make-eq-hash-table))
-        (shared '()))
-    (define (walk form)
-      (when (or (pair? form) (vector? form) (bytevector? form) (string? form))
-        (if (hash-table-ref/default visited form #f)
-            (unless (memq form shared)
-              (set! shared (cons form shared)))
-            (begin
-              (hash-table-set! visited form #t)
-              (cond ((pair? form) (walk (car form)) (walk (cdr form)))
-                    ((vector? form) (let ((len (vector-length form)))
-                                      (let loop ((i 0))
-                                        (when (< i len)
-                                          (walk (vector-ref form i))
-                                          (loop (+ i 1)))))))))))
-    (walk datum)
-    shared))
 
 (define (compile-quoted-datum func indent datum)
   (let ((shared-items (find-shared-items datum)))
