@@ -2989,11 +2989,11 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
     int64_t m = GET_FIXNUM(n);
     if (m < 0) { buf[0] = '-'; start = 1; m = -m; }
     if (base == FIXNUM(10)) {
-        snprintf(buf + start, sizeof(buf), "%ld", m);
+        snprintf(buf + start, sizeof(buf) - start, "%ld", m);
     } else if (base == FIXNUM(16)) {
-        snprintf(buf + start, sizeof(buf), "%lx", m);
+        snprintf(buf + start, sizeof(buf) - start, "%lx", m);
     } else if (base == FIXNUM(8)) {
-        snprintf(buf + start, sizeof(buf), "%lo", m);
+        snprintf(buf + start, sizeof(buf) - start, "%lo", m);
     } else if (base == FIXNUM(2)) {
         while (m >= 2) { buf[start++] = '0' + (m % 2); m /= 2; }
         buf[start++] = '0' + m;
