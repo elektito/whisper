@@ -57,41 +57,59 @@
       (col-))
   (unread-char ch port))
 
+(define-record-type <datum-label>
+  (make-datum-label number)
+  datum-label?
+  (number datum-label-number))
+
 (define reader-state (make-parameter (new-reader-state "<nofile>")))
 (define reader-wrapper (make-parameter #f))
+(define reader-labels (make-parameter #f))
 
 (define read
   (case-lambda
    (() (read (current-input-port)))
    ((port)
-    (skip-whitespace-and-comments port)
-    (let* ((ch (peek-char port))
-           (start-line (reader-state-line (reader-state)))
-           (start-col (reader-state-column (reader-state)))
-           (result (cond ((eof-object? ch) ch)
-                         ((char=? #\( ch) (read-list port))
-                         ((char=? #\" ch) (read-string-literal port))
-                         ((char=? #\# ch) (read-sharp-thing port))
-                         ((char=? #\' ch) (read-quoted-form port))
-                         ((char=? #\` ch) (read-quasiquoted-form port))
-                         ((char=? #\, ch) (read-unquoted-form port))
-                         ((char=? #\| ch) (read-piped-symbol port))
-                         ((char=? #\. ch) (read-dot-or-identifier port))
-                         ((char=? #\) ch) (read-error "extra closing parenthesis, in file ~a, line ~a, column ~a"
-                                                      (reader-state-filename (reader-state))
-                                                      (reader-state-line (reader-state))
-                                                      (reader-state-column (reader-state))))
-                         (else (stateful-read-char port) ; read-identifier-or-number expects first character already read and passed to it
-                               (read-identifier-or-number port ch)))))
-      (if (and (not (eof-object? result))
-               (reader-wrapper))
-          ((reader-wrapper) result
-                            (reader-state-filename (reader-state))
-                            start-line
-                            start-col
-                            (reader-state-line (reader-state))
-                            (reader-state-column (reader-state)))
-          result)))))
+    (if (reader-labels)
+        (read-datum port)
+        (parameterize ((reader-labels (make-eq-hash-table)))
+          (let ((datum (read-datum port)))
+            (patch-labels datum (reader-labels))
+            ;; something like #0=#0# would not be patched by
+            ;; patch-labels and would leak here, so we check for it
+            (if (datum-label? datum)
+                (read-error "datum label #~a# refers to itself" (datum-label-number datum))
+                datum)))))))
+
+(define (read-datum port)
+  (skip-whitespace-and-comments port)
+  (let* ((ch (peek-char port))
+         (start-line (reader-state-line (reader-state)))
+         (start-col (reader-state-column (reader-state)))
+         (result (cond ((eof-object? ch) ch)
+                       ((char=? #\( ch) (read-list port))
+                       ((char=? #\" ch) (read-string-literal port))
+                       ((char=? #\# ch) (read-sharp-thing port))
+                       ((char=? #\' ch) (read-quoted-form port))
+                       ((char=? #\` ch) (read-quasiquoted-form port))
+                       ((char=? #\, ch) (read-unquoted-form port))
+                       ((char=? #\| ch) (read-piped-symbol port))
+                       ((char=? #\. ch) (read-dot-or-identifier port))
+                       ((char=? #\) ch) (read-error "extra closing parenthesis, in file ~a, line ~a, column ~a"
+                                                    (reader-state-filename (reader-state))
+                                                    (reader-state-line (reader-state))
+                                                    (reader-state-column (reader-state))))
+                       (else (stateful-read-char port) ; read-identifier-or-number expects first character already read and passed to it
+                             (read-identifier-or-number port ch)))))
+    (if (and (not (eof-object? result))
+             (reader-wrapper))
+        ((reader-wrapper) result
+         (reader-state-filename (reader-state))
+         start-line
+         start-col
+         (reader-state-line (reader-state))
+         (reader-state-column (reader-state)))
+        result)))
 
 (define (skip-whitespace-and-comments port)
   (let loop ((ch (peek-char port)))
@@ -272,7 +290,7 @@
 
 (define (read-identifier-or-number port first-char)
   (let loop ((first-iter #t) (ch first-char) (s ""))
-    (cond ((char-is-separator? ch) (sym-or-num s))
+    (cond ((or (eof-object? ch) (char-is-separator? ch)) (sym-or-num s))
           ((eq? #\\ ch) (unless first-iter (stateful-read-char port))
                         (let ((escaped-char (read-escaped-char port)))
                           (loop #f (peek-char port) (string-append-char s escaped-char))))
@@ -317,6 +335,23 @@
                   (s (string-append (make-string 1 #\#) s))
                   (n (string->number s)))
              (or n (read-error "bad numeric literal: ~a" s))))
+          ((char-numeric? ch)
+           (let loop ((digits ""))
+             (let ((ch (read-char port)))
+               (cond ((char-numeric? ch)
+                      (loop (string-append digits (string ch))))
+                     ((eof-object? ch)
+                      (read-error "unexpected eof when reading datum label"))
+                     (else (let ((n (string->number digits)))
+                             (cond ((char=? ch #\#)
+                                    (make-datum-label n))
+                                   ((char=? ch #\=)
+                                    (let ((datum (read-datum port)))
+                                      (when (hash-table-exists? (reader-labels) n)
+                                        (read-error "duplicate datum label: ~a" n))
+                                      (hash-table-set! (reader-labels) n datum)
+                                      datum))
+                                   (else (read-error "unexpected character '~a' at the end of datum label" ch)))))))))
           (else (read-sharp-identifier port)))))
 
 (define (read-sharp-identifier port)
@@ -367,3 +402,31 @@
           (begin
             (stateful-read-char port)
             (loop (peek-char port) (string-append s (make-string 1 ch))))))))
+
+(define (patch-labels datum labels)
+  (define (check-label label)
+    (let ((n (datum-label-number label)))
+      (unless (hash-table-exists? labels n)
+        (read-error "unknown datum label: #~a#" n))))
+  (cond ((pair? datum)
+         (if (datum-label? (car datum))
+             (begin
+               (check-label (car datum))
+               (set-car! datum (hash-table-ref labels (datum-label-number (car datum)))))
+             (patch-labels (car datum) labels))
+         (if (datum-label? (cdr datum))
+             (begin
+               (check-label (cdr datum))
+               (set-cdr! datum (hash-table-ref labels (datum-label-number (cdr datum)))))
+             (patch-labels (cdr datum) labels)))
+        ((vector? datum)
+         (let ((len (vector-length datum)))
+           (let loop ((i 0))
+             (unless (= i len)
+               (if (datum-label? (vector-ref datum i))
+                   (begin
+                     (check-label (vector-ref datum i))
+                     (vector-set! datum i (hash-table-ref labels (datum-label-number (vector-ref datum i)))))
+                   (patch-labels (vector-ref datum i) labels))
+               (loop (+ i 1))))))))
+
