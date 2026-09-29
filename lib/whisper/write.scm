@@ -111,11 +111,11 @@
 
 (define (print-item obj port display? labels used-labels)
   (cond ((pair? obj) (%print-list obj port display? labels used-labels))
-          ((vector? obj) (%print-vector obj port display? labels used-labels))
-          ((box? obj) (%print-box obj port display? labels used-labels))
-          (else (if display?
-                    (display obj port)
-                    (write obj port)))))
+        ((vector? obj) (%print-vector obj port display? labels used-labels))
+        ((box? obj) (%print-box obj port display? labels used-labels))
+        (else (if display?
+                  (display obj port)
+                  (write obj port)))))
 
 (define (print-with-labels obj port labels used-labels print-body)
   (let* ((label (hash-table-ref/default labels obj #f))
