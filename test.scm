@@ -51,6 +51,57 @@ and still a comment
 (let ((x (lambda (a) a)))
   (eqv? x x))
 
+;; reader datum labels (#N=/#N#) can make a quoted literal cyclic or
+;; make two of its parts eq? to each other
+
+(let ((x '#0=(#1=(#0#) b . #1#)))
+  (and (eq? (caar x) x)
+       (eq? (car x) (cddr x))))
+
+;; label numbers aren't limited to small values
+(let ((x '(1 #50=(a b) #50#)))
+  (eq? (cadr x) (caddr x)))
+
+;; equal? can't tell a labeled reference apart from the same structure
+;; written out twice
+(equal? '(a (b (c (d e))) f (d e) g)
+        '(a (b (c #0=(d e))) f #0# g))
+
+;; a label reference can be the car of a pair
+(let ((x '(#0=(1 2) 3 #0#)))
+  (eq? (car x) (caddr x)))
+
+;; a cdr-cycle where the label reference is itself in cdr position
+(let ((x '(1 . #0=(2 . #0#))))
+  (eq? (cdr x) (cddr x)))
+
+;; a label's own definition can be a bare reference to another label
+;; (#1=#0#), aliasing it rather than defining new structure; resolving
+;; it has to chase through the alias to the concrete value
+(let ((x '(1 #0=(a) #1=#0# #1# 2)))
+  (and (equal? x '(1 (a) (a) (a) 2))
+       (eq? (cadr x) (caddr x))
+       (eq? (caddr x) (cadddr x))))
+
+;; reading an undefined datum label is an error, whether it's the
+;; whole top-level datum or nested inside a container
+(guard (e (#t #t)) (read (open-input-string "#0#")) #f)
+(guard (e (#t #t)) (read (open-input-string "(#0#)")) #f)
+
+;; a bare top-level self reference, with no enclosing pair/vector, is
+;; still caught
+(guard (e (#t #t)) (read (open-input-string "#0=#0#")) #f)
+
+;; a self reference nested inside a container is caught the same way
+(guard (e (#t #t)) (read (open-input-string "(#0=#0# 1)")) #f)
+
+;; two labels that alias each other with no concrete datum anywhere
+;; are a cycle too, even though neither directly refers to itself
+(guard (e (#t #t)) (read (open-input-string "(#0=#1# #1=#0#)")) #f)
+
+;; redefining a label within the same top-level datum is an error
+(guard (e (#t #t)) (read (open-input-string "(#0=1 #0=2)")) #f)
+
 (symbol=? 'foo 'foo)
 (not (symbol=? 'foo 'bar))
 
@@ -1140,15 +1191,23 @@ and still a comment
 
 (= 0 (vector-length #()))
 (= 3 (vector-length #(1 2 3)))
-;;(= 3 (vector-length #0=#(1 2 #0#)))
-;;(let ((v #0=#(1 2 #0#)))
-;;  (eq? v (vector-ref v 2)))
-;;(let ((v #(1 2 #0=(10) #0#)))
-;;  (eq? (vector-ref v 2) (vector-ref v 3)))
-;;(let ((v #0=#(1 (2 #0#) 3)))
-;;  (eq? v (cadr (vector-ref v 1))))
-;;(let ((v '#0=(1 #(2 #0#) 3)))
-;;  (eq? v (vector-ref (cadr v) 1)))
+
+;; vector literals can be cyclic or share sub-structure, via reader
+;; datum labels (#N=/#N#)
+(= 3 (vector-length #0=#(1 2 #0#)))
+(let ((v #0=#(1 2 #0#)))
+  (eq? v (vector-ref v 2)))
+(let ((v #(1 2 #0=(10) #0#)))
+  (eq? (vector-ref v 2) (vector-ref v 3)))
+(let ((v #0=#(1 (2 #0#) 3)))
+  (eq? v (cadr (vector-ref v 1))))
+(let ((v '#0=(1 #(2 #0#) 3)))
+  (eq? v (vector-ref (cadr v) 1)))
+
+;; vectors are self-evaluating, so a top-level cyclic vector literal
+;; needs no quote at all to reach the compiler's literal-compiling code
+(define cyclic-toplevel-vector #0=#(9 #0#))
+(eq? cyclic-toplevel-vector (vector-ref cyclic-toplevel-vector 1))
 
 (= 2 (vector-ref #(1 2 3) 1))
 
@@ -1158,7 +1217,7 @@ and still a comment
 
 (eq? '() (vector->list #()))
 (equal? '(a b c) (vector->list #(a b c)))
-;;(equal? '(1 2 #0=#(1 2 #0#)) (vector->list #1=#(1 2 #1#)))
+(equal? '(1 2 #0=#(1 2 #0#)) (vector->list #1=#(1 2 #1#)))
 
 (equal? #(41 62) (vector-map (lambda (x y z) (+ x y z))
                              #(1 2)
@@ -2553,6 +2612,118 @@ and still a comment
     (newline explicit))
   (and (equal? "" (get-output-string redirected))
        (equal? "xyz\n" (get-output-string explicit))))
+
+;; cyclic and shared structures: equal?, write, write-shared
+
+;; equal? on structures built cyclic by hand (set-car!/set-cdr!/
+;; vector-set!, rather than datum labels, so two independently built
+;; structures of the same or different shape can be compared)
+
+(let ((c (list 1 2))
+      (d (list 1 2)))
+  (set-cdr! (cdr c) c)
+  (set-cdr! (cdr d) d)
+  (equal? c d))
+
+(let ((a (list 1 2))
+      (b (list 1 3)))
+  (set-cdr! (cdr a) a)
+  (set-cdr! (cdr b) b)
+  (not (equal? a b)))
+
+(let ((e (list 1 2 1 2))
+      (f (list 1 2)))
+  (set-cdr! (cdr f) f)
+  (not (equal? e f)))
+
+(let ((self-car (cons 'dummy '()))
+      (self-car2 (cons 'dummy '())))
+  (set-car! self-car self-car)
+  (set-car! self-car2 self-car2)
+  (equal? self-car self-car2))
+
+(let ((complex1 (list 1 2))
+      (complex1-inner (list 3 4))
+      (complex2 (list 1 2))
+      (complex2-inner (list 3 4)))
+  (set-cdr! (cdr complex1) complex1-inner)
+  (set-cdr! (cdr complex1-inner) complex1)
+  (set-cdr! (cdr complex2) complex2-inner)
+  (set-cdr! (cdr complex2-inner) complex2)
+  (equal? complex1 complex2))
+
+(let ((v1 (vector 1 2 'placeholder))
+      (v2 (vector 1 2 'placeholder)))
+  (vector-set! v1 2 v1)
+  (vector-set! v2 2 v2)
+  (equal? v1 v2))
+
+;; write/display terminate on a cycle, labeling only the node(s) that
+;; are genuinely part of one
+
+(let ((p (list 1 2)))
+  (set-cdr! (cdr p) p)
+  (let ((out (open-output-string)))
+    (write p out)
+    (equal? "#0=(1 2 . #0#)" (get-output-string out))))
+
+(let ((v (vector 1 2 'x)))
+  (vector-set! v 2 v)
+  (let ((out (open-output-string)))
+    (write v out)
+    (equal? "#0=#(1 2 #0#)" (get-output-string out))))
+
+;; non-cyclic sharing is not a cycle, so plain write prints it
+;; redundantly rather than labeling it
+(let* ((x (list 1 2))
+       (out (open-output-string)))
+  (write (list x x) out)
+  (equal? "((1 2) (1 2))" (get-output-string out)))
+
+;; a cycle spanning two separate pairs, not just a single self-loop
+(let ((a (list 1 2))
+      (b (list 3 4)))
+  (set-cdr! (cdr a) b)
+  (set-cdr! (cdr b) a)
+  (let ((out (open-output-string)))
+    (write a out)
+    (equal? "#0=(1 2 3 4 . #0#)" (get-output-string out))))
+
+;; write-shared labels every shared sub-structure, cyclic or not,
+;; unlike plain write
+
+(let* ((x (list 1 2))
+       (out (open-output-string)))
+  (write-shared (list x x) out)
+  (equal? "(#0=(1 2) #0#)" (get-output-string out)))
+
+(let ((p (list 1 2)))
+  (set-cdr! (cdr p) p)
+  (let ((out (open-output-string)))
+    (write-shared p out)
+    (equal? "#0=(1 2 . #0#)" (get-output-string out))))
+
+(let* ((s "hi")
+       (out (open-output-string)))
+  (write-shared (list s s) out)
+  (equal? "(#0=\"hi\" #0#)" (get-output-string out)))
+
+(let* ((bv (bytevector 1 2 3))
+       (out (open-output-string)))
+  (write-shared (list bv bv) out)
+  (equal? "(#0=#u8(1 2 3) #0#)" (get-output-string out)))
+
+;; a cyclic literal read back in round-trips through write-shared to the
+;; same textual shape
+(let* ((v (read (open-input-string "#0=(1 2 . #0#)")))
+       (out (open-output-string)))
+  (write-shared v out)
+  (equal? "#0=(1 2 . #0#)" (get-output-string out)))
+
+(let* ((v (read (open-input-string "#0=#(1 2 #0#)")))
+       (out (open-output-string)))
+  (write-shared v out)
+  (equal? "#0=#(1 2 #0#)" (get-output-string out)))
 
 ;; open-output-bytevector/get-output-bytevector/write-u8
 (let ((out (open-output-bytevector)))
