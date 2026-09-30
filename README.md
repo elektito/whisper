@@ -29,6 +29,7 @@ The following SRFIs are supported:
  - [SRFI 48](https://srfi.schemers.org/srfi-48/srfi-48.html) - Intermediate Format Strings
  - [SRFI 69](https://srfi.schemers.org/srfi-69/srfi-69.html) - Basic Hash Tables
  - [SRFI 111](https://srfi.schemers.org/srfi-111/srfi-111.html) - Boxes
+ - [SRFI 133](https://srfi.schemers.org/srfi-133/srfi-133.html) - Vector Library
  - [SRFI 151](https://srfi.schemers.org/srfi-151/srfi-151.html) - Bitwise Operations
  
 ## Bootstrapping

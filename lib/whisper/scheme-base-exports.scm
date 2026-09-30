@@ -75,6 +75,7 @@
         error-object-message
         even?
         exact
+        exact?
         expt
         file-error?
         floor
@@ -90,6 +91,7 @@
         if
         include
         inexact
+        inexact?
         input-port-open?
         input-port?
         integer->char

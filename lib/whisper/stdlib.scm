@@ -294,6 +294,16 @@
   ;; TODO we need to change this if/when we have bignums
   (fixnum? n))
 
+(define (exact? n)
+  (unless (number? n)
+    (error "not a number"))
+  (integer? n))
+
+(define (inexact? n)
+  (unless (number? n)
+    (error "not a number"))
+  (not (integer? n)))
+
 (define (positive? n)
   (> n 0))
 
