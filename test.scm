@@ -25,6 +25,9 @@ and still a comment
 ;; needed for the environment/eval tests below
 (import (scheme eval))
 
+;; needed for the srfi 151 tests below
+(import (srfi 151))
+
 ;; defines
 
 (eq? 1 1) ; also test datum comment at the end of a list
@@ -3198,3 +3201,15 @@ and still a comment
   (delete-file path)
   (and (eq? out-result 'written)
        (equal? in-result "hello")))
+
+;; srfi 151
+
+;; negative numbers have infinitely many leading one bits, so bit-set? is
+;; true for them at any index, even past the width of a fixnum
+(bit-set? 0 1)
+(not (bit-set? 1 1))
+(bit-set? 3 8)
+(bit-set? 60 -1)
+(bit-set? 1000 -1)
+(not (bit-set? 1000 1))
+(not (bit-set? 1000 0))

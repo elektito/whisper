@@ -56,8 +56,10 @@
 ;;; zero "stop bit" appearing after that highest one bit to turn off the
 ;;; replication of the ones.
 
-(define (bit-set? index n) 
-  (not (zero? (bitwise-and (arithmetic-shift 1 index) n))))
+;; shift n right rather than shifting 1 left, so that an index past the
+;; fixnum width still sees the sign bits of a negative n
+(define (bit-set? index n)
+  (odd? (arithmetic-shift n (- index))))
 
 (define (any-bit-set? test-bits n) (not (zero? (bitwise-and test-bits n))))
 
