@@ -1580,9 +1580,11 @@
    ((port) (%flush-output-port port))))
 
 (define (call-with-port port proc)
-  (let ((result (proc port)))
-    (close-port port)
-    result))
+  (call-with-values
+      (lambda () (proc port))
+    (lambda results
+      (close-port port)
+      (apply values results))))
 
 (define (call-with-input-file filename proc)
   (let ((port (open-input-file filename)))
@@ -1594,15 +1596,23 @@
 
 (define (with-input-from-file filename thunk)
   (let ((port (open-input-file filename)))
-    (parameterize ((current-input-port port))
-      (thunk)
-      (close-input-port port))))
+    (call-with-values
+        (lambda ()
+          (parameterize ((current-input-port port))
+            (thunk)))
+      (lambda results
+        (close-input-port port)
+        (apply values results)))))
 
 (define (with-output-to-file filename thunk)
   (let ((port (open-output-file filename)))
-    (parameterize ((current-output-port port))
-      (thunk)
-      (close-output-port port))))
+    (call-with-values
+        (lambda ()
+          (parameterize ((current-output-port port))
+            (thunk)))
+      (lambda results
+        (close-output-port port)
+        (apply values results)))))
 
 (define (close-input-port port)
   (unless (input-port? port)

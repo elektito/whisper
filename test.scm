@@ -3050,3 +3050,29 @@ and still a comment
 ;; argument rather than raising
 (and (not (textual-port? 5))
      (not (binary-port? 5)))
+
+;; call-with-port closes the port and returns all of proc's values
+(let* ((port (open-input-string "abc"))
+       (result (call-with-values
+                   (lambda () (call-with-port port (lambda (p) (values (read-char p) 2))))
+                 list)))
+  (and (equal? result '(#\a 2))
+       (not (input-port-open? port))))
+
+;; call-with-output-file and call-with-input-file round trip
+(let ((path (test-temp-path)))
+  (call-with-output-file path (lambda (p) (write '(1 "two" #\3) p)))
+  (let ((result (call-with-input-file path read)))
+    (delete-file path)
+    (equal? result '(1 "two" #\3))))
+
+;; with-output-to-file and with-input-from-file rebind the current ports
+;; and return the thunk's result
+(let* ((path (test-temp-path))
+       (out-result (with-output-to-file path
+                     (lambda () (display "hello") 'written)))
+       (in-result (with-input-from-file path
+                    (lambda () (read-line)))))
+  (delete-file path)
+  (and (eq? out-result 'written)
+       (equal? in-result "hello")))
