@@ -365,6 +365,13 @@ and still a comment
 (= 10 (abs -10))
 (= 10 (abs 10))
 (= 0 (abs 0))
+(eqv? 0.0 (abs -0.0))
+
+;; exact zero is the additive identity, so adding it keeps -0.0
+;; negative
+(eqv? -0.0 (+ -0.0 -0.0))
+(eqv? -0.0 (+ -0.0))
+(eqv? -0.0 (+ 0 -0.0))
 
 (= 4 (gcd 32 -36))
 (= 10 (gcd 10 20 30))

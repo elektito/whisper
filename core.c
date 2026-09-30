@@ -4001,8 +4001,14 @@ value primcall_add(environment env, enum call_flags flags, int nargs, ...) {
             if (inexact) {
                 result_flonum += GET_FLONUM(v);
             } else {
-                result_flonum = (float) GET_FIXNUM(result_fixnum);
-                result_flonum += GET_FLONUM(v);
+                /* exact zero is the additive identity, so an exact sum
+                 * of zero must not turn -0.0 into 0.0 */
+                if (result_fixnum == 0) {
+                    result_flonum = GET_FLONUM(v);
+                } else {
+                    result_flonum = (float) GET_FIXNUM(result_fixnum);
+                    result_flonum += GET_FLONUM(v);
+                }
                 inexact = 1;
             }
         } else {

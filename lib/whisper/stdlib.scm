@@ -333,7 +333,8 @@
                  (else (loop (* b b) (truncate-quotient p 2) (* acc b))))))))
 
 (define (abs x)
-  (if (< x 0) (- x) x))
+  ;; the eqv? check catches -0.0, which is not less than zero
+  (if (or (< x 0) (eqv? x -0.0)) (- x) x))
 
 (define (gcd2 a b)
   (let loop ((x (abs a)) (y (abs b)))
