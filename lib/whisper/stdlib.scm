@@ -668,7 +668,9 @@
   (or (char=? #\space c)
       (char=? #\tab c)
       (char=? #\newline c)
-      (char=? #\return c)))
+      (char=? #\return c)
+      (char=? #\vtab c)
+      (char=? #\page c)))
 
 (define (char-alphabetic? ch)
   (or (and (char>=? ch #\a) (char<=? ch #\z))
