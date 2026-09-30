@@ -1367,6 +1367,11 @@ static void ensure_buffer_filled(struct object *port) {
         return;
     }
 
+    /* a previous read already hit eof on this fd. don't block on
+     * another read, which a tty would happily do (its eof is a one-shot
+     * signal, not a sticky state like a closed pipe). */
+    if (port->port.at_eof) { return; }
+
     alloc_file_buf(port);
 
     /* we are about to block waiting for input. flush stdout first so
@@ -1384,6 +1389,8 @@ static void ensure_buffer_filled(struct object *port) {
     if (bytes_read < 0) {
         raise_file_error("cannot read from file '%s': %s", port_name(port), strerror(errno));
     }
+
+    if (bytes_read == 0) { port->port.at_eof = 1; }
 
     port->port.file_buf_size = keep + bytes_read;
     port->port.file_buf_pos = keep;
@@ -1604,8 +1611,7 @@ static void string_printf(value port, const char *fmt, ...) {
     va_end(args);
 }
 
-static void _write(value v, value port);
-static void print_unprintable(value v, value port) {
+static void _write(value v, value port) {
     if (IS_CLOSURE(v)) {
         if (GET_CLOSURE(v)->min_args == GET_CLOSURE(v)->max_args)
             GET_OBJECT(port)->port.printf(port, "#<procedure nargs=%d>", GET_CLOSURE(v)->min_args);
@@ -1613,8 +1619,6 @@ static void print_unprintable(value v, value port) {
             GET_OBJECT(port)->port.printf(port, "#<procedure min_args=%d>", GET_CLOSURE(v)->min_args);
         else
             GET_OBJECT(port)->port.printf(port, "#<procedure min_args=%d max_args=%d>", GET_CLOSURE(v)->min_args, GET_CLOSURE(v)->max_args);
-    } else if (IS_EOFOBJ(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<eof-object>");
     } else if (IS_PORT(v)) {
         struct object *op = GET_OBJECT(v);
         const char *dir = (op->port.is_input && op->port.is_output) ? "input/output" : (op->port.is_input ? "input" : "output");
@@ -1649,10 +1653,6 @@ static void print_unprintable(value v, value port) {
         GET_OBJECT(port)->port.printf(port, "#<c-wrapped kind=%d data=%p>",
                                       GET_OBJECT(v)->c_wrapped.kind,
                                       GET_OBJECT(v)->c_wrapped.data);
-    } else if (IS_BOX(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<box value=");
-        _write(GET_OBJECT(v)->box.value, port);
-        GET_OBJECT(port)->port.printf(port, ">");
     } else if (IS_HASH_TABLE(v)) {
         GET_OBJECT(port)->port.printf(
             port, "#<hash-table size=%zu cap=%zu>",
@@ -1660,61 +1660,6 @@ static void print_unprintable(value v, value port) {
             GET_OBJECT(v)->hash_table.ht.cap);
     } else {
         GET_OBJECT(port)->port.printf(port, "#<object-%p>", v);
-    }
-}
-
-static void print_symbol(value sym, value port) {
-    if (IS_OBJECT(sym)) {
-        GET_OBJECT(port)->port.printf(port, "#:"); /* uninterned symbol prefix */
-    }
-
-    GET_OBJECT(port)->port.printf(port, "%.*s", (int) GET_SYMBOL(sym)->name_len, GET_SYMBOL(sym)->name);
-}
-
-static void _display(value v, value port);
-static void _display_pair(struct pair *v, value port, int in_the_middle) {
-    if (!in_the_middle) GET_OBJECT(port)->port.printf(port, "(");
-    _display(v->car, port);
-    if (IS_NIL(v->cdr)) {
-        GET_OBJECT(port)->port.printf(port, ")");
-    } else if (IS_PAIR(v->cdr)) {
-        GET_OBJECT(port)->port.printf(port, " ");
-        _display_pair(GET_PAIR(v->cdr), port, 1);
-    } else {
-        GET_OBJECT(port)->port.printf(port, " . ");
-        _display(v->cdr, port);
-        GET_OBJECT(port)->port.printf(port, ")");
-    }
-}
-
-static void _write_flonum(float f, value port);
-static void _write_vector(struct object *vec, value port);
-static void _write_bytevector(struct object *vec, value port);
-static void _display(value v, value port) {
-    if (IS_FIXNUM(v)) {
-        GET_OBJECT(port)->port.printf(port, "%ld", GET_FIXNUM(v));
-    } else if (IS_STRING(v)) {
-        GET_OBJECT(port)->port.printf(port, "%.*s", (int) GET_STRING(v)->len, GET_STRING(v)->s);
-    } else if (IS_SYMBOL(v)) {
-        print_symbol(v, port);
-    } else if (IS_BOOL(v)) {
-        GET_OBJECT(port)->port.printf(port, "%s", GET_BOOL(v) ? "#t" : "#f");
-    } else if (IS_VOID(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<void>");
-    } else if (IS_CHAR(v)) {
-        GET_OBJECT(port)->port.printf(port, "%c", GET_CHAR(v));
-    } else if (IS_NIL(v)) {
-        GET_OBJECT(port)->port.printf(port, "()");
-    } else if (IS_PAIR(v)) {
-        _display_pair(GET_PAIR(v), port, 0);
-    } else if (IS_VECTOR(v)) {
-        _write_vector(GET_OBJECT(v), port);
-    } else if (IS_BYTEVECTOR(v)) {
-        _write_bytevector(GET_OBJECT(v), port);
-    } else if (IS_FLONUM(v)) {
-        _write_flonum(GET_FLONUM(v), port);
-    } else {
-        print_unprintable(v, port);
     }
 }
 
@@ -1748,160 +1693,6 @@ static void snprintf_flonum(char *buf, size_t buf_size, float f) {
     }
 }
 
-static void _write_flonum(float f, value port) {
-    char buf[64];
-    snprintf_flonum(buf, sizeof(buf), f);
-    GET_OBJECT(port)->port.printf(port, "%s", buf);
-}
-
-static void _write_pair(struct pair *v, value port, int in_the_middle) {
-    if (!in_the_middle) GET_OBJECT(port)->port.printf(port, "(");
-    _write(v->car, port);
-    if (IS_NIL(v->cdr)) {
-        GET_OBJECT(port)->port.printf(port, ")");
-    } else if (IS_PAIR(v->cdr)) {
-        GET_OBJECT(port)->port.printf(port, " ");
-        _write_pair(GET_PAIR(v->cdr), port, 1);
-    } else {
-        GET_OBJECT(port)->port.printf(port, " . ");
-        _write(v->cdr, port);
-        GET_OBJECT(port)->port.printf(port, ")");
-    }
-}
-
-/* vec is an untagged pointer. Safe only because _write never allocates.
-   If that changes, the conservative GC could miss the vector and
-   collect it. */
-static void _write_vector(struct object *vec, value port) {
-    GET_OBJECT(port)->port.printf(port, "#(");
-    for (int i = 0; i < GET_OBJECT(vec)->vector.len; ++i) {
-        _write(GET_OBJECT(vec)->vector.data[i], port);
-        if (i != GET_OBJECT(vec)->vector.len - 1) {
-            GET_OBJECT(port)->port.printf(port, " ");
-        }
-    }
-    GET_OBJECT(port)->port.printf(port, ")");
-}
-
-static void _write_bytevector(struct object *vec, value port) {
-    GET_OBJECT(port)->port.printf(port, "#u8(");
-    for (int i = 0; i < GET_OBJECT(vec)->bytevector.len; ++i) {
-        GET_OBJECT(port)->port.printf(port, "%d", GET_OBJECT(vec)->bytevector.data[i]);
-        if (i != GET_OBJECT(vec)->bytevector.len - 1) {
-            GET_OBJECT(port)->port.printf(port, " ");
-        }
-    }
-    GET_OBJECT(port)->port.printf(port, ")");
-}
-
-static void _write_char_literal(value v, value port) {
-    char ch = GET_CHAR(v);
-    char buf[16];
-    char *text;
-    switch (ch) {
-    case '\a':
-        text = "#\\alarm";
-        break;
-    case '\b':
-        text = "#\\backspace";
-        break;
-    case '\x7f':
-        text = "#\\delete";
-        break;
-    case '\x1b':
-        text = "#\\escape";
-        break;
-    case '\n':
-        text = "#\\newline";
-        break;
-    case '\0':
-        text = "#\\null";
-        break;
-    case '\r':
-        text = "#\\return";
-        break;
-    case ' ':
-        text = "#\\space";
-        break;
-    case '\t':
-        text = "#\\tab";
-        break;
-    default:
-        if (ch >= 32 && ch < 127)
-            sprintf(buf, "#\\%c", ch);
-        else
-            sprintf(buf, "#\\x%02x", (int)(uint8_t) ch);
-        text = buf;
-    }
-
-    GET_OBJECT(port)->port.printf(port, "%s", text);
-}
-
-static void _write_string_literal(value v, value port) {
-    struct object *op = GET_OBJECT(port);
-    struct string *s = GET_STRING(v);
-    op->port.printf(port, "\"");
-    for (int i = 0; i < s->len; ++i) {
-        switch (s->s[i]) {
-        case '\a':
-            op->port.printf(port, "\\a");
-            break;
-        case '\b':
-            op->port.printf(port, "\\b");
-            break;
-        case '\r':
-            op->port.printf(port, "\\r");
-            break;
-        case '\n':
-            op->port.printf(port, "\\n");
-            break;
-        case '\t':
-            op->port.printf(port, "\\t");
-            break;
-        case '"':
-            op->port.printf(port, "\\\"");
-            break;
-        case '\\':
-            op->port.printf(port, "\\\\");
-            break;
-        default:
-            if (s->s[i] >= 32 && s->s[i] < 127)
-                op->port.printf(port, "%c", s->s[i]);
-            else
-                op->port.printf(port, "\\x%02x", (int) s->s[i]);
-        }
-    }
-    op->port.printf(port, "\"");
-}
-
-static void _write(value v, value port) {
-    if (IS_FIXNUM(v)) {
-        GET_OBJECT(port)->port.printf(port, "%ld", GET_FIXNUM(v));
-    } else if (IS_STRING(v)) {
-        _write_string_literal(v, port);
-    } else if (IS_SYMBOL(v)) {
-        print_symbol(v, port);
-    } else if (IS_BOOL(v)) {
-        GET_OBJECT(port)->port.printf(port, "%s", GET_BOOL(v) ? "#t" : "#f");
-    } else if (IS_VOID(v)) {
-        GET_OBJECT(port)->port.printf(port, "#<void>");
-    } else if (IS_CHAR(v)) {
-        _write_char_literal(v, port);
-    } else if (IS_NIL(v)) {
-        GET_OBJECT(port)->port.printf(port, "()");
-    } else if (IS_PAIR(v)) {
-        _write_pair(GET_PAIR(v), port, 0);
-    } else if (IS_VECTOR(v)) {
-        _write_vector(GET_OBJECT(v), port);
-    } else if (IS_BYTEVECTOR(v)) {
-        _write_bytevector(GET_OBJECT(v), port);
-    } else if (IS_FLONUM(v)) {
-        _write_flonum(GET_FLONUM(v), port);
-    } else {
-        print_unprintable(v, port);
-    }
-}
-
 /************ symbol helper functions ***********/
 
 static value string_to_symbol(value v) {
@@ -1932,15 +1723,19 @@ static value symbol_to_string(value v) {
 
 /************ list/pair helper functions ***********/
 
+/* tortoise and hare algorithm */
 static int is_proper_list(value v) {
-    value cur = v;
+    value slow = v;
+    value fast = v;
     for (;;) {
-        if (cur == NIL) { return 1; }
-        if (IS_PAIR(cur)) {
-            cur = GET_PAIR(cur)->cdr;
-        } else {
-            return 0;
-        }
+        if (fast == NIL) { return 1; }
+        if (!IS_PAIR(fast)) { return 0; }
+        fast = GET_PAIR(fast)->cdr;
+        if (fast == NIL) { return 1; }
+        if (!IS_PAIR(fast)) { return 0; }
+        fast = GET_PAIR(fast)->cdr;
+        slow = GET_PAIR(slow)->cdr;
+        if (fast == slow) { return 0; }
     }
 }
 
@@ -2815,18 +2610,6 @@ value primcall_delete_file(environment env, enum call_flags flags, int nargs, ..
     return VOID;
 }
 
-value primcall_percent_display(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 2) { raise_error("%%display needs two arguments"); }
-    init_args();
-    value v = next_arg();
-    value port = next_arg();
-    free_args();
-    if (!IS_PORT(port)) { raise_error("writing to non-port"); }
-    if (!GET_OBJECT(port)->port.is_output) { raise_error("writing to non-output port"); }
-    _display(v, port);
-    return VOID;
-}
-
 value primcall_eof_object(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 0) { raise_error("eof-object takes no arguments"); }
     return EOFOBJ;
@@ -3210,11 +2993,11 @@ value primcall_number_to_string(environment env, enum call_flags flags, int narg
     int64_t m = GET_FIXNUM(n);
     if (m < 0) { buf[0] = '-'; start = 1; m = -m; }
     if (base == FIXNUM(10)) {
-        snprintf(buf + start, sizeof(buf), "%ld", m);
+        snprintf(buf + start, sizeof(buf) - start, "%ld", m);
     } else if (base == FIXNUM(16)) {
-        snprintf(buf + start, sizeof(buf), "%lx", m);
+        snprintf(buf + start, sizeof(buf) - start, "%lx", m);
     } else if (base == FIXNUM(8)) {
-        snprintf(buf + start, sizeof(buf), "%lo", m);
+        snprintf(buf + start, sizeof(buf) - start, "%lo", m);
     } else if (base == FIXNUM(2)) {
         while (m >= 2) { buf[start++] = '0' + (m % 2); m /= 2; }
         buf[start++] = '0' + m;
