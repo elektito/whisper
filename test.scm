@@ -516,6 +516,23 @@ and still a comment
 (eqv? 1 (exact 1.0))
 (eqv? 1.0 (inexact 1))
 
+;; inexact numbers with no fractional part are integers too, but the
+;; infinities and nan are not
+(integer? 3)
+(integer? 3.0)
+(integer? -0.0)
+(not (integer? 3.5))
+(not (integer? +inf.0))
+(not (integer? -inf.0))
+(not (integer? +nan.0))
+(not (integer? 'foo))
+
+;; integer? accepting 3.0 does not make it exact
+(exact? 3)
+(not (exact? 3.0))
+(inexact? 3.0)
+(not (inexact? 3))
+
 (= 10 ((lambda (x y) x) 10 20))
 (= 20 ((lambda (x y) y) 10 20))
 

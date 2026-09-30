@@ -292,17 +292,21 @@
 
 (define (integer? n)
   ;; TODO we need to change this if/when we have bignums
-  (fixnum? n))
+  (or (fixnum? n)
+      (and (flonum? n)
+           (= n (truncate n))
+           ;; rules out the infinities and nan, where n - n is nan
+           (= 0 (- n n)))))
 
 (define (exact? n)
   (unless (number? n)
     (error "not a number"))
-  (integer? n))
+  (fixnum? n))
 
 (define (inexact? n)
   (unless (number? n)
     (error "not a number"))
-  (not (integer? n)))
+  (flonum? n))
 
 (define (positive? n)
   (> n 0))
@@ -1630,6 +1634,17 @@
 ;; will be set further down
 (define exit-continuation #f)
 
+;; turns the argument of exit or emergency-exit into a process exit
+;; status. numbers are truncated towards zero, so 2.5 exits with 2. #f
+;; means failure, and any other value, including the infinities and nan,
+;; means success.
+(define (exit-object->status obj)
+  (cond ((fixnum? obj) obj)
+        ((and (flonum? obj) (integer? (truncate obj)))
+         (exact (truncate obj)))
+        (obj 0)
+        (else 1)))
+
 (define exit
   (case-lambda
    (() (exit 0))
@@ -1638,9 +1653,7 @@
 (define emergency-exit
   (case-lambda
    (() (%_exit 0))
-   ((exit-code) (%_exit (if (integer? exit-code)
-                            exit-code
-                            (if exit-code 0 1))))))
+   ((exit-code) (%_exit (exit-object->status exit-code)))))
 
 ;; capture a continuation that will exit the system when called again, and store
 ;; it in exit-continuation. we exit this way to make sure all dynamic-wind
@@ -1654,4 +1667,4 @@
                         (set! exit-continuation k)
                         dont-exit))))
   (unless (eq? code dont-exit)
-    (%exit (if (integer? code) code (if code 0 1)))))
+    (%exit (exit-object->status code))))

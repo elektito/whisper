@@ -689,7 +689,7 @@
 
 (define (library-mangle-name lib-name name)
   (define (mangle-part part)
-    (cond ((integer? part) (format "i~a" part))
+    (cond ((fixnum? part) (format "i~a" part))
           ((symbol? part) (let* ((s (symbol->string part))
                                  (len (string-length s)))
                             (if (< len 10)
@@ -800,7 +800,7 @@
     (if (atom? rest)
         (unless (null? rest)
           (compile-error "invalid library name: ~a" lib-name))
-        (if (or (symbol? (car rest)) (integer? (car rest)))
+        (if (or (symbol? (car rest)) (fixnum? (car rest)))
             (loop (cdr rest))
             (compile-error "invalid library name: ~a" lib-name))))
   (import-library lib-name filename))
