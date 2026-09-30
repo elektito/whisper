@@ -879,14 +879,21 @@ and still a comment
 ;; string
 
 ;(string=? "Hello" "H\x65;llo")
-;(string=? "foobar" "foo\
-;                    bar")
+(string=? "foobar" "foo\
+                    bar")
 (char=? #\tab (string-ref "\t" 0))
 (char=? #\newline (string-ref "\n" 0))
 (char=? #\return (string-ref "\r" 0))
 (char=? #\alarm (string-ref "\a" 0))
 (char=? #\backspace (string-ref "\b" 0))
 (char=? #\" (string-ref "\"" 0))
+
+;; a line continuation may have trailing whitespace after the backslash,
+;; and it skips the leading whitespace of the next line
+(string=? "foobar" "foo\   
+   bar")
+(string=? "foo bar" "foo \
+   bar")
 ;(char=? #\x7c (string-ref "\|" 0))
 ;(char=? #\null (string-ref "\x0;" 0))
 

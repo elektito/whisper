@@ -222,10 +222,40 @@
     (stateful-read-char port)
     (cond ((eof-object? ch) (read-error "eof in string"))
           ((char=? #\" ch) s)
+          ((and (char=? #\\ ch) (line-continuation-start? (peek-char port)))
+           (skip-line-continuation port)
+           (loop (peek-char port) s))
           ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
                              (loop (peek-char port) (string-append-char s escaped-char))))
           (else (let ((s (string-append-char s ch)))
                   (loop (peek-char port) s))))))
+
+(define (intraline-whitespace? ch)
+  (and (char? ch) (or (char=? ch #\space) (char=? ch #\tab))))
+
+(define (line-continuation-start? ch)
+  (or (intraline-whitespace? ch)
+      (and (char? ch) (or (char=? ch #\newline) (char=? ch #\return)))))
+
+(define (skip-intraline-whitespace port)
+  (when (intraline-whitespace? (peek-char port))
+    (stateful-read-char port)
+    (skip-intraline-whitespace port)))
+
+(define (skip-line-continuation port)
+  ;; handles a string escape of the form \<spaces><line ending><spaces>,
+  ;; which contributes nothing to the string. the backslash is already
+  ;; read.
+  (skip-intraline-whitespace port)
+  (let ((ch (peek-char port)))
+    (cond ((eof-object? ch) (read-error "eof in string"))
+          ((char=? ch #\newline) (stateful-read-char port))
+          ((char=? ch #\return)
+           (stateful-read-char port)
+           (when (eqv? (peek-char port) #\newline)
+             (stateful-read-char port)))
+          (else (read-error "bad escape sequence"))))
+  (skip-intraline-whitespace port))
 
 (define (read-piped-symbol port)
   (stateful-read-char port) ; get rid of initial pipe
