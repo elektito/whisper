@@ -586,12 +586,21 @@
     (display (make-string (* indent *indent-size*) #\space) port)
     (apply format port fmt args)))
 
+(define (flonum->c f)
+  ;; the special values are written as +inf.0 and so on in scheme, which
+  ;; is not valid c
+  (let ((s (number->string f)))
+    (cond ((string=? s "+inf.0") "INFINITY")
+          ((string=? s "-inf.0") "-INFINITY")
+          ((string=? s "+nan.0") "NAN")
+          (else s))))
+
 (define (compile-number func indent form)
   (let ((varnum (func-next-varnum func)))
     (cond ((fixnum? form)
            (gen-code func indent "value x~a = FIXNUM(~a);\n" varnum form))
           ((flonum? form)
-           (gen-code func indent "value x~a = FLONUM(~a);\n" varnum form))
+           (gen-code func indent "value x~a = FLONUM(~a);\n" varnum (flonum->c form)))
           (else (compile-error "internal-error: unhandled number type: ~s" form)))
     varnum))
 

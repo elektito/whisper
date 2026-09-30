@@ -197,6 +197,35 @@ and still a comment
        (string->number "1000" 1))
 (not (string->number "foo"))
 
+;; exponent notation works without a decimal point in the mantissa, so
+;; 1e2 reads as 100.0 just like 1.0e2 does. things that only look
+;; similar, like e2 and 1e, are still symbols.
+(eqv? 100.0 1e2)
+(eqv? 100.0 (string->number "1e2"))
+(eqv? 0.01 1e-2)
+(symbol? 'e2)
+(symbol? '1e)
+
+;; infinities and nans are numbers, with or without a radix prefix, but
+;; have no exact equivalent
+(number? +inf.0)
+(number? -inf.0)
+(number? +nan.0)
+(number? -nan.0)
+(eqv? +inf.0 #x+inf.0)
+(eqv? -inf.0 #i#b-inf.0)
+(equal? "+inf.0" (number->string +inf.0))
+(equal? "-inf.0" (number->string -inf.0))
+(equal? "+nan.0" (number->string -nan.0))
+(not (string->number "#e+inf.0"))
+(not (string->number "inf"))
+(not (string->number "infinity"))
+
+;; #i works with a non-decimal radix
+(eqv? 16.0 #i#x10)
+(eqv? 8.0 #o#i10)
+(eqv? 2.0 (string->number "#i#b10"))
+
 (= 1 (max 1))
 (= 2 (max 1 2))
 (= 8 (max 4 1 8 7 -9))

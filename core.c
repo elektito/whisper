@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <setjmp.h>
 #include <stdint.h>
+#include <strings.h>
 #include <sys/poll.h>
 #include <unistd.h>
 
@@ -3477,17 +3478,35 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
         return FALSE;
     }
 
-    int contains_dot = !!strpbrk(start, ".");
+    /* +inf.0, -inf.0, +nan.0 and -nan.0 are allowed with any radix, but
+     * have no exact equivalent */
+    if (len == 6 && (start[0] == '+' || start[0] == '-')) {
+        int is_inf = strcasecmp(start + 1, "inf.0") == 0;
+        int is_nan = strcasecmp(start + 1, "nan.0") == 0;
+        if (is_inf || is_nan) {
+            int negative = start[0] == '-';
+            free(str);
+            if (exact) { return FALSE; }
+            if (is_nan) { return FLONUM(NAN); }
+            return FLONUM(negative ? -INFINITY : INFINITY);
+        }
+    }
+
+    /* decimal points and exponents are only allowed in base 10. we
+     * also make sure the string only has characters valid in a decimal
+     * number, since strtof accepts things like "infinity" and hex
+     * floats. strings with no point or exponent are handled by the
+     * integer path below, even when they are inexact. */
+    int is_decimal = base == 10 &&
+        strpbrk(start, ".eE") &&
+        strspn(start, "0123456789+-.eE") == len;
     char *endptr;
 
-    if (inexact || contains_dot) {
+    if (is_decimal) {
         errno = 0;
         float result_f = strtof(start, &endptr);
         if (errno == 0 && endptr == start + len) {
-            if (base != 10) {
-                raise_error("inexact numbers with non-ten bases are not supported");
-            }
-
+            free(str);
             if (exact) {
                 return FIXNUM((int64_t) result_f);
             } else {
