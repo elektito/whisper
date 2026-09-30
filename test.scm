@@ -164,6 +164,12 @@ and still a comment
 (equal? "7d0" (number->string 2000 16))
 (equal? "1.25" (number->string 1.25))
 
+;; infinities and nans are written the standard way. the multiplication
+;; overflows to infinity.
+(equal? "+inf.0" (number->string (* 1.0e30 1.0e30)))
+(equal? "-inf.0" (number->string (* -1.0e30 1.0e30)))
+(equal? "+nan.0" (number->string (- (* 1.0e30 1.0e30) (* 1.0e30 1.0e30))))
+
 (= 1000 (string->number "3e8" 16))
 (= -1000 (string->number "-3e8" 16))
 (= 1000 (string->number "+3e8" 16))

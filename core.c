@@ -1669,7 +1669,18 @@ static void snprintf_flonum(char *buf, size_t buf_size, float f) {
      * do) and not as 1 (as %g would do).
      *
      * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
-     * against libm for now */
+     * against libm for now. isnan and isinf are macros, so they do not
+     * need libm. */
+
+    if (isnan(f)) {
+        snprintf(buf, buf_size, "+nan.0");
+        return;
+    }
+
+    if (isinf(f)) {
+        snprintf(buf, buf_size, f > 0 ? "+inf.0" : "-inf.0");
+        return;
+    }
 
     /* format using %g into a buffer */
     snprintf(buf, buf_size, "%g", f);

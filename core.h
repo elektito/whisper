@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
