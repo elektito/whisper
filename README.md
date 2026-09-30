@@ -24,9 +24,12 @@ those as I need them for my own gamedev projects.
 
 The following SRFIs are supported:
 
- - SRFI 1 - List Library
- - SRFI 8 - receive
- - SRFI 151 - Bitwise Operations
+ - [SRFI 1](https://srfi.schemers.org/srfi-1/srfi-1.html) - List Library
+ - [SRFI 8](https://srfi.schemers.org/srfi-8/srfi-8.html) - receive
+ - [SRFI 48](https://srfi.schemers.org/srfi-48/srfi-48.html) - Intermediate Format Strings
+ - [SRFI 69](https://srfi.schemers.org/srfi-69/srfi-69.html) - Basic Hash Tables
+ - [SRFI 111](https://srfi.schemers.org/srfi-111/srfi-111.html) - Boxes
+ - [SRFI 151](https://srfi.schemers.org/srfi-151/srfi-151.html) - Bitwise Operations
  
 ## Bootstrapping
 

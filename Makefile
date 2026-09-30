@@ -87,10 +87,19 @@ lib/srfi-1.manifest lib/srfi-1.so lib/srfi-1.a &: $(CURRENT) lib/srfi-8.manifest
 lib/srfi-8.manifest lib/srfi-8.so lib/srfi-8.a &: $(CURRENT) lib/srfi-8-receive/srfi-8.sld lib/srfi-8-receive/srfi-8.scm
 	./$(CURRENT) lib/srfi-8-receive/srfi-8.sld -l -o lib/srfi-8 -L lib -f '-I lib'
 
+lib/srfi-48.manifest lib/srfi-48.so lib/srfi-48.a &: $(CURRENT) lib/whisper.manifest lib/srfi-48-format/srfi-48.sld
+	./$(CURRENT) lib/srfi-48-format/srfi-48.sld -l -o lib/srfi-48 -L lib -f '-I lib'
+
+lib/srfi-69.manifest lib/srfi-69.so lib/srfi-69.a &: $(CURRENT) lib/whisper.manifest lib/srfi-69-hash-tables/srfi-69.sld
+	./$(CURRENT) lib/srfi-69-hash-tables/srfi-69.sld -l -o lib/srfi-69 -L lib -f '-I lib'
+
+lib/srfi-111.manifest lib/srfi-111.so lib/srfi-111.a &: $(CURRENT) lib/whisper.manifest lib/srfi-111-boxes/srfi-111.sld
+	./$(CURRENT) lib/srfi-111-boxes/srfi-111.sld -l -o lib/srfi-111 -L lib -f '-I lib'
+
 lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a &: $(CURRENT) lib/srfi-151-bitwise/srfi-151.sld lib/srfi-151-bitwise/bitwise.c lib/srfi-151-bitwise/bitwise-33.scm lib/srfi-151-bitwise/bitwise-60.scm lib/srfi-151-bitwise/bitwise-other.scm
 	./$(CURRENT) lib/srfi-151-bitwise/srfi-151.sld -l -o lib/srfi-151 -L lib -f '-I lib'
 
-libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-151.manifest
+libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-48.manifest lib/srfi-69.manifest lib/srfi-111.manifest lib/srfi-151.manifest
 
 clean:
 	rm -rf $(CURRENT) stage0 stage1 stage0-lib stage1-lib stage2-lib
@@ -98,6 +107,9 @@ clean:
 	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
 	rm -f lib/eval.manifest lib/eval.so lib/eval.a
 	rm -f lib/raylib.manifest lib/raylib.so lib/raylib.a
+	rm -f lib/srfi-48.manifest lib/srfi-48.so lib/srfi-48.a
+	rm -f lib/srfi-69.manifest lib/srfi-69.so lib/srfi-69.a
+	rm -f lib/srfi-111.manifest lib/srfi-111.so lib/srfi-111.a
 	rm -f lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a
 	$(MAKE) -C $(RAYLIB_SRC) clean
 
