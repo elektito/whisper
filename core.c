@@ -4185,158 +4185,72 @@ value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
     }
 }
 
+/* the result of comparing two real numbers. comparisons involving a nan
+ * are unordered, so every ordered comparison is false for them. */
+enum num_order { NUM_LT, NUM_EQ, NUM_GT, NUM_UNORDERED };
+
+static enum num_order compare_numbers(value n, value m) {
+    if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
+        /* compare as integers, so no precision is lost to float */
+        int64_t a = GET_FIXNUM(n);
+        int64_t b = GET_FIXNUM(m);
+        return a < b ? NUM_LT : (a > b ? NUM_GT : NUM_EQ);
+    }
+
+    float a = IS_FIXNUM(n) ? (float) GET_FIXNUM(n) : GET_FLONUM(n);
+    float b = IS_FIXNUM(m) ? (float) GET_FIXNUM(m) : GET_FLONUM(m);
+    if (a < b) { return NUM_LT; }
+    if (a > b) { return NUM_GT; }
+    if (a == b) { return NUM_EQ; }
+    return NUM_UNORDERED;
+}
+
+/* the body shared by the numeric comparison primcalls. each adjacent
+ * pair of arguments is compared, and `accept` says which orderings keep
+ * the result true. all arguments are type checked, even after the
+ * result is known to be false. */
+#define NUM_COMPARISON(name, accept)                                    \
+    if (nargs < 1) {                                                    \
+        raise_error(name " needs at least one argument");               \
+    }                                                                   \
+    init_args();                                                        \
+    value n = next_arg();                                               \
+    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {                               \
+        free_args();                                                    \
+        raise_error(name " argument is not a number");                  \
+    }                                                                   \
+    value result = TRUE;                                                \
+    for (int i = 1; i < nargs; ++i) {                                   \
+        value m = next_arg();                                           \
+        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {                           \
+            free_args();                                                \
+            raise_error(name " argument is not a number");              \
+        }                                                               \
+        enum num_order order = compare_numbers(n, m);                   \
+        if (!(accept)) { result = FALSE; }                              \
+        n = m;                                                          \
+    }                                                                   \
+    free_args();                                                        \
+    return result;
+
 value primcall_num_eq(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error("= needs at least one argument"); }
-    init_args();
-    value n = next_arg();
-    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
-        free_args();
-        raise_error("= argument is not a number");
-    }
-
-    for (int i = 1; i < nargs; ++i) {
-        value m = next_arg();
-        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
-            free_args();
-            raise_error("= argument is not a number");
-        }
-
-        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
-            if (GET_FIXNUM(n) != GET_FIXNUM(m)) { return FALSE; }
-        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
-            if ((float) GET_FIXNUM(n) != GET_FLONUM(m)) { return FALSE; }
-        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
-            if (GET_FLONUM(n) != (float) GET_FIXNUM(m)) { return FALSE; }
-        } else { /* both flonums */
-            if (GET_FLONUM(n) != GET_FLONUM(m)) { return FALSE; }
-        }
-    }
-
-    free_args();
-    return TRUE;
+    NUM_COMPARISON("=", order == NUM_EQ)
 }
 
 value primcall_num_lt(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error("< needs at least one argument"); }
-    init_args();
-    value n = next_arg();
-    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
-        free_args();
-        raise_error("< argument is not a number");
-    }
-
-    for (int i = 1; i < nargs; ++i) {
-        value m = next_arg();
-        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
-            free_args();
-            raise_error("< argument is not a number");
-        }
-
-        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
-            if (GET_FIXNUM(n) >= GET_FIXNUM(m)) { return FALSE; }
-        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
-            if ((float) GET_FIXNUM(n) >= GET_FLONUM(m)) { return FALSE; }
-        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
-            if (GET_FLONUM(n) >= (float) GET_FIXNUM(m)) { return FALSE; }
-        } else { /* both flonums */
-            if (GET_FLONUM(n) >= GET_FLONUM(m)) { return FALSE; }
-        }
-    }
-
-    free_args();
-    return TRUE;
+    NUM_COMPARISON("<", order == NUM_LT)
 }
 
 value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error("> needs at least one argument"); }
-    init_args();
-    value n = next_arg();
-    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
-        free_args();
-        raise_error("> argument is not a number");
-    }
-    for (int i = 1; i < nargs; ++i) {
-        value m = next_arg();
-        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
-            free_args();
-            raise_error("> argument is not a number");
-        }
-
-        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
-            if (GET_FIXNUM(n) <= GET_FIXNUM(m)) { return FALSE; }
-        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
-            if ((float) GET_FIXNUM(n) <= GET_FLONUM(m)) { return FALSE; }
-        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
-            if (GET_FLONUM(n) <= (float) GET_FIXNUM(m)) { return FALSE; }
-        } else { /* both flonums */
-            if (GET_FLONUM(n) <= GET_FLONUM(m)) { return FALSE; }
-        }
-    }
-
-    free_args();
-    return TRUE;
+    NUM_COMPARISON(">", order == NUM_GT)
 }
 
 value primcall_num_le(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error("<= needs at least one argument"); }
-    init_args();
-    value n = next_arg();
-    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
-        free_args();
-        raise_error("<= argument is not a number");
-    }
-
-    for (int i = 1; i < nargs; ++i) {
-        value m = next_arg();
-        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
-            free_args();
-            raise_error("<= argument is not a number");
-        }
-
-        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
-            if (GET_FIXNUM(n) > GET_FIXNUM(m)) { return FALSE; }
-        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
-            if ((float) GET_FIXNUM(n) > GET_FLONUM(m)) { return FALSE; }
-        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
-            if (GET_FLONUM(n) > (float) GET_FIXNUM(m)) { return FALSE; }
-        } else { /* both flonums */
-            if (GET_FLONUM(n) > GET_FLONUM(m)) { return FALSE; }
-        }
-    }
-
-    free_args();
-    return TRUE;
+    NUM_COMPARISON("<=", order == NUM_LT || order == NUM_EQ)
 }
 
 value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs < 1) { raise_error(">= needs at least one argument"); }
-    init_args();
-    value n = next_arg();
-    if (!IS_FIXNUM(n) && !IS_FLONUM(n)) {
-        free_args();
-        raise_error(">= argument is not a number");
-    }
-
-    for (int i = 1; i < nargs; ++i) {
-        value m = next_arg();
-        if (!IS_FIXNUM(m) && !IS_FLONUM(m)) {
-            free_args();
-            raise_error(">= argument is not a number");
-        }
-
-        if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
-            if (GET_FIXNUM(n) < GET_FIXNUM(m)) { return FALSE; }
-        } else if (IS_FIXNUM(n) && IS_FLONUM(m)) {
-            if ((float) GET_FIXNUM(n) < GET_FLONUM(m)) { return FALSE; }
-        } else if (IS_FLONUM(n) && IS_FIXNUM(m)) {
-            if (GET_FLONUM(n) < (float) GET_FIXNUM(m)) { return FALSE; }
-        } else { /* both flonums */
-            if (GET_FLONUM(n) < GET_FLONUM(m)) { return FALSE; }
-        }
-    }
-
-    free_args();
-    return TRUE;
+    NUM_COMPARISON(">=", order == NUM_GT || order == NUM_EQ)
 }
 
 static uint64_t hash_fn_wrapper(struct hash_table *ht, value key) {

@@ -435,6 +435,28 @@ and still a comment
 (not (>= 5.0 81.0))
 (>= 10.0 10.0)
 
+;; comparisons check each adjacent pair, not just the first argument
+;; against the rest
+(< 1 2 3)
+(<= 1 1 2 2)
+(> 3 2 1)
+(>= 2 2 1 1)
+(= 1 1 1)
+(not (< 1 3 2))
+(not (> 5 1 2))
+(not (<= 1 3 2))
+(not (>= 5 1 2))
+(not (= 1 1 2))
+
+;; nan is unordered, so every comparison with it is false
+(not (< +nan.0 0))
+(not (> +nan.0 0))
+(not (<= +nan.0 0))
+(not (>= +nan.0 0))
+(not (= +nan.0 +nan.0))
+(not (< 0 +nan.0 1))
+(> +inf.0 1000000 -inf.0)
+
 (zero? 0)
 (zero? 0.0)
 (not (zero? 1))
