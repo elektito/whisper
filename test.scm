@@ -362,6 +362,33 @@ and still a comment
 (= (modulo 5 -2) -1)
 (= (modulo -5 -2) -1)
 
+;; integer division also works on inexact integers
+(eqv? 3.0 (truncate-quotient 7.0 2))
+(eqv? 1.0 (truncate-remainder 7.0 2))
+(eqv? -4.0 (floor-quotient -7.0 2))
+(eqv? 1.0 (floor-remainder -7.0 2))
+(let-values (((q r) (truncate/ -5.0 2)))
+  (and (eqv? q -2.0) (eqv? r -1.0)))
+(let-values (((q r) (floor/ -7.0 2)))
+  (and (eqv? q -4.0) (eqv? r 1.0)))
+(eqv? 3.0 (quotient 7.0 2))
+(eqv? 1.0 (remainder 7.0 2))
+(eqv? 1.0 (modulo -7.0 2))
+
+;; non-integer arguments are an error
+(guard (e (#t #t)) (truncate-quotient 32.3 2) #f)
+(guard (e (#t #t)) (truncate-remainder 32 2.5) #f)
+(guard (e (#t #t)) (truncate/ 32.3 2) #f)
+(guard (e (#t #t)) (floor-quotient 32.3 2) #f)
+(guard (e (#t #t)) (floor-remainder 32.3 2) #f)
+(guard (e (#t #t)) (floor/ 32.3 2) #f)
+(guard (e (#t #t)) (quotient 32.3 2) #f)
+(guard (e (#t #t)) (remainder 32.3 2) #f)
+(guard (e (#t #t)) (modulo 32.3 2) #f)
+(guard (e (#t #t)) (gcd 32.5 2) #f)
+(guard (e (#t #t)) (lcm 2 +inf.0) #f)
+(guard (e (#t #t)) (modulo 'foo 2) #f)
+
 (= 10 (abs -10))
 (= 10 (abs 10))
 (= 0 (abs 0))
@@ -379,6 +406,8 @@ and still a comment
 (= 288 (lcm 32 -36))
 (= 60 (lcm 10 20 30))
 (= 1 (lcm))
+(eqv? 4.0 (gcd 32.0 -36))
+(eqv? 288.0 (lcm 32.0 -36))
 
 (= 0 (expt 0 3))
 (= 1 (expt 1 3))
@@ -494,6 +523,11 @@ and still a comment
 (not (odd? 0))
 (not (odd? 2))
 (not (odd? -100))
+
+;; even? and odd? work on inexact integers
+(even? 4.0)
+(odd? 5.0)
+(not (odd? 4.0))
 
 ;; we use eqv? in the following comparisons, instead of =, because exactness
 ;; matters.

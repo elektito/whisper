@@ -317,12 +317,12 @@
 (define (even? n)
   (unless (integer? n)
     (error "not an integer"))
-  (zero? (floor-remainder n 2)))
+  (zero? (%floor-remainder n 2)))
 
 (define (odd? n)
   (unless (integer? n)
     (error "not an integer"))
-  (not (zero? (floor-remainder n 2))))
+  (not (zero? (%floor-remainder n 2))))
 
 (define (!= m n)
   (not (= m n)))
@@ -333,8 +333,8 @@
         (else
          (let loop ((b base) (p power) (acc 1))
            (cond ((= p 0) acc)
-                 ((even? p) (loop (* b b) (truncate-quotient p 2) acc))
-                 (else (loop (* b b) (truncate-quotient p 2) (* acc b))))))))
+                 ((even? p) (loop (* b b) (%truncate-quotient p 2) acc))
+                 (else (loop (* b b) (%truncate-quotient p 2) (* acc b))))))))
 
 (define (abs x)
   ;; the eqv? check catches -0.0, which is not less than zero
@@ -344,14 +344,15 @@
   (let loop ((x (abs a)) (y (abs b)))
     (if (= y 0)
         x
-        (loop y (truncate-remainder x y)))))
+        (loop y (%truncate-remainder x y)))))
 
 (define (lcm2 a b)
   (if (or (= a 0) (= b 0))
       0
-      (* (truncate-quotient (abs a) (gcd2 a b)) (abs b))))
+      (* (%truncate-quotient (abs a) (gcd2 a b)) (abs b))))
 
 (define (gcd . args)
+  (for-each (lambda (n) (check-integer-arg "gcd" n)) args)
   (if (null? args)
       0
       (let loop ((rest (cdr args)) (acc (car args)))
@@ -360,6 +361,7 @@
             (loop (cdr rest) (gcd2 acc (car rest)))))))
 
 (define (lcm . args)
+  (for-each (lambda (n) (check-integer-arg "lcm" n)) args)
   (if (null? args)
       1
       (let loop ((rest (cdr args)) (acc (car args)))
@@ -382,34 +384,70 @@
 (define (square z)
   (* z z))
 
-(define (truncate-quotient m n)
-  (/ m n))
+;; the integer division procedures take integers, which may be inexact
+;; like 7.0. each public procedure checks its own arguments, so the error
+;; names the procedure that was called (quotient, remainder and modulo
+;; are renames, so they report the procedure they rename). the unchecked
+;; % versions below are for internal use once the arguments are known to
+;; be integers.
 
-(define (truncate-remainder m n)
-  (- m (* n (truncate-quotient m n))))
+(define (check-integer-arg who n)
+  (unless (integer? n)
+    (error (string-append who ": arguments must be integers") n)))
 
-(define (truncate/ m n)
-  (values (truncate-quotient m n)
-          (truncate-remainder m n)))
+(define (%truncate-quotient m n)
+  ;; / already truncates when both are fixnums, but not for flonums
+  (truncate (/ m n)))
 
-(define (floor-quotient m n)
-  (let ((q (truncate-quotient m n))
-        (r (truncate-remainder m n)))
+(define (%truncate-remainder m n)
+  (- m (* n (%truncate-quotient m n))))
+
+(define (%floor-quotient m n)
+  (let ((q (%truncate-quotient m n))
+        (r (%truncate-remainder m n)))
     (if (and (not (zero? r))
              (not (eqv? (negative? m) (negative? n))))
         (- q 1)
         q)))
 
-(define (floor-remainder n d)
-  (let ((r (truncate-remainder n d)))
+(define (%floor-remainder n d)
+  (let ((r (%truncate-remainder n d)))
     (if (and (not (zero? r))
              (not (eqv? (negative? n) (negative? d))))
         (+ r d)
         r)))
 
+(define (truncate-quotient m n)
+  (check-integer-arg "truncate-quotient" m)
+  (check-integer-arg "truncate-quotient" n)
+  (%truncate-quotient m n))
+
+(define (truncate-remainder m n)
+  (check-integer-arg "truncate-remainder" m)
+  (check-integer-arg "truncate-remainder" n)
+  (%truncate-remainder m n))
+
+(define (truncate/ m n)
+  (check-integer-arg "truncate/" m)
+  (check-integer-arg "truncate/" n)
+  (values (%truncate-quotient m n)
+          (%truncate-remainder m n)))
+
+(define (floor-quotient m n)
+  (check-integer-arg "floor-quotient" m)
+  (check-integer-arg "floor-quotient" n)
+  (%floor-quotient m n))
+
+(define (floor-remainder n d)
+  (check-integer-arg "floor-remainder" n)
+  (check-integer-arg "floor-remainder" d)
+  (%floor-remainder n d))
+
 (define (floor/ m n)
-  (values (floor-quotient m n)
-          (floor-remainder m n)))
+  (check-integer-arg "floor/" m)
+  (check-integer-arg "floor/" n)
+  (values (%floor-quotient m n)
+          (%floor-remainder m n)))
 
 (define (caaar x) (car (car (car x))))
 (define (caadr x) (car (car (cdr x))))
