@@ -108,12 +108,30 @@ struct symbol_ht_ctx {
     funcptr func;
 };
 
+value case_lambda_dispatch(environment env, enum call_flags flags, int nargs, ...);
 static void symbols_ht_each(value k, value v, void *ctx) {
     struct symbol_ht_ctx *c = ctx;
     struct symbol *sym = GET_SYMBOL(v);
-    if (IS_CLOSURE(sym->value) && GET_CLOSURE(sym->value)->func == c->func) {
-        c->name = GET_SYMBOL(v)->name;
-        c->name_len = GET_SYMBOL(v)->name_len;
+    if (!IS_CLOSURE(sym->value)) {
+        return;
+    }
+
+    struct closure *cl = GET_CLOSURE(sym->value);
+    int found = (cl->func == c->func);
+
+    /* a case-lambda's clauses aren't bound to any globals themselves.
+     * they sit inside the freevars of a closure that's bound to a
+     * global. */
+    if (!found && cl->func == case_lambda_dispatch) {
+        int64_t n_clauses = GET_FIXNUM(cl->freevars[0]);
+        for (int64_t i = 0; i < n_clauses && !found; ++i) {
+            found = (GET_CLOSURE(cl->freevars[i + 1])->func == c->func);
+        }
+    }
+
+    if (found) {
+        c->name = sym->name;
+        c->name_len = sym->name_len;
     }
 }
 
@@ -2429,6 +2447,68 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 
         return obj->continuation.ret;
     }
+}
+
+value case_lambda_dispatch(environment env, enum call_flags flags, int nargs, ...) {
+    int64_t n_clauses = GET_FIXNUM(envget(env, 0));
+    struct closure *matched_clause = NULL;
+    for (int64_t i = 0; i < n_clauses; ++i) {
+        struct closure *proc = GET_CLOSURE(envget(env, i + 1));
+        if (CLOSURE_ACCEPTS(proc, nargs)) {
+            matched_clause = proc;
+            break;
+        }
+    }
+
+    if (matched_clause == NULL) { raise_error("no matching clause"); }
+
+    init_args();
+    if (arg_arr_base != NULL) {
+        free_args();
+        return matched_clause->func(matched_clause->freevars, flags, nargs, arg_arr_base);
+    }
+
+    value args[nargs > 0 ? nargs : 1];
+    for (int i = 0; i < nargs; ++i) {
+        args[i] = next_arg();
+    }
+    free_args();
+
+    return matched_clause->func(matched_clause->freevars, flags | CALL_HAS_ARG_ARRAY, nargs, args); 
+}
+
+value primcall_percent_case_lambda(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs == 0) { raise_error("%%case-lambda needs at least one argument"); }
+
+    struct closure *dispatch = alloc_closure(nargs + 1);
+    dispatch->freevars[0] = FIXNUM(nargs);
+
+    init_args();
+    int min_args = MAX_ARGS;
+    int max_args = 0;
+    for (int i = 0; i < nargs; ++i) {
+        value proc = next_arg();
+        if (!IS_CLOSURE(proc)) {
+            free_args();
+            raise_error("%%case-lambda argument is not a procedure");
+        }
+        dispatch->freevars[i + 1] = proc;
+        
+        if (GET_CLOSURE(proc)->min_args < min_args) {
+            min_args = GET_CLOSURE(proc)->min_args;
+        }
+        
+        if (GET_CLOSURE(proc)->max_args > max_args) {
+            max_args = GET_CLOSURE(proc)->max_args;
+        }
+    }
+    free_args();
+
+    dispatch->func = case_lambda_dispatch;
+    dispatch->min_args = min_args;
+    dispatch->max_args = max_args;
+    dispatch->n_freevars = nargs + 1;
+    return CLOSURE(dispatch);
 }
 
 value primcall_car(environment env, enum call_flags flags, int nargs, ...) {

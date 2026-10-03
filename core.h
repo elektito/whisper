@@ -545,6 +545,7 @@ extern value primcall_bytevector_length(environment env, enum call_flags flags, 
 extern value primcall_bytevector_u8_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_bytevector_u8_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_callcc(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_percent_case_lambda(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_car(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cdr(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_caar(environment env, enum call_flags flags, int nargs, ...);

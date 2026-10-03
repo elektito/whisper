@@ -641,7 +641,8 @@
     (gen-code func indent "value x~a = CHAR('~a');\n" varnum (c-char form))
     varnum))
 
-(define *primcalls* '((%char-ready? "percent_char_ready_q" 1 1)
+(define *primcalls* '((%case-lambda "percent_case_lambda" 1 -1)
+                      (%char-ready? "percent_char_ready_q" 1 1)
                       (%_exit "percent_underscore_exit" 2 2)
                       (%exit "percent_exit" 2 2)
                       (%flush-output-port "percent_flush_output_port" 1 1)
@@ -1630,6 +1631,7 @@
                                  (identifier 'aux '_ '_)
                                  (identifier 'aux 'unquote 'unquote)
                                  (identifier 'aux 'unquote-splicing 'unquote-splicing)
+                                 (identifier 'primcall '%case-lambda '%case-lambda)
                                  (identifier 'primcall '%char-ready? '%char-ready?)
                                  (identifier 'primcall '%_exit '%_exit)
                                  (identifier 'primcall '%exit '%exit)
