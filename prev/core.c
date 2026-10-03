@@ -108,12 +108,30 @@ struct symbol_ht_ctx {
     funcptr func;
 };
 
+value case_lambda_dispatch(environment env, enum call_flags flags, int nargs, ...);
 static void symbols_ht_each(value k, value v, void *ctx) {
     struct symbol_ht_ctx *c = ctx;
     struct symbol *sym = GET_SYMBOL(v);
-    if (IS_CLOSURE(sym->value) && GET_CLOSURE(sym->value)->func == c->func) {
-        c->name = GET_SYMBOL(v)->name;
-        c->name_len = GET_SYMBOL(v)->name_len;
+    if (!IS_CLOSURE(sym->value)) {
+        return;
+    }
+
+    struct closure *cl = GET_CLOSURE(sym->value);
+    int found = (cl->func == c->func);
+
+    /* a case-lambda's clauses aren't bound to any globals themselves.
+     * they sit inside the freevars of a closure that's bound to a
+     * global. */
+    if (!found && cl->func == case_lambda_dispatch) {
+        int64_t n_clauses = GET_FIXNUM(cl->freevars[0]);
+        for (int64_t i = 0; i < n_clauses && !found; ++i) {
+            found = (GET_CLOSURE(cl->freevars[i + 1])->func == c->func);
+        }
+    }
+
+    if (found) {
+        c->name = sym->name;
+        c->name_len = sym->name_len;
     }
 }
 
@@ -307,8 +325,17 @@ const char *find_func_name(funcptr func) {
 
 /************ trampoline ***********/
 
+/* forget the pending tail call once its callee has returned. this stops
+ * the global from keeping the finished call's closure and arguments
+ * reachable. */
+static void retire_pending_tail_call(void) {
+    pending_tail_call.closure = VOID;
+    pending_tail_call.nargs = 0;
+}
+
 /* call a closure with arguments passed as an array (trampoline) */
 value call_with_args(value closure, int accepts_mvalues, int nargs, value *args) {
+    int took_tail_call = 0;
     for (;;) {
         if (!IS_CLOSURE(closure)) { raise_error("called object not a procedure"); }
         struct closure *c = GET_CLOSURE(closure);
@@ -316,9 +343,13 @@ value call_with_args(value closure, int accepts_mvalues, int nargs, value *args)
         if (accepts_mvalues) { flags |= ACCEPTS_MVALUES; }
         value r = c->func(c->freevars, flags, nargs, args);
         if (r != TAILCALL) {
+            if (took_tail_call) {
+                retire_pending_tail_call();
+            }
             return r;
         }
 
+        took_tail_call = 1;
         closure = pending_tail_call.closure;
         nargs = pending_tail_call.nargs;
         args = nargs <= TAILCALL_MAX_INLINE
@@ -379,8 +410,14 @@ value resume_tail_call(value r) {
     value *args = nargs <= TAILCALL_MAX_INLINE
         ? pending_tail_call.args
         : GET_OBJECT(pending_tail_call.overflow)->vector.data;
-    return call_with_args(pending_tail_call.closure,
-                          pending_tail_call.accepts_mvalues, nargs, args);
+    value ret = call_with_args(pending_tail_call.closure,
+                               pending_tail_call.accepts_mvalues, nargs, args);
+
+    /* the first callee was reached through the global. if it made no
+     * tail call itself, call_with_args did not retire it. */
+    retire_pending_tail_call();
+
+    return ret;
 }
 
 /************ hash table ***********/
@@ -826,12 +863,19 @@ static value lookup_freevars_closure(struct freevars_closure_mapping *map, int l
     return 0;
 }
 
+/* the freevars map used by gc_scan_stack. It is a global and not a
+ * local because it is the same for every stack scan in a mark phase:
+ * the main stack and the saved stack of every live continuation.
+ * building it per scan meant rebuilding and sorting it once for each
+ * continuation, on every gc. nothing allocates or frees closures while
+ * marking, so gc_mark builds it once at the start and frees it at the
+ * end. */
+static struct freevars_closure_mapping *gc_freevars_map = NULL;
+static int gc_freevars_map_len = 0;
+
 /* see gc_mark() function's comment to see why no_sanitize */
 __attribute__((no_sanitize("address")))
 static void gc_scan_stack(void *cur_stack, void *stack_start) {
-    int freevars_map_len;
-    struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
-
     for (void **p = cur_stack; p < (void**) stack_start; p++) {
         uint64_t tag = (uint64_t) *p & TAG_MASK;
         for (int i = 0; i < n_heaps; ++i) {
@@ -857,7 +901,7 @@ static void gc_scan_stack(void *cur_stack, void *stack_start) {
          * accept in a conservative garbage collector).
          *
          * For large closures env points to a malloc'd array outside any
-         * pool; those are matched via freevars_map. */
+         * pool; those are matched via gc_freevars_map. */
         uint64_t raw = (uint64_t)*p;
         if ((raw & TAG_MASK) == 0 && raw > 0) {
             for (int i = 0; i < n_heaps; ++i) {
@@ -878,14 +922,12 @@ static void gc_scan_stack(void *cur_stack, void *stack_start) {
                 }
             }
 
-            value cl = lookup_freevars_closure(freevars_map, freevars_map_len, raw);
+            value cl = lookup_freevars_closure(gc_freevars_map, gc_freevars_map_len, raw);
             if (cl) {
                 gc_recurse(cl);
             }
         }
     }
-
-    free(freevars_map);
 }
 
 static void gc_free_empty_pools(struct pool **heaps, int n_heaps) {
@@ -1024,6 +1066,10 @@ static void gc_mark(void) {
     gc_marked_count = 0;
     gc_epoch++;
 
+    /* build this before marking anything. a global can hold a
+     * continuation, and marking it scans its saved stack right away. */
+    gc_freevars_map = build_freevars_map(&gc_freevars_map_len);
+
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
@@ -1039,12 +1085,19 @@ static void gc_mark(void) {
     }
 
     gc_recurse(pending_tail_call.closure);
-    for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
-      gc_recurse(pending_tail_call.args[i]);
+    if (pending_tail_call.nargs <= TAILCALL_MAX_INLINE) {
+        for (int i = 0; i < pending_tail_call.nargs; i++) {
+            gc_recurse(pending_tail_call.args[i]);
+        }
+    } else {
+        gc_recurse(pending_tail_call.overflow);
     }
-    gc_recurse(pending_tail_call.overflow);
 
     gc_scan_stack(cur_stack, stack_start);
+
+    free(gc_freevars_map);
+    gc_freevars_map = NULL;
+    gc_freevars_map_len = 0;
 
     if (gc_threshold_multiplier == 0) {
         char *env = getenv("GC_THRESHOLD_MULTIPLIER");
@@ -2329,6 +2382,12 @@ value resume_continuation(environment env, enum call_flags flags, int nargs, ...
     free_args();
     GET_OBJECT(cont)->continuation.ret = ret;
 
+    /* we may have been reached through a tail call, and the longjmp
+     * below skips the call_with_args loop that would otherwise retire
+     * the pending tail call. our arguments are already read, so retire
+     * it here. */
+    retire_pending_tail_call();
+
     reinstate_stack(cont);
     return VOID; /* not reached; reinstate_stack longjmps away */
 }
@@ -2388,6 +2447,68 @@ value primcall_callcc(environment env, enum call_flags flags, int nargs, ...) {
 
         return obj->continuation.ret;
     }
+}
+
+value case_lambda_dispatch(environment env, enum call_flags flags, int nargs, ...) {
+    int64_t n_clauses = GET_FIXNUM(envget(env, 0));
+    struct closure *matched_clause = NULL;
+    for (int64_t i = 0; i < n_clauses; ++i) {
+        struct closure *proc = GET_CLOSURE(envget(env, i + 1));
+        if (CLOSURE_ACCEPTS(proc, nargs)) {
+            matched_clause = proc;
+            break;
+        }
+    }
+
+    if (matched_clause == NULL) { raise_error("no matching clause"); }
+
+    init_args();
+    if (arg_arr_base != NULL) {
+        free_args();
+        return matched_clause->func(matched_clause->freevars, flags, nargs, arg_arr_base);
+    }
+
+    value args[nargs > 0 ? nargs : 1];
+    for (int i = 0; i < nargs; ++i) {
+        args[i] = next_arg();
+    }
+    free_args();
+
+    return matched_clause->func(matched_clause->freevars, flags | CALL_HAS_ARG_ARRAY, nargs, args); 
+}
+
+value primcall_percent_case_lambda(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs == 0) { raise_error("%%case-lambda needs at least one argument"); }
+
+    struct closure *dispatch = alloc_closure(nargs + 1);
+    dispatch->freevars[0] = FIXNUM(nargs);
+
+    init_args();
+    int min_args = MAX_ARGS;
+    int max_args = 0;
+    for (int i = 0; i < nargs; ++i) {
+        value proc = next_arg();
+        if (!IS_CLOSURE(proc)) {
+            free_args();
+            raise_error("%%case-lambda argument is not a procedure");
+        }
+        dispatch->freevars[i + 1] = proc;
+        
+        if (GET_CLOSURE(proc)->min_args < min_args) {
+            min_args = GET_CLOSURE(proc)->min_args;
+        }
+        
+        if (GET_CLOSURE(proc)->max_args > max_args) {
+            max_args = GET_CLOSURE(proc)->max_args;
+        }
+    }
+    free_args();
+
+    dispatch->func = case_lambda_dispatch;
+    dispatch->min_args = min_args;
+    dispatch->max_args = max_args;
+    dispatch->n_freevars = nargs + 1;
+    return CLOSURE(dispatch);
 }
 
 value primcall_car(environment env, enum call_flags flags, int nargs, ...) {

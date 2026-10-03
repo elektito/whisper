@@ -393,8 +393,12 @@ struct tail_call {
 /* this is populated when a function wants to request a tail call from
  * the trampoline. it's okay for this to be a global (in a
  * single-threaded environment) because it's only filled by the caller
- * and then read from in the callee, and is never kept alive beyond
- * that. */
+ * and then read from in the callee. the callee reads its arguments from
+ * it lazily, so gc_mark treats it as a root while the call is in use,
+ * and call_with_args makes it unreachable (closure VOID, nargs 0) once
+ * the callee returns. this relies on a callee reading all of its
+ * arguments before it makes any call of its own, since a nested call
+ * reuses and then retires the same global. */
 extern struct tail_call pending_tail_call;
 
 extern value call_with_args(value closure, int accepts_mvalues, int nargs, value *args);
@@ -541,6 +545,7 @@ extern value primcall_bytevector_length(environment env, enum call_flags flags, 
 extern value primcall_bytevector_u8_ref(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_bytevector_u8_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_callcc(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_percent_case_lambda(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_car(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cdr(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_caar(environment env, enum call_flags flags, int nargs, ...);
