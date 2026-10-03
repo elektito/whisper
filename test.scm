@@ -2176,6 +2176,21 @@ and still a comment
 (define (call-with-9 g) (g 1 2 3 4 5 6 7 8 9))
 (= 45 (call-with-9 sum9))
 
+;; rest parameters must collect the extra arguments in order, with any
+;; number of them, after fixed parameters, through apply, and through a
+;; tail call.
+(define (rest-all . args) args)
+(define (rest-after-two a b . rest) (list a b rest))
+(define (rest-tail-call . args) (rest-all 0 args))
+(equal? '() ((lambda args args)))
+(equal? '(1) (rest-all 1))
+(equal? '(1 2 3) (rest-all 1 2 3))
+(equal? '(1 2 3 4 5 6 7 8 9 10) (rest-all 1 2 3 4 5 6 7 8 9 10))
+(equal? '(a b ()) (rest-after-two 'a 'b))
+(equal? '(a b (c d)) (rest-after-two 'a 'b 'c 'd))
+(equal? '(1 2 3 4 5 6 7 8 9 10 11 12) (apply rest-all '(1 2 3 4 5 6 7 8 9 10 11 12)))
+(equal? '(0 (1 2 3)) (rest-tail-call 1 2 3))
+
 ;; a hash-table-ref default thunk, and hash-table-update!'s default
 ;; thunk and update function, must produce their real result correctly
 ;; even if their own body tail-recurses deeply before returning it.

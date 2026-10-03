@@ -1168,8 +1168,14 @@
 
         (when rest-param
           (gen-code new-func 1 "value ~a = NIL;\n" (mangle-unique-name rest-param))
-          (gen-code new-func 1 "for (int i = 0; i < nargs - ~a; ++i) { value v = next_arg(); ~a = make_pair(v, ~a); }\n" (length params) (mangle-name rest-param) (mangle-name rest-param))
-          (gen-code new-func 1 "~a = reverse_list(~a, NIL);\n" (mangle-name rest-param) (mangle-name rest-param)))
+          (gen-code new-func 1 "{\n")
+          (gen-code new-func 2 "value tail = NIL;\n")
+          (gen-code new-func 2 "for (int i = 0; i < nargs - ~a; ++i) {\n" (length params))
+          (gen-code new-func 3 "value p = make_pair(next_arg(), NIL);\n")
+          (gen-code new-func 3 "if (tail == NIL) ~a = p; else GET_PAIR(tail)->cdr = p;\n" (mangle-unique-name rest-param))
+          (gen-code new-func 3 "tail = p;\n")
+          (gen-code new-func 2 "}\n")
+          (gen-code new-func 1 "}\n"))
 
         ;; this lambda is the sole, never-set! init of a letrec binding
         ;; with no rest param: record it so a self tail call inside the
