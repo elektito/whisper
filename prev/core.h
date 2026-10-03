@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -551,6 +552,11 @@ extern value primcall_char_downcase(environment env, enum call_flags flags, int 
 extern value primcall_percent_char_ready_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_upcase(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_to_integer(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_char_eq_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_char_ge_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_char_gt_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_char_le_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_char_lt_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_char_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_close_port(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cons(environment env, enum call_flags flags, int nargs, ...);
