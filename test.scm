@@ -2182,6 +2182,7 @@ and still a comment
 (define (rest-all . args) args)
 (define (rest-after-two a b . rest) (list a b rest))
 (define (rest-tail-call . args) (rest-all 0 args))
+(define (rest-tail-call-overflow) (rest-after-two 1 2 3 4 5 6 7 8 9 10 11))
 (equal? '() ((lambda args args)))
 (equal? '(1) (rest-all 1))
 (equal? '(1 2 3) (rest-all 1 2 3))
@@ -2190,6 +2191,7 @@ and still a comment
 (equal? '(a b (c d)) (rest-after-two 'a 'b 'c 'd))
 (equal? '(1 2 3 4 5 6 7 8 9 10 11 12) (apply rest-all '(1 2 3 4 5 6 7 8 9 10 11 12)))
 (equal? '(0 (1 2 3)) (rest-tail-call 1 2 3))
+(equal? '(1 2 (3 4 5 6 7 8 9 10 11)) (rest-tail-call-overflow))
 
 ;; a hash-table-ref default thunk, and hash-table-update!'s default
 ;; thunk and update function, must produce their real result correctly

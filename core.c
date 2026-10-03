@@ -307,8 +307,17 @@ const char *find_func_name(funcptr func) {
 
 /************ trampoline ***********/
 
+/* forget the pending tail call once its callee has returned. this stops
+ * the global from keeping the finished call's closure and arguments
+ * reachable. */
+static void retire_pending_tail_call(void) {
+    pending_tail_call.closure = VOID;
+    pending_tail_call.nargs = 0;
+}
+
 /* call a closure with arguments passed as an array (trampoline) */
 value call_with_args(value closure, int accepts_mvalues, int nargs, value *args) {
+    int took_tail_call = 0;
     for (;;) {
         if (!IS_CLOSURE(closure)) { raise_error("called object not a procedure"); }
         struct closure *c = GET_CLOSURE(closure);
@@ -316,9 +325,13 @@ value call_with_args(value closure, int accepts_mvalues, int nargs, value *args)
         if (accepts_mvalues) { flags |= ACCEPTS_MVALUES; }
         value r = c->func(c->freevars, flags, nargs, args);
         if (r != TAILCALL) {
+            if (took_tail_call) {
+                retire_pending_tail_call();
+            }
             return r;
         }
 
+        took_tail_call = 1;
         closure = pending_tail_call.closure;
         nargs = pending_tail_call.nargs;
         args = nargs <= TAILCALL_MAX_INLINE
@@ -379,8 +392,14 @@ value resume_tail_call(value r) {
     value *args = nargs <= TAILCALL_MAX_INLINE
         ? pending_tail_call.args
         : GET_OBJECT(pending_tail_call.overflow)->vector.data;
-    return call_with_args(pending_tail_call.closure,
-                          pending_tail_call.accepts_mvalues, nargs, args);
+    value ret = call_with_args(pending_tail_call.closure,
+                               pending_tail_call.accepts_mvalues, nargs, args);
+
+    /* the first callee was reached through the global. if it made no
+     * tail call itself, call_with_args did not retire it. */
+    retire_pending_tail_call();
+
+    return ret;
 }
 
 /************ hash table ***********/
@@ -1048,10 +1067,13 @@ static void gc_mark(void) {
     }
 
     gc_recurse(pending_tail_call.closure);
-    for (int i = 0; i < TAILCALL_MAX_INLINE; i++) {
-      gc_recurse(pending_tail_call.args[i]);
+    if (pending_tail_call.nargs <= TAILCALL_MAX_INLINE) {
+        for (int i = 0; i < pending_tail_call.nargs; i++) {
+            gc_recurse(pending_tail_call.args[i]);
+        }
+    } else {
+        gc_recurse(pending_tail_call.overflow);
     }
-    gc_recurse(pending_tail_call.overflow);
 
     gc_scan_stack(cur_stack, stack_start);
 
@@ -2341,6 +2363,12 @@ value resume_continuation(environment env, enum call_flags flags, int nargs, ...
 
     free_args();
     GET_OBJECT(cont)->continuation.ret = ret;
+
+    /* we may have been reached through a tail call, and the longjmp
+     * below skips the call_with_args loop that would otherwise retire
+     * the pending tail call. our arguments are already read, so retire
+     * it here. */
+    retire_pending_tail_call();
 
     reinstate_stack(cont);
     return VOID; /* not reached; reinstate_stack longjmps away */
