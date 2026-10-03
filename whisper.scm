@@ -1830,6 +1830,56 @@
           (loop (cdr forms)
                 (compile-form func 1 (car forms) (and tail? last?) (not last?)))))))
 
+;; the number of temporaries after which the top level moves on to a new
+;; chunk function. this keeps every c function, and so every stack
+;; frame, bounded no matter how big the top level is. gcc takes much
+;; longer on one huge function than on several small ones, and call/cc
+;; copies the whole stack, including the top-level frame.
+(define *top-level-chunk-size* 300)
+
+;; flattens groups of expanded top-level forms (one group per source
+;; form) into (form . last?) pairs, where last? marks the last form of
+;; its group. only that form's value is used, and in a test suite it
+;; is what gets asserted.
+(define (top-level-items groups)
+  (define (group-items forms)
+    (if (null? forms)
+        '()
+        (cons (cons (car forms) (null? (cdr forms)))
+              (group-items (cdr forms)))))
+  (apply append (map group-items groups)))
+
+;; compiles groups of expanded top-level forms into a series of chunk
+;; functions, called in order from init-func. a chunk can end between
+;; any two forms, since expanded top-level forms share no temporaries.
+;; that holds even within one source form, since begin and include are
+;; spliced into separate forms by the expander, and that matters for a
+;; file that is mostly one big include.
+(define (compile-top-level-chunks program init-func groups)
+  (define (compile-item chunk item)
+    (let* ((last? (cdr item))
+           (varnum (compile-form chunk 1 (car item) #f (not last?))))
+      (when (and last? (!= varnum -1) (program-is-test-suite program))
+        (gen-code chunk 1 "test_assert(x~a);\n" varnum))))
+  (define (finish-chunk chunk)
+    (when (program-debug program)
+      (gen-code chunk 1 "leave_proc();\n"))
+    (gen-code chunk 1 "return VOID;\n"))
+  (define (start-chunk)
+    (let ((chunk (add-function program #f)))
+      (gen-code init-func 1 "~a(NULL, NO_CALL_FLAGS, 0);\n" (func-name chunk))
+      chunk))
+  (let loop ((items (top-level-items groups)) (chunk #f))
+    (if (null? items)
+        (when chunk (finish-chunk chunk))
+        (let ((chunk (if (and chunk (< (func-varnum chunk) *top-level-chunk-size*))
+                         chunk
+                         (begin
+                           (when chunk (finish-chunk chunk))
+                           (start-chunk)))))
+          (compile-item chunk (car items))
+          (loop (cdr items) chunk)))))
+
 (define (compile-top-level-form func env form filename)
   ;; eval returns the last form's value (see the resume_tail_call in
   ;; compile-expr-to-so), so that form is in tail position. hence
@@ -1858,11 +1908,7 @@
         (if (eof-object? form)
             (begin
               (mark-sealed-globals! program (expand-root-env-compilation-unit env))
-              (for-each (lambda (forms)
-                          (let ((varnum (compile-expanded-forms func forms #f)))
-                            (when (and (!= varnum -1) (program-is-test-suite program))
-                              (gen-code func 1 "test_assert(x~a);\n" varnum))))
-                        (reverse groups))
+              (compile-top-level-chunks program func (reverse groups))
               (when (program-is-test-suite program)
                 (gen-code func 1 "printf(\"\\n\");\n"))
               (gen-code func 1 "return VOID;\n"))
@@ -1942,8 +1988,9 @@
             (raise-if-undefined
              (compilation-unit-undefined-refs cu (expand-root-env-runtime-env lib-env) 'strict))
             (mark-sealed-globals! program cu)
-            (for-each (lambda (f) (compile-form func 1 f #f #f))
-                      (reverse forms))
+            ;; one group per form, so every form is the last of its
+            ;; group and is compiled with discard? set to false
+            (compile-top-level-chunks program func (map list (reverse forms)))
             (let ((exports (append (map (lambda (spec)
                                           (resolve-library-export lib-env (car spec) (cdr spec)))
                                         export-names)
