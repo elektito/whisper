@@ -92,48 +92,10 @@
 
 (define-syntax case-lambda
   (syntax-rules ()
-    ((case-lambda (params body0 ...) ...)
-     (lambda args
-       (letrec-syntax
-           ;; arity tests, expanded inline as pair?/null? chains so that
-           ;; dispatch costs no calls at all (as opposed to calling
-           ;; length which we used to do). the parameter list is only
-           ;; used as a counter, so the pattern variable p is never
-           ;; referenced in the template.
-           ((args=? (syntax-rules ::: ()
-                      ((_ a ())
-                       (null? a))
-                      ((_ a (p . rest))
-                       (and (pair? a) (args=? (cdr a) rest)))))
-            (args>=? (syntax-rules ::: ()
-                       ((_ a ())
-                        #t)
-                       ((_ a (p . rest))
-                        (and (pair? a) (args>=? (cdr a) rest)))))
-            ;; binds the parameters directly out of the argument list,
-            ;; avoiding the closure allocation and variadic re-dispatch
-            ;; that going through apply would cost.
-            (bind (syntax-rules ::: ()
-                    ((_ a () b :::)
-                     (begin b :::))
-                    ((_ a (p . rest) b :::)
-                     (let ((p (car a)))
-                       (bind (cdr a) rest b :::)))
-                    ((_ a t b :::)
-                     (let ((t a)) b :::))))
-            (cl (syntax-rules ::: ()
-                  ((cl)
-                   (error "no matching clause"))
-                  ((cl ((p :::) . body) . rest)
-                   (if (args=? args (p :::))
-                       (bind args (p :::) . body)
-                       (cl . rest)))
-                  ((cl ((p ::: . tail) . body)
-                       . rest)
-                   (if (args>=? args (p :::))
-                       (bind args (p ::: . tail) . body)
-                       (cl . rest))))))
-         (cl (params body0 ...) ...))))))
+    ((_)
+     (lambda args (error "no matching clause")))
+    ((_ (params body ...) ...)
+     (%case-lambda (lambda params body ...) ...))))
 
 (define-syntax do-step
   (syntax-rules ()
