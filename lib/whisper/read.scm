@@ -38,7 +38,8 @@
 
 (define (stateful-read-char port)
   (let ((ch (read-char port)))
-    (if (char=? ch #\newline)
+    ;; eqv? since ch can be eof
+    (if (eqv? ch #\newline)
         (begin
           (line+)
           (reset-col))
@@ -52,7 +53,8 @@
     (reader-state-column-set! (reader-state) last)))
 
 (define (stateful-unread-char ch port)
-  (if (char=? ch #\newline)
+  ;; eqv? since ch can be eof
+  (if (eqv? ch #\newline)
       (revert-col-to-last)
       (col-))
   (unread-char ch port))
@@ -118,7 +120,8 @@
 
 (define (skip-whitespace-and-comments port)
   (let loop ((ch (peek-char port)))
-    (cond ((char-whitespace? ch) (stateful-read-char port) (loop (peek-char port)))
+    (cond ((eof-object? ch) (void))
+          ((char-whitespace? ch) (stateful-read-char port) (loop (peek-char port)))
           ((char=? #\; ch) (skip-line-comment port) (loop (peek-char port)))
           ((char=? #\# ch) (stateful-read-char port)
                            (let ((next-char (peek-char port)))
@@ -152,9 +155,10 @@
         (void)
         (let ((ch (stateful-read-char port)))
           (cond ((eof-object? ch) (read-error "unterminated block comment"))
-                ((and (char=? ch #\#) (char=? (peek-char port) #\|))
+                ;; eqv? since the peeked char can be eof
+                ((and (eqv? ch #\#) (eqv? (peek-char port) #\|))
                  (stateful-read-char port) (loop (+ depth 1)))
-                ((and (char=? ch #\|) (char=? (peek-char port) #\#))
+                ((and (eqv? ch #\|) (eqv? (peek-char port) #\#))
                  (stateful-read-char port) (loop (- depth 1)))
                 (else (loop depth)))))))
 
@@ -170,7 +174,8 @@
 
 (define (read-unquoted-form port)
   (stateful-read-char port) ; skip the unquote (comma) character
-  (let ((unquote (if (char=? #\@ (peek-char port))
+  ;; eqv? since the peeked char can be eof
+  (let ((unquote (if (eqv? #\@ (peek-char port))
                      (begin
                        (stateful-read-char port)
                        'unquote-splicing)

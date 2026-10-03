@@ -688,35 +688,6 @@
       (let ((halves (split lst)))
         (merge (sort (car halves) less?) (sort (cdr halves) less?)))))
 
-(define (char=? . chars)
-  (cond ((null? (cdr chars)) #t)
-        ((null? (cddr chars)) (eq? (car chars) (cadr chars)))
-        (else (all? (pairwise eq? chars)))))
-
-(define (char<? . chars)
-  (cond ((null? (cdr chars)) #t)
-        ((null? (cddr chars))
-         (< (char->integer (car chars)) (char->integer (cadr chars))))
-        (else (all? (pairwise < (map char->integer chars))))))
-
-(define (char>? . chars)
-  (cond ((null? (cdr chars)) #t)
-        ((null? (cddr chars))
-         (> (char->integer (car chars)) (char->integer (cadr chars))))
-        (else (all? (pairwise > (map char->integer chars))))))
-
-(define (char<=? . chars)
-  (cond ((null? (cdr chars)) #t)
-        ((null? (cddr chars))
-         (<= (char->integer (car chars)) (char->integer (cadr chars))))
-        (else (all? (pairwise <= (map char->integer chars))))))
-
-(define (char>=? . chars)
-  (cond ((null? (cdr chars)) #t)
-        ((null? (cddr chars))
-         (>= (char->integer (car chars)) (char->integer (cadr chars))))
-        (else (all? (pairwise >= (map char->integer chars))))))
-
 (define (char-whitespace? c)
   (or (char=? #\space c)
       (char=? #\tab c)
