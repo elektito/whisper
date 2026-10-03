@@ -826,12 +826,19 @@ static value lookup_freevars_closure(struct freevars_closure_mapping *map, int l
     return 0;
 }
 
+/* the freevars map used by gc_scan_stack. It is a global and not a
+ * local because it is the same for every stack scan in a mark phase:
+ * the main stack and the saved stack of every live continuation.
+ * building it per scan meant rebuilding and sorting it once for each
+ * continuation, on every gc. nothing allocates or frees closures while
+ * marking, so gc_mark builds it once at the start and frees it at the
+ * end. */
+static struct freevars_closure_mapping *gc_freevars_map = NULL;
+static int gc_freevars_map_len = 0;
+
 /* see gc_mark() function's comment to see why no_sanitize */
 __attribute__((no_sanitize("address")))
 static void gc_scan_stack(void *cur_stack, void *stack_start) {
-    int freevars_map_len;
-    struct freevars_closure_mapping *freevars_map = build_freevars_map(&freevars_map_len);
-
     for (void **p = cur_stack; p < (void**) stack_start; p++) {
         uint64_t tag = (uint64_t) *p & TAG_MASK;
         for (int i = 0; i < n_heaps; ++i) {
@@ -857,7 +864,7 @@ static void gc_scan_stack(void *cur_stack, void *stack_start) {
          * accept in a conservative garbage collector).
          *
          * For large closures env points to a malloc'd array outside any
-         * pool; those are matched via freevars_map. */
+         * pool; those are matched via gc_freevars_map. */
         uint64_t raw = (uint64_t)*p;
         if ((raw & TAG_MASK) == 0 && raw > 0) {
             for (int i = 0; i < n_heaps; ++i) {
@@ -878,14 +885,12 @@ static void gc_scan_stack(void *cur_stack, void *stack_start) {
                 }
             }
 
-            value cl = lookup_freevars_closure(freevars_map, freevars_map_len, raw);
+            value cl = lookup_freevars_closure(gc_freevars_map, gc_freevars_map_len, raw);
             if (cl) {
                 gc_recurse(cl);
             }
         }
     }
-
-    free(freevars_map);
 }
 
 static void gc_free_empty_pools(struct pool **heaps, int n_heaps) {
@@ -1024,6 +1029,10 @@ static void gc_mark(void) {
     gc_marked_count = 0;
     gc_epoch++;
 
+    /* build this before marking anything. a global can hold a
+     * continuation, and marking it scans its saved stack right away. */
+    gc_freevars_map = build_freevars_map(&gc_freevars_map_len);
+
     /* recursively mark values accessible from global symbols */
     hash_table_each(&symbols, gc_symbol_each, NULL);
 
@@ -1045,6 +1054,10 @@ static void gc_mark(void) {
     gc_recurse(pending_tail_call.overflow);
 
     gc_scan_stack(cur_stack, stack_start);
+
+    free(gc_freevars_map);
+    gc_freevars_map = NULL;
+    gc_freevars_map_len = 0;
 
     if (gc_threshold_multiplier == 0) {
         char *env = getenv("GC_THRESHOLD_MULTIPLIER");
