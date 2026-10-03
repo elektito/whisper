@@ -685,6 +685,11 @@
                       (char-downcase "char_downcase" 1 1)
                       (char-upcase "char_upcase" 1 1)
                       (char->integer "char_to_integer" 1 1)
+                      (char=? "char_eq_q" 2 -1)
+                      (char<? "char_lt_q" 2 -1)
+                      (char<=? "char_le_q" 2 -1)
+                      (char>? "char_gt_q" 2 -1)
+                      (char>=? "char_ge_q" 2 -1)
                       (char? "char_q" 1 1)
                       (close-port "close_port" 1 1)
                       (command-line "command_line" 0 0)
@@ -851,6 +856,21 @@
                              (cdr 1 value
                               ((("!IS_PAIR(" 0 ")") . "cdr argument is not a pair"))
                               ("GET_PAIR(" 0 ")->cdr"))
+                             (char=? 2 value
+                              ((("!IS_CHAR(" 0 ") || !IS_CHAR(" 1 ")") . "char=? argument is not a character"))
+                              ("BOOL((uint8_t) GET_CHAR(" 0 ") == (uint8_t) GET_CHAR(" 1 "))"))
+                             (char<? 2 value
+                              ((("!IS_CHAR(" 0 ") || !IS_CHAR(" 1 ")") . "char<? argument is not a character"))
+                              ("BOOL((uint8_t) GET_CHAR(" 0 ") < (uint8_t) GET_CHAR(" 1 "))"))
+                             (char<=? 2 value
+                              ((("!IS_CHAR(" 0 ") || !IS_CHAR(" 1 ")") . "char<=? argument is not a character"))
+                              ("BOOL((uint8_t) GET_CHAR(" 0 ") <= (uint8_t) GET_CHAR(" 1 "))"))
+                             (char>? 2 value
+                              ((("!IS_CHAR(" 0 ") || !IS_CHAR(" 1 ")") . "char>? argument is not a character"))
+                              ("BOOL((uint8_t) GET_CHAR(" 0 ") > (uint8_t) GET_CHAR(" 1 "))"))
+                             (char>=? 2 value
+                              ((("!IS_CHAR(" 0 ") || !IS_CHAR(" 1 ")") . "char>=? argument is not a character"))
+                              ("BOOL((uint8_t) GET_CHAR(" 0 ") >= (uint8_t) GET_CHAR(" 1 "))"))
                              (char? 1 value () ("BOOL(IS_CHAR(" 0 "))"))
                              (eq? 2 value () ("BOOL(" 0 " == " 1 ")"))
                              (eqv? 2 value () ("BOOL(" 0 " == " 1 ")")) ;; TODO fix when we have other number types
@@ -1648,6 +1668,11 @@
                                  (identifier 'primcall 'char-downcase 'char-downcase)
                                  (identifier 'primcall 'char-upcase 'char-upcase)
                                  (identifier 'primcall 'char->integer 'char->integer)
+                                 (identifier 'primcall 'char=? 'char=?)
+                                 (identifier 'primcall 'char<? 'char<?)
+                                 (identifier 'primcall 'char<=? 'char<=?)
+                                 (identifier 'primcall 'char>? 'char>?)
+                                 (identifier 'primcall 'char>=? 'char>=?)
                                  (identifier 'primcall 'char? 'char?)
                                  (identifier 'primcall 'close-port 'close-port)
                                  (identifier 'primcall 'command-line 'command-line)

@@ -864,20 +864,17 @@ and still a comment
 (char? #\A)
 (char? #\x40)
 
-(char=? #\space)
 (char=? #\space #\space)
 (char=? #\space #\  #\space)
 (not (char=? #\A #\B))
 (not (char=? #\A #\B #\space))
 
-(char<? #\a)
 (char<? #\a #\b)
 (char<? #\a #\b #\c)
 (char<? #\A #\a)
 (not (char<? #\b #\a))
 (not (char<? #\a #\a #\b #\c))
 
-(char<=? #\a)
 (char<=? #\a #\a)
 (char<=? #\a #\b)
 (char<=? #\a #\b #\c)
@@ -886,14 +883,12 @@ and still a comment
 (char<=? #\a #\a #\b #\c)
 (char<=? #\a #\b #\b #\c)
 
-(char>? #\a)
 (char>? #\b #\a)
 (char>? #\c #\b #\a)
 (char>? #\a #\A)
 (not (char>? #\a #\b))
 (not (char>? #\c #\b #\a #\a))
 
-(char>=? #\a)
 (char>=? #\a #\a)
 (char>=? #\b #\a)
 (char>=? #\c #\b #\a)

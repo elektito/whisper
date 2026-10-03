@@ -2498,6 +2498,63 @@ value primcall_char_to_integer(environment env, enum call_flags flags, int nargs
     return FIXNUM((int)(uint8_t) GET_CHAR(ch));
 }
 
+/* the result of comparing two numbers. this is used for both character
+ * comparison and numeric comparison. the latter might involve nans
+ * which are unordered and comparing them is always false, hence we
+ * also have NUM_UNORDERED */
+enum num_order { NUM_LT, NUM_EQ, NUM_GT, NUM_UNORDERED };
+
+/* the body shared by the character comparison primcalls, similar to
+ * NUM_COMPARISON */
+#define CHAR_COMPARISON(name, accept)                                   \
+    if (nargs < 2) {                                                    \
+        raise_error(name " needs at least two arguments");              \
+    }                                                                   \
+    init_args();                                                        \
+    value c1 = next_arg();                                              \
+    if (!IS_CHAR(c1)) {                                                 \
+        free_args();                                                    \
+        raise_error(name " argument is not a character");               \
+    }                                                                   \
+    value result = TRUE;                                                \
+    for (int i = 1; i < nargs; ++i) {                                   \
+        value c2 = next_arg();                                          \
+        if (!IS_CHAR(c2)) {                                             \
+            free_args();                                                \
+            raise_error(name " argument is not a character");           \
+        }                                                               \
+        uint8_t n = (uint8_t) GET_CHAR(c1);                             \
+        uint8_t m = (uint8_t) GET_CHAR(c2);                             \
+        enum num_order order;                                           \
+        if (n < m) { order = NUM_LT; }                                  \
+        else if (n > m) { order = NUM_GT; }                             \
+        else { order = NUM_EQ; }                                        \
+        if (!(accept)) { result = FALSE; }                              \
+        c1 = c2;                                                        \
+    }                                                                   \
+    free_args();                                                        \
+    return result;
+
+value primcall_char_eq_q(environment env, enum call_flags flags, int nargs, ...) {
+    CHAR_COMPARISON("char=?", order == NUM_EQ)
+}
+
+value primcall_char_ge_q(environment env, enum call_flags flags, int nargs, ...) {
+    CHAR_COMPARISON("char>=?", order == NUM_GT || order == NUM_EQ)
+}
+
+value primcall_char_gt_q(environment env, enum call_flags flags, int nargs, ...) {
+    CHAR_COMPARISON("char>?", order == NUM_GT)
+}
+
+value primcall_char_le_q(environment env, enum call_flags flags, int nargs, ...) {
+    CHAR_COMPARISON("char<=?", order == NUM_LT || order == NUM_EQ)
+}
+
+value primcall_char_lt_q(environment env, enum call_flags flags, int nargs, ...) {
+    CHAR_COMPARISON("char<?", order == NUM_LT)
+}
+
 value primcall_char_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("char? needs a single argument"); }
     init_args();
@@ -4190,10 +4247,6 @@ value primcall_sub(environment env, enum call_flags flags, int nargs, ...) {
         return result_fixnum;
     }
 }
-
-/* the result of comparing two real numbers. comparisons involving a nan
- * are unordered, so every ordered comparison is false for them. */
-enum num_order { NUM_LT, NUM_EQ, NUM_GT, NUM_UNORDERED };
 
 static enum num_order compare_numbers(value n, value m) {
     if (IS_FIXNUM(n) && IS_FIXNUM(m)) {
