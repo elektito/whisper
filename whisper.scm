@@ -1164,7 +1164,7 @@
           (unless (null? params)
             (gen-code new-func 1 "value ~a = next_arg();\n" (mangle-unique-name (car params)))
             (when (var-is-modified? (car params))
-              (gen-code new-func 1 "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, ~a);\n" (mangle-unique-name (car params)) (mangle-unique-name (car params))))
+              (gen-code new-func 1 "~a = make_box(~a);\n" (mangle-unique-name (car params)) (mangle-unique-name (car params))))
             (loop (cdr params))))
 
         (when rest-param
@@ -1230,7 +1230,7 @@
         (binding-owner-set! (identifier-binding (caar bindings)) func)
         (let ((varnum (compile-form func (+ 1 indent) (cadar bindings) #f #f)))
           (if (var-is-modified? (caar bindings))
-              (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-unique-name (caar bindings)) varnum)
+              (gen-code func (+ 1 indent) "value ~a = make_box(x~a);\n" (mangle-unique-name (caar bindings)) varnum)
               (gen-code func (+ 1 indent) "value ~a = x~a;\n" (mangle-unique-name (caar bindings)) varnum))
           (loop (cdr bindings)))))
     (let loop ((body (cddr form))
@@ -1293,7 +1293,7 @@
     ;; use them
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-unique-name (caar bindings)))
+        (gen-code func (+ 1 indent) "value ~a = make_box(VOID);\n" (mangle-unique-name (caar bindings)))
         (loop (cdr bindings))))
 
     ;; evaluate all inits
@@ -1346,7 +1346,7 @@
     ;; scope
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (gen-code func (+ 1 indent) "value ~a = primcall_box(NULL, NO_CALL_FLAGS, 1, VOID);\n" (mangle-unique-name (caar bindings)))
+        (gen-code func (+ 1 indent) "value ~a = make_box(VOID);\n" (mangle-unique-name (caar bindings)))
         (loop (cdr bindings))))
 
     ;; evaluate each initializer and assign immediately before moving to
@@ -1483,7 +1483,7 @@
     (let loop ((params params) (varnums arg-varnums))
       (unless (null? params)
         (if (var-is-modified? (car params))
-            (gen-code func indent "~a = primcall_box(NULL, NO_CALL_FLAGS, 1, x~a);\n" (mangle-unique-name (car params)) (car varnums))
+            (gen-code func indent "~a = make_box(x~a);\n" (mangle-unique-name (car params)) (car varnums))
             (gen-code func indent "~a = x~a;\n" (mangle-unique-name (car params)) (car varnums)))
         (loop (cdr params) (cdr varnums))))
     (gen-code func indent "goto ~a_entry;\n" (func-name func))
