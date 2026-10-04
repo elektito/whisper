@@ -175,19 +175,22 @@ OPTION  [MNEMONIC]      DESCRIPTION     -- Implementation Assumes ASCII Text Enc
                  (eqv? #\newline (string-ref whatever (- len 1)))))))
   ) ; end has-newline?
 
+;; the index of the first tilde at or after pos, or len if there is none
+(define (next-tilde str pos len)
+  (cond ((= pos len) len)
+        ((eqv? (string-ref str pos) #\~) pos)
+        (else (next-tilde str (+ pos 1) len))))
+
 (define (anychar-dispatch pos arglist last-was-newline port length-of-format-string format-strg)
   (if (>= pos length-of-format-string)
       arglist ; return unused args
-      (let ( (char (string-ref format-strg pos)) )
-        (cond
-         ((eqv? char #\~)
-          (tilde-dispatch (+ pos 1) arglist last-was-newline port length-of-format-string format-strg))
-         (else
-          (write-char char port)
-          (anychar-dispatch (+ pos 1) arglist #f port length-of-format-string format-strg)
-          ))
-        ))
-  ) ; end anychar-dispatch
+      (let ((tilde (next-tilde format-strg pos length-of-format-string)))
+        (if (= tilde pos)
+            (tilde-dispatch (+ pos 1) arglist last-was-newline port length-of-format-string format-strg)
+            (begin
+              ;; write the literal text up to the next tilde
+              (%write-string format-strg port pos tilde)
+              (anychar-dispatch tilde arglist #f port length-of-format-string format-strg))))))
 
 (define (tilde-dispatch pos arglist last-was-newline port length-of-format-string format-strg)
   (cond
