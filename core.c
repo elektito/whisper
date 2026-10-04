@@ -19,6 +19,8 @@
  * refill, so unread-char still works right after buffe refill */
 #define FILE_PUSHBACK 4
 
+#define OBJECT_SIZE(field) (offsetof(struct object, field) + sizeof(((struct object *) 0)->field))
+
 static void cleanup(void);
 
 /*************** static variables **************/
@@ -59,6 +61,9 @@ static struct pool *closure1s_heap;
 static struct pool *closure2s_heap;
 static struct pool *closure3s_heap;
 static struct pool *closures_heap;
+static struct pool *boxes_heap;
+static struct pool *vectors_heap;
+static struct pool *wrapped_heap;
 
 static void *lbound_all_heaps = 0;
 static void *ubound_all_heaps = 0;
@@ -665,8 +670,11 @@ static void init_memory(void) {
     closure2s_heap = create_heap(sizeof(struct closure2), CLOSURE_TAG);
     closure3s_heap = create_heap(sizeof(struct closure3), CLOSURE_TAG);
     closures_heap = create_heap(sizeof(struct closure), CLOSURE_TAG);
+    boxes_heap = create_heap(OBJECT_SIZE(box), OBJECT_TAG);
+    vectors_heap = create_heap(OBJECT_SIZE(vector), OBJECT_TAG);
+    wrapped_heap = create_heap(OBJECT_SIZE(wrapped), OBJECT_TAG);
 
-    n_heaps = 9;
+    n_heaps = 12;
     heaps = malloc(n_heaps * sizeof(struct pool *));
     heaps[0] = symbols_heap;
     heaps[1] = pairs_heap;
@@ -677,6 +685,9 @@ static void init_memory(void) {
     heaps[6] = closure2s_heap;
     heaps[7] = closure3s_heap;
     heaps[8] = closures_heap;
+    heaps[9] = boxes_heap;
+    heaps[10] = vectors_heap;
+    heaps[11] = wrapped_heap;
 }
 
 static void gc_recurse(value v);
@@ -979,9 +990,6 @@ static void gc_free_block(void *p, struct pool *heap) {
             free(obj->port.file_buf);
             free(obj->port.string);
             break;
-        case OBJ_VECTOR:
-            free(obj->vector.data);
-            break;
         case OBJ_BYTEVECTOR:
             free(obj->bytevector.data);
             break;
@@ -1007,6 +1015,9 @@ static void gc_free_block(void *p, struct pool *heap) {
             /* do nothing */
             break;
         }
+    } else if (heap == vectors_heap) {
+        struct object *obj = (struct object *) v;
+        free(obj->vector.data);
     }
 
     /* zero the data so stale pointers don't cause double-frees if the
@@ -1315,7 +1326,7 @@ value make_string(const char *s, size_t len) {
 }
 
 value make_vector(size_t len, value fill) {
-    struct object *obj = alloc_object();
+    struct object *obj = alloc_from_heap(vectors_heap);
     obj->type = OBJ_VECTOR;
     obj->vector.len = len;
     obj->vector.data = calloc(obj->vector.len, sizeof(value));
@@ -1331,6 +1342,13 @@ value make_bytevector(size_t len, uint8_t byte) {
     obj->bytevector.len = len;
     obj->bytevector.data = malloc(obj->bytevector.len);
     memset(obj->bytevector.data, byte, len);
+    return OBJECT(obj);
+}
+
+value make_box(value v) {
+    struct object *obj = alloc_from_heap(boxes_heap);
+    obj->type = OBJ_BOX;
+    obj->box.value = v;
     return OBJECT(obj);
 }
 
@@ -2248,10 +2266,7 @@ value primcall_box(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
     value v = next_arg();
     free_args();
-    struct object *box = alloc_object();
-    box->type = OBJ_BOX;
-    box->box.value = v;
-    return OBJECT(box);
+    return make_box(v);
 }
 
 value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -4003,7 +4018,7 @@ value primcall_wrap(environment env, enum call_flags flags, int nargs, ...) {
     value kind = next_arg();
     free_args();
 
-    struct object *w = alloc_object();
+    struct object *w = alloc_from_heap(wrapped_heap);
     w->type = OBJ_WRAPPED;
     w->wrapped.value = v;
     w->wrapped.kind = kind;
