@@ -222,18 +222,20 @@
 
 (define (read-string-literal port)
   (stateful-read-char port) ; get rid of open quotation
-  (let loop ((ch (peek-char port))
-             (s ""))
-    (stateful-read-char port)
-    (cond ((eof-object? ch) (read-error "eof in string"))
-          ((char=? #\" ch) s)
-          ((and (char=? #\\ ch) (line-continuation-start? (peek-char port)))
-           (skip-line-continuation port)
-           (loop (peek-char port) s))
-          ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
-                             (loop (peek-char port) (string-append-char s escaped-char))))
-          (else (let ((s (string-append-char s ch)))
-                  (loop (peek-char port) s))))))
+  (let ((out (open-output-string)))
+    (let loop ((ch (peek-char port)))
+      (stateful-read-char port)
+      (cond ((eof-object? ch) (read-error "eof in string"))
+            ((char=? #\" ch) (get-output-string out))
+            ((and (char=? #\\ ch) (line-continuation-start? (peek-char port)))
+             (skip-line-continuation port)
+             (loop (peek-char port)))
+            ((char=? #\\ ch)
+             (%write-char (read-escaped-char port) out)
+             (loop (peek-char port)))
+            (else
+             (%write-char ch out)
+             (loop (peek-char port)))))))
 
 (define (intraline-whitespace? ch)
   (and (char? ch) (or (char=? ch #\space) (char=? ch #\tab))))
@@ -264,15 +266,17 @@
 
 (define (read-piped-symbol port)
   (stateful-read-char port) ; get rid of initial pipe
-  (let loop ((ch (peek-char port))
-             (s ""))
-    (stateful-read-char port)
-    (cond ((eof-object? ch) (read-error "eof in piped symbol"))
-          ((char=? #\| ch) (string->symbol s))
-          ((char=? #\\ ch) (let ((escaped-char (read-escaped-char port)))
-                             (loop (peek-char port) (string-append-char s escaped-char))))
-          (else (let ((s (string-append s (make-string 1 ch))))
-                  (loop (peek-char port) s))))))
+  (let ((out (open-output-string)))
+    (let loop ((ch (peek-char port)))
+      (stateful-read-char port)
+      (cond ((eof-object? ch) (read-error "eof in piped symbol"))
+            ((char=? #\| ch) (string->symbol (get-output-string out)))
+            ((char=? #\\ ch)
+             (%write-char (read-escaped-char port) out)
+             (loop (peek-char port)))
+            (else
+             (%write-char ch out)
+             (loop (peek-char port)))))))
 
 (define (read-escaped-char port)
   ;; note: the backslash is already read
@@ -329,14 +333,19 @@
         (read-identifier-or-number port #\.))))
 
 (define (read-identifier-or-number port first-char)
-  (let loop ((first-iter #t) (ch first-char) (s ""))
-    (cond ((or (eof-object? ch) (char-is-separator? ch)) (sym-or-num s))
-          ((eq? #\\ ch) (unless first-iter (stateful-read-char port))
-                        (let ((escaped-char (read-escaped-char port)))
-                          (loop #f (peek-char port) (string-append-char s escaped-char))))
-          (else (unless first-iter
-                  (stateful-read-char port))
-                (loop #f (peek-char port) (string-append-char s ch))))))
+  (let ((out (open-output-string)))
+    (let loop ((first-iter #t) (ch first-char))
+      (cond ((or (eof-object? ch) (char-is-separator? ch))
+             (sym-or-num (get-output-string out)))
+            ((eq? #\\ ch)
+             (unless first-iter (stateful-read-char port))
+             (%write-char (read-escaped-char port) out)
+             (loop #f (peek-char port)))
+            (else
+             (unless first-iter
+               (stateful-read-char port))
+             (%write-char ch out)
+             (loop #f (peek-char port)))))))
 
 (define (read-sharp-thing port)
   (stateful-read-char port) ; skip the sharp
