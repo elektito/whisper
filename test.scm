@@ -2170,6 +2170,21 @@ and still a comment
         (apply apply-loop (list (- n 1))))))
 (eq? 'done (apply-loop 10000000))
 
+;; tail calls through a case-lambda
+(define cl-loop
+  (case-lambda
+   ((n) (cl-loop n 0))
+   ((n acc) (if (= n 0) acc (cl-loop (- n 1) (+ acc 1))))))
+(= 10000000 (cl-loop 10000000))
+
+(define (cl-ping n) (if (= n 0) 'done (cl-pong (- n 1))))
+(define cl-pong (case-lambda ((n) (cl-ping n))))
+(eq? 'done (cl-ping 10000000))
+
+(define cl-many (case-lambda ((a) (list a)) ((a . rest) (list a rest))))
+(define (cl-call-many) (cl-many 1 2 3 4 5 6 7 8 9 10 11))
+(equal? '(1 (2 3 4 5 6 7 8 9 10 11)) (cl-call-many))
+
 ;; a tail call with 9 arguments (more than it fits inline) must still
 ;; pass them all through correctly.
 (define (sum9 a b c d e f g h i) (+ a b c d e f g h i))
