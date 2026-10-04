@@ -24,6 +24,15 @@
          (begin result1 result2 ...)
          (cond clause1 clause2 ...)))))
 
+;; (case-match? key a b c) is true when key is eqv? to one of the atoms.
+;; it expands to inline eqv? tests, so case needs no memv call.
+(define-syntax case-match?
+  (syntax-rules ()
+    ((_ key) #f)
+    ((_ key atom) (eqv? key 'atom))
+    ((_ key atom atoms ...)
+     (or (eqv? key 'atom) (case-match? key atoms ...)))))
+
 (define-syntax case
   (syntax-rules (else =>)
     ((case (key ...)
@@ -38,22 +47,22 @@
      (begin result1 result2 ...))
     ((case key
        ((atoms ...) result1 result2 ...))
-     (if (memv key '(atoms ...))
+     (if (case-match? key atoms ...)
          (begin result1 result2 ...)))
     ((case key
        ((atoms ...) => result))
-     (if (memv key '(atoms ...))
+     (if (case-match? key atoms ...)
          (result key)))
     ((case key
        ((atoms ...) => result)
        clause clauses ...)
-     (if (memv key '(atoms ...))
+     (if (case-match? key atoms ...)
          (result key)
          (case key clause clauses ...)))
     ((case key
        ((atoms ...) result1 result2 ...)
        clause clauses ...)
-     (if (memv key '(atoms ...))
+     (if (case-match? key atoms ...)
          (begin result1 result2 ...)
          (case key clause clauses ...)))))
 
