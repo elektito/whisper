@@ -1222,6 +1222,17 @@
               (loop (cdr freevars))))
           (gen-code func 0 ");\n")
 
+          ;; a single letrec binding holds its closure without a box
+          ;; (see compile-letrec), so if the closure captured it above,
+          ;; it captured it while still VOID. point that slot at the
+          ;; closure itself.
+          (when (and eligible-binding
+                     (eq? (binding-owner eligible-binding) func)
+                     (not (binding-mutated? eligible-binding)))
+            (let ((idx (func-find-freevar new-func eligible-binding)))
+              (when idx
+                (gen-code func indent "GET_CLOSURE(x~a)->freevars[~a] = x~a;\n" varnum idx varnum))))
+
           ;; return function varnum
           varnum)))))
 
@@ -1268,6 +1279,16 @@
                     (cons b acc)
                     acc))))))
 
+;; a letrec or letrec* whose only binding is a lambda that is never set!
+;; (a named let, or a body with one internal define) needs no box: the
+;; variable can hold the closure directly. compile-lambda handles a
+;; closure that refers to itself.
+(define (unboxed-letrec? form eligible-bindings)
+  (let ((bindings (cadr form)))
+    (and (= 1 (length bindings))
+         (memq (identifier-binding (caar bindings)) eligible-bindings)
+         #t)))
+
 ;; compile a letrec/letrec* binding's init form, calling compile-lambda
 ;; directly when its binding was found eligible
 (define (compile-letrec-init func indent binding init-form eligible-bindings)
@@ -1276,8 +1297,9 @@
       (compile-form func indent init-form #f #f)))
 
 (define (compile-letrec func indent form tail? discard?)
-  (let ((letrec-varnum (func-next-varnum func))
-        (eligible-bindings (eligible-letrec-bindings form)))
+  (let* ((letrec-varnum (func-next-varnum func))
+         (eligible-bindings (eligible-letrec-bindings form))
+         (unboxed? (unboxed-letrec? form eligible-bindings)))
     (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
     (gen-code func indent "{\n")
 
@@ -1289,7 +1311,8 @@
       (let loop ((bindings (cadr form)))
         (unless (null? bindings)
           (binding-owner-set! (identifier-binding (caar bindings)) func)
-          (mark-var-as-modified (caar bindings))
+          (unless unboxed?
+            (mark-var-as-modified (caar bindings)))
           (loop (cdr bindings)))))
 
     ;; declare all variables as boxed(void) (since they are all marked
@@ -1297,7 +1320,8 @@
     ;; use them
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (gen-code func (+ 1 indent) "value ~a = make_box(VOID);\n" (mangle-unique-name (caar bindings)))
+        (gen-code func (+ 1 indent) (if unboxed? "value ~a = VOID;\n" "value ~a = make_box(VOID);\n")
+                  (mangle-unique-name (caar bindings)))
         (loop (cdr bindings))))
 
     ;; evaluate all inits
@@ -1312,8 +1336,10 @@
       ;; assign results
       (let loop ((bindings (cadr form)) (varnums init-varnums))
         (unless (null? bindings)
-          (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n"
-                    (mangle-name (caar bindings)) (car varnums))
+          (if unboxed?
+              (gen-code func (+ 1 indent) "~a = x~a;\n" (mangle-name (caar bindings)) (car varnums))
+              (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n"
+                        (mangle-name (caar bindings)) (car varnums)))
           (loop (cdr bindings) (cdr varnums))))
 
       ;; compile the body
@@ -1330,8 +1356,9 @@
       letrec-varnum)))
 
 (define (compile-letrec* func indent form tail? discard?)
-  (let ((letrec-varnum (func-next-varnum func))
-        (eligible-bindings (eligible-letrec-bindings form)))
+  (let* ((letrec-varnum (func-next-varnum func))
+         (eligible-bindings (eligible-letrec-bindings form))
+         (unboxed? (unboxed-letrec? form eligible-bindings)))
     (gen-code func indent "value x~a = VOID;\n" letrec-varnum)
     (gen-code func indent "{\n")
 
@@ -1343,14 +1370,16 @@
       (let loop ((bindings (cadr form)))
         (unless (null? bindings)
           (binding-owner-set! (identifier-binding (caar bindings)) func)
-          (mark-var-as-modified (caar bindings))
+          (unless unboxed?
+            (mark-var-as-modified (caar bindings)))
           (loop (cdr bindings)))))
 
     ;; declare all variables as boxed(void) and bring them all into
     ;; scope
     (let loop ((bindings (cadr form)))
       (unless (null? bindings)
-        (gen-code func (+ 1 indent) "value ~a = make_box(VOID);\n" (mangle-unique-name (caar bindings)))
+        (gen-code func (+ 1 indent) (if unboxed? "value ~a = VOID;\n" "value ~a = make_box(VOID);\n")
+                  (mangle-unique-name (caar bindings)))
         (loop (cdr bindings))))
 
     ;; evaluate each initializer and assign immediately before moving to
@@ -1359,7 +1388,9 @@
       (unless (null? bindings)
         (let ((varnum (compile-letrec-init func (+ 1 indent) (identifier-binding (caar bindings))
                                            (cadar bindings) eligible-bindings)))
-          (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n" (mangle-unique-name (caar bindings)) varnum))
+          (if unboxed?
+              (gen-code func (+ 1 indent) "~a = x~a;\n" (mangle-unique-name (caar bindings)) varnum)
+              (gen-code func (+ 1 indent) "GET_OBJECT(~a)->box.value = x~a;\n" (mangle-unique-name (caar bindings)) varnum)))
         (loop (cdr bindings))))
 
     ;; compile the body
