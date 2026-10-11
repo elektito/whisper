@@ -1501,6 +1501,21 @@ and still a comment
 (let ((ht (alist->hash-table (list (cons (list 1 2) 'x)))))
   (eq? 'x (hash-table-ref/default ht (list 1 2) #f)))
 
+;; regression test: hash agrees with equal? past its depth limit and for
+;; bytevectors
+(= (hash (iota 20)) (hash (iota 20)))
+(let ((nest (lambda (n)
+              (let loop ((i 0) (x 1))
+                (if (= i n) x (loop (+ i 1) (list x)))))))
+  (= (hash (nest 12)) (hash (nest 12))))
+(= (hash (bytevector 1 2 3)) (hash (bytevector 1 2 3)))
+
+(let ((ht (make-hash-table)))
+  (hash-table-set! ht (iota 20) 'x)
+  (hash-table-set! ht (bytevector 1 2 3) 'y)
+  (and (eq? 'x (hash-table-ref/default ht (iota 20) #f))
+       (eq? 'y (hash-table-ref/default ht (bytevector 1 2 3) #f))))
+
 (let ((ht (make-hash-table string-ci=? string-ci-hash)))
   (hash-table-set! ht "foo" 100)
   (hash-table-set! ht "bar" 200)

@@ -4890,18 +4890,31 @@ static uint64_t hash_vector_recursive(value *data, int len, int depth) {
     return h;
 }
 
-/* depth=8 covers typical nesting depth without risking stack overflow */
+/* must agree with equal?, which compares strings, bytevectors, pairs,
+ * and vectors by content and everything else with eqv?.
+ * depth=8 covers typical nesting depth without risking stack overflow */
 static uint64_t hash_equal_recursive(value v, int depth) {
     if (IS_STRING(v)) {
         struct string *s = GET_STRING(v);
         return hash_string_djb2(s->s, s->len);
     }
-    if (depth > 0 && IS_PAIR(v)) {
+    if (IS_BYTEVECTOR(v)) {
+        return hash_string_djb2((const char *) GET_OBJECT(v)->bytevector.data,
+                                GET_OBJECT(v)->bytevector.len);
+    }
+    if (IS_PAIR(v)) {
+        /* past the depth limit, contents no longer contribute to the
+         * hash. the address can't be used instead, since equal pairs
+         * live at different addresses. we simply return a hash of 1 for
+         * all such pairs. */
+        if (depth <= 0) { return 1; }
         uint64_t h = hash_equal_recursive(GET_PAIR(v)->car, depth - 1);
         h ^= hash_equal_recursive(GET_PAIR(v)->cdr, depth - 1) * 2654435761ULL; /* Knuth */
         return h;
     }
-    if (depth > 0 && IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR) {
+    if (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR) {
+        /* return a hash of 2 for all such deeply nested vectors */
+        if (depth <= 0) { return 2; }
         return hash_vector_recursive(GET_OBJECT(v)->vector.data,
                                      GET_OBJECT(v)->vector.len, depth);
     }
