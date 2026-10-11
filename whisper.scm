@@ -2034,13 +2034,18 @@
                                    (map (lambda (spec)
                                           (list (car spec) 'value))
                                         c-exports)))
+                  ;; sorted, since hash table order depends on addresses
+                  ;; and would make library builds differ from run to
+                  ;; run
                   (value-defines
-                   (hash-table-fold (compilation-unit-defines cu)
-                                    (lambda (name binding acc)
-                                      (if (eq? 'global (binding-kind binding))
-                                          (cons name acc)
-                                          acc))
-                                    '())))
+                   (sort (hash-table-fold (compilation-unit-defines cu)
+                                          (lambda (name binding acc)
+                                            (if (eq? 'global (binding-kind binding))
+                                                (cons name acc)
+                                                acc))
+                                          '())
+                         (lambda (a b)
+                           (string<? (symbol->string a) (symbol->string b))))))
               (program-c-exports-set!
                program
                (cons (cons lib-name c-exports)
