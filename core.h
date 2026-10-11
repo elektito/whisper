@@ -370,6 +370,10 @@ __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
  * "F(n)" where n is a 1-based count of assertions seen so far. */
 void test_assert(value result);
 
+/* called at the end of a -t test suite: prints a newline to end the
+ * line of results and exits with status 1 if any assertion failed. */
+void test_finish(void);
+
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)

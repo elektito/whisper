@@ -297,13 +297,23 @@ void panic(const char *fmt, ...) {
     exit(1);
 }
 
+static int test_counter = 0;
+static int test_failures = 0;
+
 void test_assert(value result) {
-    static int test_counter = 0;
     test_counter++;
     if (result == TRUE) {
         printf(".");
     } else {
+        ++test_failures;
         printf("F(%d)", test_counter);
+    }
+}
+
+void test_finish(void) {
+    printf("\n");
+    if (test_failures > 0) {
+        exit(1);
     }
 }
 

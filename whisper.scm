@@ -1947,7 +1947,7 @@
               (mark-sealed-globals! program (expand-root-env-compilation-unit env))
               (compile-top-level-chunks program func (reverse groups))
               (when (program-is-test-suite program)
-                (gen-code func 1 "printf(\"\\n\");\n"))
+                (gen-code func 1 "test_finish();\n"))
               (gen-code func 1 "return VOID;\n"))
             (loop (read (program-port program))
                   (cons (expand-top-level-form form env filename) groups)))))))
