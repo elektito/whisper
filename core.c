@@ -4976,6 +4976,15 @@ value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs,
     return FIXNUM(hash_finalize(hash_string_ci_djb2(s->s, s->len), bound));
 }
 
+/* known issue: the following two functions return #f when the table was
+ * made with #f for that function, which %make-hash-table takes to mean
+ * the native address functions. that happens for the hash function of
+ * eq? and eqv? tables (see default-hash-function in stdlib.scm), and
+ * for both functions of make-eq-hash-table tables. srfi 69 expects real
+ * procedures. the problem is that #f means both "use the native
+ * functions" and "the table's function". fixing it properly probably
+ * means a separate native flag for %make-hash-table which we might do
+ * in the future. */
  value primcall_hash_table_equivalence_function(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("hash-table-equivalence-function needs a single argument"); }
     init_args();
