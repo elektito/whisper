@@ -1181,16 +1181,26 @@
 (define (make-eq-hash-table)
   (%make-hash-table #f #f))
 
+;; the hash function to use when make-hash-table is given only an
+;; equivalence function, as in srfi 69's reference implementation. #f
+;; means the runtime's address hashing, which suits eq? and also eqv?,
+;; since numbers and chars are immediates.
+(define (default-hash-function eq-fn)
+  (cond ((or (eq? eq-fn eq?) (eq? eq-fn eqv?)) #f)
+        ((eq? eq-fn string=?) string-hash)
+        ((eq? eq-fn string-ci=?) string-ci-hash)
+        (else hash)))
+
 (define make-hash-table
   (case-lambda
    (() (%make-hash-table equal? hash))
-   ((eq-fn) (%make-hash-table eq-fn #f))
+   ((eq-fn) (%make-hash-table eq-fn (default-hash-function eq-fn)))
    ((eq-fn hash-fn) (%make-hash-table eq-fn hash-fn))))
 
 (define alist->hash-table
   (case-lambda
    ((alist) (alist->hash-table alist equal? hash))
-   ((alist eq-fn) (alist->hash-table alist eq-fn #f))
+   ((alist eq-fn) (alist->hash-table alist eq-fn (default-hash-function eq-fn)))
    ((alist eq-fn hash-fn)
     (let ((ht (%make-hash-table eq-fn hash-fn)))
       (let loop ((alist alist))

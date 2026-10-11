@@ -1516,6 +1516,27 @@ and still a comment
   (and (eq? 'x (hash-table-ref/default ht (iota 20) #f))
        (eq? 'y (hash-table-ref/default ht (bytevector 1 2 3) #f))))
 
+;; given only an equivalence function, make-hash-table picks a hash
+;; function that suits it
+(let ((ht (make-hash-table equal?)))
+  (hash-table-set! ht (list 1 2) 'x)
+  (eq? 'x (hash-table-ref/default ht (list 1 2) #f)))
+
+(let ((ht (make-hash-table string=?)))
+  (hash-table-set! ht (string #\a #\b) 'x)
+  (eq? 'x (hash-table-ref/default ht (string #\a #\b) #f)))
+
+(let ((ht (make-hash-table string-ci=?)))
+  (hash-table-set! ht "foo" 'x)
+  (eq? 'x (hash-table-ref/default ht "FOO" #f)))
+
+(let ((ht (make-hash-table eq?)))
+  (hash-table-set! ht (string #\a) 'x)
+  (not (hash-table-ref/default ht (string #\a) #f)))
+
+(let ((ht (alist->hash-table (list (cons "foo" 'x)) string-ci=?)))
+  (eq? 'x (hash-table-ref/default ht "Foo" #f)))
+
 (let ((ht (make-hash-table string-ci=? string-ci-hash)))
   (hash-table-set! ht "foo" 100)
   (hash-table-set! ht "bar" 200)
