@@ -3247,6 +3247,11 @@ and still a comment
   (and (eq? out-result 'written)
        (equal? in-result "hello")))
 
+;; regression test: system returns the command's exit code, not the raw
+;; wait status
+(= 0 (system "true"))
+(= 3 (system "exit 3"))
+
 ;; srfi 151
 
 ;; negative numbers have infinitely many leading one bits, so bit-set? is

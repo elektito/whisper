@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <strings.h>
 #include <sys/poll.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define FILE_BUFFER_SIZE 8192
@@ -3879,9 +3880,21 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
     if (!IS_STRING(cmd)) { raise_error("system argument is not a string"); }
     char *cmdz = strz(cmd);
-    int ret = system(cmdz);
+    int status = system(cmdz);
     free(cmdz);
-    return FIXNUM(ret);
+
+    /* system returns a wait status, not an exit code. return the exit
+     * code, or 128 plus the signal number like the shell does when the
+     * command was killed by a signal. */
+    if (status == -1) {
+        return FIXNUM(-1);
+    } else if (WIFEXITED(status)) {
+        return FIXNUM(WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        return FIXNUM(128 + WTERMSIG(status));
+    } else {
+        return FIXNUM(status);
+    }
 }
 
 value primcall_textual_port_q(environment env, enum call_flags flags, int nargs, ...) {
