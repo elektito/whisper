@@ -1558,6 +1558,16 @@ and still a comment
        (= 300 (hash-table-ref ht 'spam))
        (= 400 (hash-table-ref ht 'eggs))))
 
+;; regression test: the copy keeps the original's equivalence and hash
+;; functions (equal? and hash)
+(let ((ht1 (make-hash-table)))
+  (hash-table-set! ht1 (string #\a) 1)
+  (let ((ht2 (hash-table-copy ht1)))
+    (hash-table-set! ht2 (string #\b) 2)
+    (and (= 1 (hash-table-ref ht2 (string #\a)))
+         (= 2 (hash-table-ref ht2 (string #\b)))
+         (eq? equal? (hash-table-equivalence-function ht2)))))
+
 (let ((ht1 (alist->hash-table '((foo . 100) (bar . 200)))))
   (let ((ht2 (hash-table-copy ht1)))
     (and (not (eq? ht1 ht2))

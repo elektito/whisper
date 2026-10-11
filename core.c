@@ -4789,12 +4789,12 @@ value primcall_hash_table_copy(environment env, enum call_flags flags, int nargs
 
     struct object *new_ht = alloc_object();
     new_ht->type = OBJ_HASH_TABLE;
-    new_ht->hash_table.ht.user_hash_fn = GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
-    new_ht->hash_table.ht.user_eq_fn = GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
     hash_table_init(&new_ht->hash_table.ht,
                     GET_OBJECT(ht)->hash_table.ht.cap,
                     GET_OBJECT(ht)->hash_table.ht.hash_fn,
                     GET_OBJECT(ht)->hash_table.ht.eq_fn);
+    new_ht->hash_table.ht.user_hash_fn = GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
+    new_ht->hash_table.ht.user_eq_fn = GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
 
     hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_copier, OBJECT(new_ht));
 
