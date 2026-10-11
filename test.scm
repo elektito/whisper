@@ -1493,6 +1493,14 @@ and still a comment
 (let ((ht (make-hash-table)))
   (hash-table? ht))
 
+;; the default equivalence is equal?, as in srfi 69
+(let ((ht (make-hash-table)))
+  (hash-table-set! ht (list 1 (string #\a)) 'x)
+  (eq? 'x (hash-table-ref/default ht (list 1 (string #\a)) #f)))
+
+(let ((ht (alist->hash-table (list (cons (list 1 2) 'x)))))
+  (eq? 'x (hash-table-ref/default ht (list 1 2) #f)))
+
 (let ((ht (make-hash-table string-ci=? string-ci-hash)))
   (hash-table-set! ht "foo" 100)
   (hash-table-set! ht "bar" 200)

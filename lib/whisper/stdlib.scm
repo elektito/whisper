@@ -1183,13 +1183,13 @@
 
 (define make-hash-table
   (case-lambda
-   (() (%make-hash-table #f #f))
+   (() (%make-hash-table equal? hash))
    ((eq-fn) (%make-hash-table eq-fn #f))
    ((eq-fn hash-fn) (%make-hash-table eq-fn hash-fn))))
 
 (define alist->hash-table
   (case-lambda
-   ((alist) (alist->hash-table alist #f #f))
+   ((alist) (alist->hash-table alist equal? hash))
    ((alist eq-fn) (alist->hash-table alist eq-fn #f))
    ((alist eq-fn hash-fn)
     (let ((ht (%make-hash-table eq-fn hash-fn)))

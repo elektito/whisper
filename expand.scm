@@ -406,7 +406,7 @@
   (import-origins compilation-unit-import-origins))
 
 (define (new-compilation-unit program-mode?)
-  (make-compilation-unit (make-hash-table) '() (make-hash-table) program-mode? #f #f #f '() (make-hash-table)))
+  (make-compilation-unit (make-eq-hash-table) '() (make-eq-hash-table) program-mode? #f #f #f '() (make-eq-hash-table)))
 
 ;;;;;; expand root env ;;;;;;
 
