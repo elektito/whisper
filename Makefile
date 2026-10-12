@@ -61,6 +61,10 @@ $(CURRENT): stage1 stage2-lib/compiler.manifest core.h core.c main.scm
 test: $(CURRENT) libs
 	WHISPER_LIBRARY_PATH=lib ./$(CURRENT) test.scm -t -r -L lib
 
+time: $(CURRENT) lib/whisper.manifest
+	bash -c 'time (./$(CURRENT) lib/whisper/whisper.sld -l -c -o /tmp/time-whisper.c \
+		&& ./$(CURRENT) lib/whisper/compiler.sld -l -c -o /tmp/time-compiler.c -L lib)'
+
 matrix: $(CURRENT) libs
 	./$(CURRENT) main.scm -c -o /tmp/b.c -L lib
 	@for o in 0 1 2 3; do \
@@ -141,4 +145,4 @@ clean:
 	rm -f lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a
 	$(MAKE) -C $(RAYLIB_SRC) clean
 
-.PHONY: all clean test matrix libs
+.PHONY: all clean test time matrix libs
