@@ -24,6 +24,7 @@ and still a comment
 
 ;; needed for the environment/eval tests below
 (import (scheme eval))
+(import (scheme repl))
 
 ;; needed for the srfi 151 tests below
 (import (srfi 151))
@@ -1707,6 +1708,18 @@ and still a comment
 ;; environment/eval. those two should hold the same exact reference to
 ;; the environment function.
 (eq? environment (eval 'environment (environment '(scheme eval))))
+;; interaction-environment always returns the same environment, which
+;; has the (scheme base) bindings and accepts definitions
+(environment? (interaction-environment))
+(eq? (interaction-environment) (interaction-environment))
+(= 3 (eval '(+ 1 2) (interaction-environment)))
+(begin
+  (eval '(define interaction-test-var 42) (interaction-environment))
+  (= 42 (eval 'interaction-test-var (interaction-environment))))
+
+;; it can also be reached from code running inside it
+(eq? (interaction-environment)
+     (eval '(interaction-environment) (interaction-environment)))
 
 ;; eval should pass on multiple values
 (call-with-values (lambda () (eval '(values 1 2) (environment '(scheme base))))

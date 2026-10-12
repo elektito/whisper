@@ -173,9 +173,11 @@
     ;; used by format.scm
     (define %write-string write-string))
 
-  ;; my understanding of r7rs is that this should be relative to this
-  ;; file, but guile resolves it against the current directory, which is
-  ;; the repo root when bootstrapping.
+  ;; r7rs says this is relative to this file, but guile resolves it
+  ;; against this file's path relative to the load path, opened from the
+  ;; current directory. this file is at the top of the load path, so
+  ;; that works out to the repo root when bootstrapping. see quirk 1 in
+  ;; bootstrap-scheme.md.
   (include "lib/whisper/format.scm")
 
   ;; the r7rs names, from (scheme base), (scheme cxr), (scheme char),

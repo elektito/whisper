@@ -1,7 +1,7 @@
 (include "qq.scm")
 (include "expand.scm")
 (include "syntax-rules.scm")
-(include "lib/whisper/shared.scm")
+(include "../shared.scm")
 
 (define *indent-size* 4)
 
@@ -213,6 +213,16 @@
 
 (define (init-read-included-file search-dirs)
   (set! *read-included-file* (make-read-included-file search-dirs)))
+
+;; sets up the compiler's required runtime globals: the library
+;; provider, the include reader, and source location tracking.
+;; library-dirs and include-dirs are the -L and -I directories in the
+;; order given, and are combined with the environment variables as
+;; described in resolve-search-path.
+(define (init-compiler library-dirs include-dirs)
+  (init-find-library (resolve-library-search-path library-dirs))
+  (init-read-included-file (resolve-include-search-path include-dirs))
+  (init-source-location-tracking))
 
 (define (path-absolute? path)
   (and (> (string-length path) 0)

@@ -1,7 +1,6 @@
 (import (whisper))
 (import (whisper core))
-
-(include "whisper.scm")
+(import (whisper compiler))
 
 ;;;;;; command-line parsing ;;;;;;
 
@@ -168,44 +167,11 @@
   (exit 0)
   )
 
-;;;;;; repl ;;;;;;
-
-(define (report-repl-error e)
-  (display "error: " (current-error-port))
-  (if (error-object? e)
-      (display (error-object-message e) (current-error-port))
-      (write e (current-error-port)))
-  (newline (current-error-port)))
-
-(define (repl env)
-  (display "> ")
-  (parameterize ((reader-state (new-reader-state "<repl>")))
-    (guard (e (else (report-repl-error e)
-                    (repl env)))
-           (let ((expr (read (current-input-port))))
-             (if (eof-object? expr)
-                 (begin
-                   ;; print a newline before exiting, so shell prompt
-                   ;; doesn't appear on the same line
-                   (newline)
-                   (exit 0))
-                 (call-with-values (lambda () (eval expr env))
-                   (lambda v
-                     (let loop ((v v))
-                       (unless (null? v)
-                         (unless (void? (car v))
-                           (write (car v))
-                           (newline))
-                         (loop (cdr v))))))))))
-  (repl env))
-
 ;;;;;; main ;;;;;;
 
 (let ((args (parse-command-line-args)))
-  (init-find-library (resolve-library-search-path (reverse (cmdline-library-paths args))))
-  (init-read-included-file (resolve-include-search-path
-                            (reverse (cmdline-include-paths args))))
-  (init-source-location-tracking)
+  (init-compiler (reverse (cmdline-library-paths args))
+                 (reverse (cmdline-include-paths args)))
 
   (when (cmdline-expand-form args)
     (let* ((port (open-input-string (cmdline-expand-form args)))
@@ -220,7 +186,7 @@
       (exit 0)))
 
   (when (not (cmdline-input-file args))
-    (repl (environment '(whisper) '(scheme eval)))
+    (run-repl)
     (exit 0))
   (postprocess-cmdline args)
 

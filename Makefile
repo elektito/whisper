@@ -6,8 +6,8 @@ PREV = whisper-v$(PREV_V)
 
 CFLAGS ?=
 
-COMPILER_SRC = whisper.scm qq.scm expand.scm syntax-rules.scm lib/whisper/shared.scm
-SRC_FILES = $(COMPILER_SRC) main.scm
+COMPILER_SRC = lib/whisper/compiler/whisper.scm lib/whisper/compiler/qq.scm lib/whisper/compiler/expand.scm lib/whisper/compiler/syntax-rules.scm lib/whisper/shared.scm
+COMPILER_LIB_SRC = $(COMPILER_SRC) lib/whisper/compiler.sld lib/whisper/repl.scm
 
 LIB_EXPORT_FILES = lib/whisper/scheme-base-exports.scm \
                    lib/whisper/scheme-cxr-exports.scm \
@@ -24,28 +24,37 @@ RAYLIB_SRC = vendor/raylib/src
 
 all: $(CURRENT)
 
-# each bootstrap stage needs its own (whisper) library built by the
-# previous stage before it can compile main.scm. stageN-lib is the
-# library used to build stageN's compiler.
+# each bootstrap stage needs its own (whisper) and (whisper compiler)
+# libraries built by the previous stage before it can compile main.scm.
+# stageN-lib holds the libraries used to build stageN's compiler.
 stage0-lib/whisper.manifest stage0-lib/whisper.so stage0-lib/whisper.a &: prev/core.h prev/core.c $(WHISPER_LIB_SRC)
 	mkdir -p stage0-lib
 	./$(PREV) lib/whisper/whisper.sld -l -o stage0-lib/whisper -C prev
 
-stage0: stage0-lib/whisper.manifest prev/core.h prev/core.c $(SRC_FILES)
+stage0-lib/compiler.manifest stage0-lib/compiler.so stage0-lib/compiler.a &: stage0-lib/whisper.manifest prev/core.h prev/core.c $(COMPILER_LIB_SRC)
+	./$(PREV) lib/whisper/compiler.sld -l -o stage0-lib/compiler -C prev -L stage0-lib
+
+stage0: stage0-lib/compiler.manifest prev/core.h prev/core.c main.scm
 	./$(PREV) main.scm -o stage0 -C prev -L stage0-lib
 
 stage1-lib/whisper.manifest stage1-lib/whisper.so stage1-lib/whisper.a &: stage0 core.h $(WHISPER_LIB_SRC)
 	mkdir -p stage1-lib
 	./stage0 lib/whisper/whisper.sld -l -o stage1-lib/whisper
 
-stage1: stage0 stage1-lib/whisper.manifest core.h core.c $(SRC_FILES)
+stage1-lib/compiler.manifest stage1-lib/compiler.so stage1-lib/compiler.a &: stage0 stage1-lib/whisper.manifest core.h $(COMPILER_LIB_SRC)
+	./stage0 lib/whisper/compiler.sld -l -o stage1-lib/compiler -L stage1-lib
+
+stage1: stage0 stage1-lib/compiler.manifest core.h core.c main.scm
 	./stage0 main.scm -o stage1 -f "-Wl,-s $(CFLAGS)" -L stage1-lib
 
 stage2-lib/whisper.manifest stage2-lib/whisper.so stage2-lib/whisper.a &: stage1 core.h $(WHISPER_LIB_SRC)
 	mkdir -p stage2-lib
 	./stage1 lib/whisper/whisper.sld -l -o stage2-lib/whisper
 
-$(CURRENT): stage1 stage2-lib/whisper.manifest core.h core.c $(SRC_FILES)
+stage2-lib/compiler.manifest stage2-lib/compiler.so stage2-lib/compiler.a &: stage1 stage2-lib/whisper.manifest core.h $(COMPILER_LIB_SRC)
+	./stage1 lib/whisper/compiler.sld -l -o stage2-lib/compiler -L stage2-lib
+
+$(CURRENT): stage1 stage2-lib/compiler.manifest core.h core.c main.scm
 	./stage1 main.scm -o $(CURRENT) -f "-Wl,-s $(CFLAGS)" -L stage2-lib
 	diff stage1 $(CURRENT)
 
@@ -56,7 +65,7 @@ matrix: $(CURRENT) libs
 	./$(CURRENT) main.scm -c -o /tmp/b.c -L lib
 	@for o in 0 1 2 3; do \
 		echo "--- O$$o ---"; \
-		gcc -O$$o -Wl,-s -I. -ldl -Wl,--export-dynamic -o /tmp/b.$$o /tmp/b.c -Wl,--whole-archive lib/whisper.a -Wl,--no-whole-archive core.c \
+		gcc -O$$o -Wl,-s -I. -ldl -Wl,--export-dynamic -o /tmp/b.$$o /tmp/b.c -Wl,--whole-archive lib/whisper.a lib/compiler.a -Wl,--no-whole-archive core.c \
 		&& /tmp/b.$$o main.scm -o /tmp/out.$$o -L lib \
 		&& WHISPER_LIBRARY_PATH=lib /tmp/b.$$o test.scm -t -r -L lib || exit 1; \
 	done
@@ -67,8 +76,17 @@ lib/whisper.manifest lib/whisper.so lib/whisper.a &: $(CURRENT) lib/whisper/whis
 lib/scheme.manifest lib/scheme.so lib/scheme.a &: $(CURRENT) lib/whisper/scheme.sld lib/whisper.manifest $(LIB_EXPORT_FILES)
 	./$(CURRENT) lib/whisper/scheme.sld -l -o lib/scheme -L lib
 
-lib/eval.manifest lib/eval.so lib/eval.a &: $(CURRENT) lib/whisper/scheme-eval.sld $(COMPILER_SRC)
+lib/compiler.manifest lib/compiler.so lib/compiler.a &: $(CURRENT) lib/whisper.manifest $(COMPILER_LIB_SRC)
+	./$(CURRENT) lib/whisper/compiler.sld -l -o lib/compiler -L lib
+
+lib/eval.manifest lib/eval.so lib/eval.a &: $(CURRENT) lib/whisper/scheme-eval.sld lib/compiler.manifest
 	./$(CURRENT) lib/whisper/scheme-eval.sld -l -o lib/eval -L lib
+
+lib/scheme-repl.manifest lib/scheme-repl.so lib/scheme-repl.a &: $(CURRENT) lib/whisper/scheme-repl.sld lib/compiler.manifest
+	./$(CURRENT) lib/whisper/scheme-repl.sld -l -o lib/scheme-repl -L lib
+
+lib/whisper-repl.manifest lib/whisper-repl.so lib/whisper-repl.a &: $(CURRENT) lib/whisper/whisper-repl.sld lib/compiler.manifest
+	./$(CURRENT) lib/whisper/whisper-repl.sld -l -o lib/whisper-repl -L lib
 
 lib/libraylib.a lib/libraylib.so lib/libraylib.so.600 &:
 	$(MAKE) -C $(RAYLIB_SRC) RAYLIB_LIBTYPE=STATIC
@@ -102,13 +120,16 @@ lib/srfi-133.manifest lib/srfi-133.so lib/srfi-133.a &: $(CURRENT) lib/whisper.m
 lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a &: $(CURRENT) lib/srfi-151-bitwise/srfi-151.sld lib/srfi-151-bitwise/bitwise.c lib/srfi-151-bitwise/bitwise-33.scm lib/srfi-151-bitwise/bitwise-60.scm lib/srfi-151-bitwise/bitwise-other.scm
 	./$(CURRENT) lib/srfi-151-bitwise/srfi-151.sld -l -o lib/srfi-151 -L lib -f '-I lib'
 
-libs: lib/whisper.manifest lib/scheme.manifest lib/eval.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-48.manifest lib/srfi-69.manifest lib/srfi-111.manifest lib/srfi-133.manifest lib/srfi-151.manifest
+libs: lib/whisper.manifest lib/scheme.manifest lib/compiler.manifest lib/eval.manifest lib/scheme-repl.manifest lib/whisper-repl.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-48.manifest lib/srfi-69.manifest lib/srfi-111.manifest lib/srfi-133.manifest lib/srfi-151.manifest
 
 clean:
 	rm -rf $(CURRENT) stage0 stage1 stage0-lib stage1-lib stage2-lib
 	rm -f lib/whisper.manifest lib/whisper.so lib/whisper.a
 	rm -f lib/scheme.manifest lib/scheme.so lib/scheme.a
+	rm -f lib/compiler.manifest lib/compiler.so lib/compiler.a
 	rm -f lib/eval.manifest lib/eval.so lib/eval.a
+	rm -f lib/scheme-repl.manifest lib/scheme-repl.so lib/scheme-repl.a
+	rm -f lib/whisper-repl.manifest lib/whisper-repl.so lib/whisper-repl.a
 	rm -f lib/raylib.manifest lib/raylib.so lib/raylib.a
 	rm -f lib/srfi-48.manifest lib/srfi-48.so lib/srfi-48.a
 	rm -f lib/srfi-69.manifest lib/srfi-69.so lib/srfi-69.a

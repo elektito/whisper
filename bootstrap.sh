@@ -49,11 +49,12 @@ if [ -n "$SCHEME" ]; then
   git clone .. --branch=master current >/dev/null 2>&1
   cd current
 
-  # these stand in for the two steps in the Makefile that use the
+  # these stand in for the three steps in the Makefile that use the
   # previous version. the sources are the current ones, so they use the
   # current core files rather than prev/.
   mkdir -p stage0-lib
   $RUN_MAIN lib/whisper/whisper.sld -l -o stage0-lib/whisper -C .
+  $RUN_MAIN lib/whisper/compiler.sld -l -o stage0-lib/compiler -C . -L stage0-lib
   $RUN_MAIN main.scm -o stage0 -C . -L stage0-lib
   make
   cp whisper-v$CURRENT_V ../whisper
