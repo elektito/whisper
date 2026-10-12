@@ -50,6 +50,8 @@
            (print-box obj port #f))
           ((eof-object? obj)
            (write-string "#<eof-object>" port))
+          ((environment? obj)
+           (write-string "#<environment>"))
           (else (%write obj port))))))
 
 (define write-shared
