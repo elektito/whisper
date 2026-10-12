@@ -833,7 +833,15 @@
 ;; error-ms) in which code-template is a template used for the condition
 ;; of an if statement and error-msg is used as the error messae in the
 ;; if body.
-(define *inline-primcalls* '((boolean? 1 value () ("BOOL(IS_BOOL(" 0 "))"))
+(define *inline-primcalls* '((+ 2 value () ("inline_add(" 0 ", " 1 ")"))
+                             (- 2 value () ("inline_sub(" 0 ", " 1 ")"))
+                             (* 2 value () ("inline_mul(" 0 ", " 1 ")"))
+                             (= 2 value () ("inline_num_eq(" 0 ", " 1 ")"))
+                             (< 2 value () ("inline_num_lt(" 0 ", " 1 ")"))
+                             (> 2 value () ("inline_num_gt(" 0 ", " 1 ")"))
+                             (<= 2 value () ("inline_num_le(" 0 ", " 1 ")"))
+                             (>= 2 value () ("inline_num_ge(" 0 ", " 1 ")"))
+                             (boolean? 1 value () ("BOOL(IS_BOOL(" 0 "))"))
                              (box? 1 value () ("BOOL(IS_BOX(" 0 "))"))
                              (car 1 value
                               ((("!IS_PAIR(" 0 ")") . "car argument is not a pair"))

@@ -676,6 +676,61 @@ extern value primcall_num_lt(environment env, enum call_flags flags, int nargs, 
 extern value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_num_le(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...);
+
+/* two-argument arithmetic and comparisons, inlined by the compiler. the
+ * fast path handles two fixnums. fixnums have a zero tag, so the tagged
+ * values can be added, subtracted and compared as they are, and a
+ * 64-bit overflow of the tagged result means the 61-bit result is out
+ * of range. anything else (flonums, type errors, overflow) goes to the
+ * primcall. */
+#define BOTH_FIXNUMS(a, b) ((((uint64_t)(a) | (uint64_t)(b)) & TAG_MASK) == FIXNUM_TAG)
+
+/* always_inline makes gcc inline these even at -O0 */
+#define ARITH_INLINE static inline __attribute__((always_inline))
+
+ARITH_INLINE value inline_add(value a, value b) {
+    int64_t r;
+    if (BOTH_FIXNUMS(a, b) &&
+        !__builtin_add_overflow((int64_t) a, (int64_t) b, &r))
+    {
+        return (value) r;
+    }
+
+    return primcall_add(NULL, NO_CALL_FLAGS, 2, a, b);
+}
+
+ARITH_INLINE value inline_sub(value a, value b) {
+    int64_t r;
+    if (BOTH_FIXNUMS(a, b) &&
+        !__builtin_sub_overflow((int64_t) a, (int64_t) b, &r))
+    {
+        return (value) r;
+    }
+    return primcall_sub(NULL, NO_CALL_FLAGS, 2, a, b);
+}
+
+ARITH_INLINE value inline_mul(value a, value b) {
+    int64_t r;
+    /* untagged a times tagged b gives a tagged result */
+    if (BOTH_FIXNUMS(a, b) &&
+        !__builtin_mul_overflow(GET_FIXNUM(a), (int64_t) b, &r))
+    {
+        return (value) r;
+    }
+    return primcall_mul(NULL, NO_CALL_FLAGS, 2, a, b);
+}
+
+#define INLINE_COMPARISON(name, op)                                         \
+    ARITH_INLINE value inline_##name(value a, value b) {                    \
+        if (BOTH_FIXNUMS(a, b)) { return BOOL((int64_t) a op (int64_t) b); } \
+        return primcall_##name(NULL, NO_CALL_FLAGS, 2, a, b);               \
+    }
+
+INLINE_COMPARISON(num_eq, ==)
+INLINE_COMPARISON(num_lt, <)
+INLINE_COMPARISON(num_gt, >)
+INLINE_COMPARISON(num_le, <=)
+INLINE_COMPARISON(num_ge, >=)
 extern value primcall_percent_make_hash_table(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_set_b(environment env, enum call_flags flags, int nargs, ...);
