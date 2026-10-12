@@ -3,7 +3,11 @@
 (define *dot* (gensym "dot"))
 
 (define (read-error fmt . args)
-  (error (apply format fmt args)))
+  (raise (make-error (apply format fmt args) '() 'read)))
+
+(define (read-error? obj)
+  (and (error-object? obj)
+       (eq? 'read (error-object-kind obj))))
 
 (define-record-type <reader-state>
   (make-reader-state filename line column line-lengths)

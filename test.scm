@@ -105,6 +105,14 @@ and still a comment
 ;; redefining a label within the same top-level datum is an error
 (guard (e (#t #t)) (read (open-input-string "(#0=1 #0=2)")) #f)
 
+;; reader errors satisfy read-error? and nothing else does
+(guard (e (#t (read-error? e))) (read (open-input-string "(1 2")) #f)
+(guard (e (#t (read-error? e))) (read (open-input-string "\"abc")) #f)
+(guard (e (#t (read-error? e))) (read (open-input-string "#u8(300)")) #f)
+(guard (e (#t (not (file-error? e)))) (read (open-input-string "(1 2")) #f)
+(guard (e (#t (not (read-error? e)))) (error "not a read error") #f)
+(not (read-error? 42))
+
 (symbol=? 'foo 'foo)
 (not (symbol=? 'foo 'bar))
 
