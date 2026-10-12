@@ -35,6 +35,21 @@ The following SRFIs are supported:
 ## Bootstrapping
 
 A `bootstrap.sh` script is included that allows you to bootstrap the
-compiler using gcc. It builds the full version history of the compiler
-starting from v1 which can be built from C and then proceeds to v2 and
-so on which are written in scheme.
+compiler. It can bootstrap either from a seed compiler written in C or
+from another Scheme implementation. Either way a C compiler is needed.
+
+### Bootstrapping with gcc
+
+In order to bootstrap using gcc (currently the only tested C compiler),
+the script clones the v1 branch of whisper, which contains a seed
+compiler written in C, and builds v1 using that. It then continues with
+v2 and so on, up to the current version.
+
+In order to bootstrap using this method, simply run `./bootstrap.sh`.
+
+### Bootstrapping with Guile
+
+Currently, Guile is the only Scheme implementation which can bootstrap
+whisper. This does not require building the entire version history so
+it's considerably faster than bootstrapping with gcc alone. Simply run
+`./bootstrap.sh --scheme guile`. Guile 3.0.9 was used to test this.

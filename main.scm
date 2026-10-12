@@ -3,15 +3,6 @@
 
 (include "whisper.scm")
 
-(define (build-compile-cmd-from-args cc own-cflags args program)
-  (build-compile-cmd cc
-                     (cmdline-library-mode args)
-                     (format "~a ~a" own-cflags (cmdline-cflags args))
-                     (cmdline-c-file args)
-                     (cmdline-executable-file args)
-                     (cmdline-core-path args)
-                     program))
-
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
@@ -32,6 +23,15 @@
   (include-paths cmdline-include-paths cmdline-include-paths-set!)
   (core-path cmdline-core-path cmdline-core-path-set!)
   (expand-form cmdline-expand-form cmdline-expand-form-set!))
+
+(define (build-compile-cmd-from-args cc own-cflags args program)
+  (build-compile-cmd cc
+                     (cmdline-library-mode args)
+                     (format "~a ~a" own-cflags (cmdline-cflags args))
+                     (cmdline-c-file args)
+                     (cmdline-executable-file args)
+                     (cmdline-core-path args)
+                     program))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
