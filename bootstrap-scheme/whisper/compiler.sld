@@ -20,16 +20,10 @@
           interaction-environment
           run-repl
           init-compiler
-          create-program
+          create-file-program
           compile-program
           output-program-code
-          program-debug
-          program-debug-set!
-          program-is-test-suite-set!
-          program-library-mode-set!
           build-compile-cmd
           write-manifest
           temp-filename
-          new-expand-root-env
-          expand-top-level-form
-          de-identifier))
+          expand-for-display))

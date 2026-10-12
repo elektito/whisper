@@ -294,6 +294,18 @@
                 '()  ; .so extra flags
                 ))
 
+;; creates a program for compiling a source file. mode is 'executable,
+;; 'test (an executable compiled as a test suite), or 'library.
+(define (create-file-program port filename mode debug?)
+  (let ((program (create-program port filename (make-empty-environment) #t)))
+    (case mode
+      ((executable) #t)
+      ((test) (program-is-test-suite-set! program #t))
+      ((library) (program-library-mode-set! program 'library))
+      (else (error "create-file-program: invalid mode" mode)))
+    (program-debug-set! program debug?)
+    program))
+
 (define (program-add-function program func)
   (program-funcs-set! program (cons func (program-funcs program))))
 
@@ -2357,3 +2369,10 @@
               import-sets)
     (load-imported-libraries! root-env env)
     env))
+
+;; expands form as a top-level form in an environment importing
+;; (whisper), and returns the resulting forms as plain data, without
+;; identifier records. used by the -e command line flag.
+(define (expand-for-display form)
+  (let ((env (new-expand-root-env (environment '(whisper)) #f)))
+    (map de-identifier (expand-top-level-form form env #f))))
