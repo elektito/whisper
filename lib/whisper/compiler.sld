@@ -16,10 +16,6 @@
 
           ;; used by main.scm
           init-compiler
-          create-file-program
-          compile-program
-          output-program-code
-          build-compile-cmd
-          write-manifest
+          compile-file
           temp-filename
           expand-for-display))

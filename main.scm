@@ -23,15 +23,6 @@
   (core-path cmdline-core-path cmdline-core-path-set!)
   (expand-form cmdline-expand-form cmdline-expand-form-set!))
 
-(define (build-compile-cmd-from-args cc own-cflags args program)
-  (build-compile-cmd cc
-                     (cmdline-library-mode args)
-                     (format "~a ~a" own-cflags (cmdline-cflags args))
-                     (cmdline-c-file args)
-                     (cmdline-executable-file args)
-                     (cmdline-core-path args)
-                     program))
-
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
                 #f  ; run
@@ -186,31 +177,23 @@
     (exit 0))
   (postprocess-cmdline args)
 
-  (let ((port (open-input-file (cmdline-input-file args))))
-    (let ((program (create-file-program port
-                                        (cmdline-input-file args)
-                                        (cond ((cmdline-test args) 'test)
-                                              ((cmdline-library-mode args) 'library)
-                                              (else 'executable))
-                                        (cmdline-debug args))))
-      (compile-program program)
-      (output-program-code program (cmdline-c-file args))
-      (if (not (cmdline-just-compile args))
-          (let ((cc (get-environment-variable "CC")))
-            (let ((cc (if cc cc "gcc"))
-                  (own-cflags (if (cmdline-debug args) " -DDEBUG" "")))
-              (let ((cmd (build-compile-cmd-from-args cc own-cflags args program)))
-                (let ((ret (system cmd)))
-                  (delete-file (cmdline-c-file args))
-                  (if (not (zero? ret))
-                      (begin
-                        (format (current-error-port) "program exited with error code: ~a\n" ret)
-                        (exit ret))
-                      (when (cmdline-library-mode args)
-                        (write-manifest program (string-append (cmdline-executable-file args) ".manifest")))))))))
-      (if (cmdline-run args)
-          (let ((cmd (format "$(realpath ~a)" (cmdline-executable-file args))))
-            (let ((ret (system cmd)))
-              (when (cmdline-delete-executable args)
-                (delete-file (cmdline-executable-file args)))
-              (exit ret)))))))
+  (let ((ret (compile-file (cmdline-input-file args)                ; input file
+                           (cond ((cmdline-test args) 'test)        ; mode
+                                 ((cmdline-library-mode args) 'library)
+                                 (else 'executable))
+                           (cmdline-debug args)                     ; debug?
+                           (cmdline-c-file args)                    ; c file
+                           (and (not (cmdline-just-compile args))   ; output file, or
+                                (cmdline-executable-file args))     ; #f for -c
+                           (cmdline-cflags args)                    ; extra cflags
+                           (cmdline-core-path args))))              ; core path
+    (unless (zero? ret)
+      (format (current-error-port) "program exited with error code: ~a\n" ret)
+      (exit ret)))
+
+  (when (cmdline-run args)
+    (let ((cmd (format "$(realpath ~a)" (cmdline-executable-file args))))
+      (let ((ret (system cmd)))
+        (when (cmdline-delete-executable args)
+          (delete-file (cmdline-executable-file args)))
+        (exit ret)))))

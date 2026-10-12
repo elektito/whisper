@@ -2327,6 +2327,35 @@
 (define (temp-filename)
   (format "/tmp/~a" (hex-encode (urandom 6))))
 
+;; the C compiler to run: CC env var if set, otherwise gcc
+(define (c-compiler)
+  (or (get-environment-variable "CC") "gcc"))
+
+;; compiles input-file to C in c-file. mode is 'executable, 'test, or
+;; 'library. if output-file is not #f, also runs the c compiler to build
+;; output-file, which for a library is the stem of the .so, .a, and
+;; .manifest files, and deletes c-file afterwards. cflags are extra
+;; flags for the c compiler, and core-path is where core.h and core.c
+;; are. returns the c compiler's exit status, or 0 when only C was
+;; produced.
+(define (compile-file input-file mode debug? c-file output-file cflags core-path)
+  (let ((program (create-file-program (open-input-file input-file)
+                                      input-file mode debug?)))
+    (compile-program program)
+    (output-program-code program c-file)
+    (if (not output-file)
+        0
+        (let* ((own-cflags (if debug? " -DDEBUG" ""))
+               (cmd (build-compile-cmd (c-compiler)
+                                       (program-library-mode program)
+                                       (format "~a ~a" own-cflags cflags)
+                                       c-file output-file core-path program))
+               (ret (system cmd)))
+          (delete-file c-file)
+          (when (and (zero? ret) (eq? mode 'library))
+            (write-manifest program (string-append output-file ".manifest")))
+          ret))))
+
 (define (compile-expr-to-so expr env)
   (let* ((c-file (string-append (temp-filename) ".c"))
          (so-file (string-append (temp-filename) ".so"))
@@ -2343,9 +2372,8 @@
      (compilation-unit-undefined-refs
       (expand-root-env-compilation-unit root-env) env 'eval))
     (output-program-code program c-file)
-    (let ((cc (or (get-environment-variable "CC") "gcc"))
-          (core-path (or (get-environment-variable "WHISPER_HOME") ".")))
-      (let ((ret (system (build-compile-cmd cc 'so "" c-file so-file core-path program))))
+    (let ((core-path (or (get-environment-variable "WHISPER_HOME") ".")))
+      (let ((ret (system (build-compile-cmd (c-compiler) 'so "" c-file so-file core-path program))))
         (delete-file c-file)
         (unless (zero? ret)
           (compile-error "gcc returned non-zero exit code: ~a" ret))))
