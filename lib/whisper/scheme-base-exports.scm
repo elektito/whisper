@@ -43,7 +43,6 @@
         ceiling
         char->integer
         char-ready?
-        char-whitespace?
         char<=?
         char<?
         char=?

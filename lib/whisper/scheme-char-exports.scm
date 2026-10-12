@@ -8,6 +8,7 @@
         char-foldcase
         char-alphabetic?
         char-numeric?
+        char-whitespace?
         char-upper-case?
         char-lower-case?
         string-ci<=?
