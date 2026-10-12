@@ -10,6 +10,7 @@
   (include-library-declarations "scheme-char-exports.scm")
   (include-library-declarations "scheme-case-lambda-exports.scm")
   (include-library-declarations "scheme-file-exports.scm")
+  (include-library-declarations "scheme-lazy-exports.scm")
   (include-library-declarations "scheme-process-context-exports.scm")
   (include-library-declarations "scheme-read-exports.scm")
   (include-library-declarations "scheme-write-exports.scm")
