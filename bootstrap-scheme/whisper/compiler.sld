@@ -21,5 +21,4 @@
           run-repl
           init-compiler
           compile-file
-          temp-filename
           expand-for-display))

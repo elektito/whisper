@@ -154,7 +154,7 @@
 
     (define (record-set-print type proc) #f)
 
-    ;; only used to make temporary file names
+    ;; only used by temp-filename below
     (define urandom-counter 0)
     (define (urandom n)
       (set! urandom-counter (+ urandom-counter 1))
@@ -166,6 +166,18 @@
             (loop (+ i 1)
                   (quotient x 256)
                   (cons (integer->char (modulo x 256)) chars)))))
+
+    ;; copied from lib/whisper/stdlib.scm
+    (define (temp-filename)
+      (let ((bytes (urandom 6)))
+        (let loop ((i 0) (name "/tmp/"))
+          (if (= i (string-length bytes))
+              name
+              (let ((c (char->integer (string-ref bytes i))))
+                (loop (+ i 1)
+                      (string-append name
+                                     (if (< c 16) "0" "")
+                                     (number->string c 16))))))))
 
     (define (run-so filename env)
       (error "run-so is not supported when bootstrapping from another scheme"))
@@ -272,5 +284,5 @@
           realpath
           list-directory
           system
-          urandom
+          temp-filename
           run-so))

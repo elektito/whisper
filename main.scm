@@ -131,9 +131,7 @@
                 (cmdline-output-file-set! args "b.out")))))
   (if (cmdline-just-compile args)
       (cmdline-c-file-set! args (cmdline-output-file args))
-      (begin
-        (cmdline-c-file-set! args (string-append (temp-filename) ".c"))
-        (cmdline-executable-file-set! args (cmdline-output-file args)))))
+      (cmdline-executable-file-set! args (cmdline-output-file args))))
 
 (define (print-usage)
   (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g] [-e expr]
@@ -182,9 +180,9 @@
                                  ((cmdline-library-mode args) 'library)
                                  (else 'executable))
                            (cmdline-debug args)                     ; debug?
-                           (cmdline-c-file args)                    ; c file
-                           (and (not (cmdline-just-compile args))   ; output file, or
-                                (cmdline-executable-file args))     ; #f for -c
+                           (cmdline-c-file args)                    ; c file, or #f for a temp one
+                           (cmdline-executable-file args)           ; output file, or
+                                                                    ; #f for -c
                            (cmdline-cflags args)                    ; extra cflags
                            (cmdline-core-path args))))              ; core path
     (unless (zero? ret)

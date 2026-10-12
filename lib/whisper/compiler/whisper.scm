@@ -2315,43 +2315,36 @@
       (else
        (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c ~a ~a" cc core-path cflags out-file c-file archive-flags core-path extra-archives extra-flags)))))
 
-(define (hex-encode s)
-  (let loop ((i 0) (x ""))
-    (if (= i (string-length s))
-        x
-        (let ((c (char->integer (string-ref s i))))
-          (if (< c 16)
-              (loop (+ i 1) (format "~a0~x" x c))
-              (loop (+ i 1) (format "~a~x" x c)))))))
-
-(define (temp-filename)
-  (format "/tmp/~a" (hex-encode (urandom 6))))
-
 ;; the C compiler to run: CC env var if set, otherwise gcc
 (define (c-compiler)
   (or (get-environment-variable "CC") "gcc"))
 
-;; compiles input-file to C in c-file. mode is 'executable, 'test, or
-;; 'library. if output-file is not #f, also runs the c compiler to build
-;; output-file, which for a library is the stem of the .so, .a, and
-;; .manifest files, and deletes c-file afterwards. cflags are extra
-;; flags for the c compiler, and core-path is where core.h and core.c
-;; are. returns the c compiler's exit status, or 0 when only C was
-;; produced.
+;; compiles input-file to C. mode is 'executable, 'test, or 'library.
+;; c-file is where the C goes, or #f to use a temporary file that is
+;; deleted after the C compiler runs. if output-file is not #f, also
+;; runs the C compiler to build output-file, which for a library is the
+;; stem of the .so, .a, and .manifest files. cflags are extra flags for
+;; the C compiler, and core-path is where core.h and core.c are. returns
+;; the C compiler's exit status, or 0 when only C was produced.
 (define (compile-file input-file mode debug? c-file output-file cflags core-path)
+  (unless (or c-file output-file)
+    (error "compile-file: need a c-file, an output-file, or both"))
   (let ((program (create-file-program (open-input-file input-file)
-                                      input-file mode debug?)))
+                                      input-file mode debug?))
+        (temp-c-file (and (not c-file) (string-append (temp-filename) ".c"))))
     (compile-program program)
-    (output-program-code program c-file)
+    (output-program-code program (or c-file temp-c-file))
     (if (not output-file)
         0
         (let* ((own-cflags (if debug? " -DDEBUG" ""))
                (cmd (build-compile-cmd (c-compiler)
                                        (program-library-mode program)
                                        (format "~a ~a" own-cflags cflags)
-                                       c-file output-file core-path program))
+                                       (or c-file temp-c-file)
+                                       output-file core-path program))
                (ret (system cmd)))
-          (delete-file c-file)
+          (when temp-c-file
+            (delete-file temp-c-file))
           (when (and (zero? ret) (eq? mode 'library))
             (write-manifest program (string-append output-file ".manifest")))
           ret))))

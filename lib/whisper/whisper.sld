@@ -89,6 +89,7 @@
           system
           unread-char
           urandom
+          temp-filename
 
           new-reader-state
           reader-state

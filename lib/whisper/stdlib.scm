@@ -1613,6 +1613,18 @@
         (close-output-port port)
         (apply values results)))))
 
+;; returns a random file name under /tmp, made of 12 hex digits
+(define (temp-filename)
+  (let ((bytes (urandom 6)))
+    (let loop ((i 0) (name "/tmp/"))
+      (if (= i (string-length bytes))
+          name
+          (let ((c (char->integer (string-ref bytes i))))
+            (loop (+ i 1)
+                  (string-append name
+                                 (if (< c 16) "0" "")
+                                 (number->string c 16))))))))
+
 (define (close-input-port port)
   (unless (input-port? port)
     (raise (file-error "Not an input port")))

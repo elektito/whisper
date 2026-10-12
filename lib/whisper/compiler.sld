@@ -17,5 +17,4 @@
           ;; used by main.scm
           init-compiler
           compile-file
-          temp-filename
           expand-for-display))
