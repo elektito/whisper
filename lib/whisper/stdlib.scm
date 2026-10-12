@@ -674,6 +674,10 @@
 (define (char-numeric? ch)
   (and (char>=? ch #\0) (char<=? ch #\9)))
 
+(define (digit-value ch)
+  (and (char-numeric? ch)
+       (- (char->integer ch) (char->integer #\0))))
+
 (define (char-upper-case? ch)
   (and (char>=? ch #\A)
        (char<=? ch #\Z)))

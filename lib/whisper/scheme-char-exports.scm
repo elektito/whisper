@@ -9,6 +9,7 @@
         char-alphabetic?
         char-numeric?
         char-whitespace?
+        digit-value
         char-upper-case?
         char-lower-case?
         string-ci<=?

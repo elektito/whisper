@@ -987,6 +987,10 @@ and still a comment
 (char-whitespace? #\return)
 (not (char-whitespace? #\a))
 (not (char-whitespace? #\1))
+(eqv? 0 (digit-value #\0))
+(eqv? 7 (digit-value #\7))
+(eqv? #f (digit-value #\a))
+(eqv? #f (digit-value #\space))
 
 (char-numeric? #\0)
 (char-numeric? #\5)
