@@ -14,9 +14,11 @@ LIB_EXPORT_FILES = lib/whisper/scheme-base-exports.scm \
                    lib/whisper/scheme-char-exports.scm \
                    lib/whisper/scheme-case-lambda-exports.scm \
                    lib/whisper/scheme-file-exports.scm \
+                   lib/whisper/scheme-lazy-exports.scm \
                    lib/whisper/scheme-process-context-exports.scm \
-                   lib/whisper/scheme-write-exports.scm \
-				   lib/whisper/scheme-read-exports.scm
+                   lib/whisper/scheme-read-exports.scm \
+                   lib/whisper/scheme-time-exports.scm \
+                   lib/whisper/scheme-write-exports.scm
 
 WHISPER_LIB_SRC = lib/whisper/stdlib.scm lib/whisper/format.scm lib/whisper/read.scm lib/whisper/write.scm lib/whisper/shared.scm lib/whisper/whisper.sld $(LIB_EXPORT_FILES)
 

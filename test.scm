@@ -3321,6 +3321,39 @@ and still a comment
   (and (eq? out-result 'written)
        (equal? in-result "hello")))
 
+;; file-exists? follows a file being created and then deleted
+(let* ((path (test-temp-path))
+       (before (file-exists? path)))
+  (call-with-output-file path (lambda (p) (write 1 p)))
+  (let ((during (file-exists? path)))
+    (delete-file path)
+    (and (not before)
+         during
+         (not (file-exists? path)))))
+
+(file-exists? ".")
+(guard (e (#t #t)) (file-exists? 'foo) #f)
+
+;; get-environment-variables is an alist of strings that agrees with
+;; get-environment-variable
+(let ((env (get-environment-variables)))
+  (and (list? env)
+       (all? (map (lambda (p)
+                    (and (pair? p)
+                         (string? (car p))
+                         (string? (cdr p))
+                         (equal? (cdr p) (get-environment-variable (car p)))))
+                  env))))
+
+;; time
+(inexact? (current-second))
+(exact-integer? (jiffies-per-second))
+(positive? (jiffies-per-second))
+(let* ((a (current-jiffy))
+       (b (current-jiffy)))
+  (and (exact-integer? a)
+       (<= a b)))
+
 ;; regression test: system returns the command's exit code, not the raw
 ;; wait status
 (= 0 (system "true"))

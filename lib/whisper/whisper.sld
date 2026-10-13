@@ -13,6 +13,7 @@
   (include-library-declarations "scheme-lazy-exports.scm")
   (include-library-declarations "scheme-process-context-exports.scm")
   (include-library-declarations "scheme-read-exports.scm")
+  (include-library-declarations "scheme-time-exports.scm")
   (include-library-declarations "scheme-write-exports.scm")
 
   (export atom?
