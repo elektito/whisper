@@ -1,16 +1,16 @@
 #include "core.h"
 
-#include <dirent.h>
-#include <dlfcn.h>
-#include <fcntl.h>
-#include <poll.h>
-
 #include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdint.h>
+#include <time.h>
+
+#include <dirent.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <strings.h>
-#include <sys/poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -2792,8 +2792,24 @@ value primcall_cons(environment env, enum call_flags flags, int nargs, ...) {
     return make_pair(car, cdr);
 }
 
+value primcall_current_second(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("current-second takes no arguments"); }
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return FLONUM(ts.tv_sec + ts.tv_nsec / 1e9);
+}
+
+value primcall_current_jiffy(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("current-jiffy takes no arguments"); }
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return FIXNUM((int64_t) ts.tv_sec * 1000000000 + ts.tv_nsec);
+}
+
 value primcall_command_line(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { raise_error("cons needs two arguments"); }
+    if (nargs != 0) { raise_error("command-line needs two arguments"); }
 
     value cmdline = NIL;
     for (int i = cmdline_argc - 1; i >= 0; --i) {
@@ -2873,6 +2889,21 @@ value primcall_exact(environment env, enum call_flags flags, int nargs, ...) {
     } else {
         raise_error("exact argument is not a number");
     }
+}
+
+value primcall_file_exists_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("file-exists? needs a single argument"); }
+    init_args();
+    value filename = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename)) { raise_error("file-exists? argument is not a string"); }
+
+    char *filenamez = strz(filename);
+    int ret = access(filenamez, F_OK);
+    free(filenamez);
+
+    return BOOL(ret == 0);
 }
 
 value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -3001,6 +3032,22 @@ value primcall_get_environment_variable(environment env, enum call_flags flags, 
     return OBJECT(v);
 }
 
+extern char **environ;
+value primcall_get_environment_variables(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-environment-variables takes no arguments"); }
+
+    value alist = NIL;
+    for (char **e = environ; *e; ++e) {
+        char *eq = strchr(*e, '=');
+        if (!eq) { continue; }
+        value name = make_string(*e, eq - *e);
+        value val = make_string(eq + 1, strlen(eq + 1));
+        alist = make_pair(make_pair(name, val), alist);
+    }
+
+    return alist;
+}
+
 value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("get-output-string needs a single argument"); }
     init_args();
@@ -3065,6 +3112,11 @@ value primcall_integer_to_char(environment env, enum call_flags flags, int nargs
     if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not an integer"); }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { raise_error("integer->char argument is out of range"); }
     return CHAR((char) GET_FIXNUM(n));
+}
+
+value primcall_jiffies_per_second(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("jiffies-per-second takes no arguments"); }
+    return FIXNUM(1000000000);
 }
 
 value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
