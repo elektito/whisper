@@ -565,6 +565,8 @@ and still a comment
 ;; inexact numbers with no fractional part are integers too, but the
 ;; infinities and nan are not
 (integer? 3)
+(integer? 0)
+(integer? -7)
 (integer? 3.0)
 (integer? -0.0)
 (not (integer? 3.5))
@@ -572,6 +574,17 @@ and still a comment
 (not (integer? -inf.0))
 (not (integer? +nan.0))
 (not (integer? 'foo))
+
+(exact-integer? 3)
+(exact-integer? 0)
+(exact-integer? -7)
+(not (exact-integer? 3.0))
+(not (exact-integer? -0.0))
+(not (exact-integer? 3.5))
+(not (exact-integer? +inf.0))
+(not (exact-integer? -inf.0))
+(not (exact-integer? +nan.0))
+(not (exact-integer? 'foo))
 
 ;; integer? accepting 3.0 does not make it exact
 (exact? 3)

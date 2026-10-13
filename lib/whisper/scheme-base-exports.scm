@@ -76,6 +76,7 @@
         even?
         exact
         exact?
+        exact-integer?
         expt
         file-error?
         floor

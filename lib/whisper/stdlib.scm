@@ -269,6 +269,10 @@
            ;; rules out the infinities and nan, where n - n is nan
            (= 0 (- n n)))))
 
+(define (exact-integer? n)
+  ;; TODO we need to change this if/when we have bignums
+  (fixnum? n))
+
 (define (exact? n)
   (unless (number? n)
     (error "not a number"))
