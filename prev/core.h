@@ -370,6 +370,10 @@ __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
  * "F(n)" where n is a 1-based count of assertions seen so far. */
 void test_assert(value result);
 
+/* called at the end of a -t test suite: prints a newline to end the
+ * line of results and exits with status 1 if any assertion failed. */
+void test_finish(void);
+
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base
 #define reset_args() va_end(argsx); va_start(argsx, nargs); arg_arr = arg_arr_base
 #define next_arg() (arg_arr == NULL ? va_arg(argsx, value) : *arg_arr++)
@@ -467,6 +471,7 @@ extern value make_symbol(char *name, size_t len, enum sym_kind kind);
 extern value make_closure(funcptr func, int min_args, int max_args, int nfreevars, ...);
 extern value make_string(const char *s, size_t len);
 extern value make_vector(size_t len, value fill);
+extern value make_box(value v);
 extern value make_bytevector(size_t len, uint8_t fill);
 extern value make_pair(value car, value cdr);
 extern struct object* alloc_object(void);
@@ -565,6 +570,8 @@ extern value primcall_char_lt_q(environment env, enum call_flags flags, int narg
 extern value primcall_char_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_close_port(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_cons(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_current_second(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_current_jiffy(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_command_line(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_delete_file(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eof_object(environment env, enum call_flags flags, int nargs, ...);
@@ -572,6 +579,7 @@ extern value primcall_eof_object_q(environment env, enum call_flags flags, int n
 extern value primcall_eq_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_eqv_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_exact(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_file_exists_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_flonum_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_floor(environment env, enum call_flags flags, int nargs, ...);
@@ -580,12 +588,14 @@ extern value primcall_percent_underscore_exit(environment env, enum call_flags f
 extern value primcall_percent_flush_output_port(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_gensym(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_get_environment_variable(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_get_environment_variables(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_get_output_bytevector(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_inexact(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_input_port_open_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_input_port_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_integer_to_char(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_jiffies_per_second(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_directory(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_list_star(environment env, enum call_flags flags, int nargs, ...);
@@ -671,6 +681,61 @@ extern value primcall_num_lt(environment env, enum call_flags flags, int nargs, 
 extern value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_num_le(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...);
+
+/* two-argument arithmetic and comparisons, inlined by the compiler. the
+ * fast path handles two fixnums. fixnums have a zero tag, so the tagged
+ * values can be added, subtracted and compared as they are, and a
+ * 64-bit overflow of the tagged result means the 61-bit result is out
+ * of range. anything else (flonums, type errors, overflow) goes to the
+ * primcall. */
+#define BOTH_FIXNUMS(a, b) ((((uint64_t)(a) | (uint64_t)(b)) & TAG_MASK) == FIXNUM_TAG)
+
+/* always_inline makes gcc inline these even at -O0 */
+#define ARITH_INLINE static inline __attribute__((always_inline))
+
+ARITH_INLINE value inline_add(value a, value b) {
+    int64_t r;
+    if (BOTH_FIXNUMS(a, b) &&
+        !__builtin_add_overflow((int64_t) a, (int64_t) b, &r))
+    {
+        return (value) r;
+    }
+
+    return primcall_add(NULL, NO_CALL_FLAGS, 2, a, b);
+}
+
+ARITH_INLINE value inline_sub(value a, value b) {
+    int64_t r;
+    if (BOTH_FIXNUMS(a, b) &&
+        !__builtin_sub_overflow((int64_t) a, (int64_t) b, &r))
+    {
+        return (value) r;
+    }
+    return primcall_sub(NULL, NO_CALL_FLAGS, 2, a, b);
+}
+
+ARITH_INLINE value inline_mul(value a, value b) {
+    int64_t r;
+    /* untagged a times tagged b gives a tagged result */
+    if (BOTH_FIXNUMS(a, b) &&
+        !__builtin_mul_overflow(GET_FIXNUM(a), (int64_t) b, &r))
+    {
+        return (value) r;
+    }
+    return primcall_mul(NULL, NO_CALL_FLAGS, 2, a, b);
+}
+
+#define INLINE_COMPARISON(name, op)                                         \
+    ARITH_INLINE value inline_##name(value a, value b) {                    \
+        if (BOTH_FIXNUMS(a, b)) { return BOOL((int64_t) a op (int64_t) b); } \
+        return primcall_##name(NULL, NO_CALL_FLAGS, 2, a, b);               \
+    }
+
+INLINE_COMPARISON(num_eq, ==)
+INLINE_COMPARISON(num_lt, <)
+INLINE_COMPARISON(num_gt, >)
+INLINE_COMPARISON(num_le, <=)
+INLINE_COMPARISON(num_ge, >=)
 extern value primcall_percent_make_hash_table(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_hash_table_set_b(environment env, enum call_flags flags, int nargs, ...);

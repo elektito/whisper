@@ -1,16 +1,17 @@
 #include "core.h"
 
-#include <dirent.h>
-#include <dlfcn.h>
-#include <fcntl.h>
-#include <poll.h>
-
 #include <ctype.h>
 #include <errno.h>
 #include <setjmp.h>
 #include <stdint.h>
+#include <time.h>
+
+#include <dirent.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <strings.h>
-#include <sys/poll.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define FILE_BUFFER_SIZE 8192
@@ -18,6 +19,8 @@
 /* bytes of consumed input kept at the front of the buffer across a
  * refill, so unread-char still works right after buffe refill */
 #define FILE_PUSHBACK 4
+
+#define OBJECT_SIZE(field) (offsetof(struct object, field) + sizeof(((struct object *) 0)->field))
 
 static void cleanup(void);
 
@@ -59,6 +62,9 @@ static struct pool *closure1s_heap;
 static struct pool *closure2s_heap;
 static struct pool *closure3s_heap;
 static struct pool *closures_heap;
+static struct pool *boxes_heap;
+static struct pool *vectors_heap;
+static struct pool *wrapped_heap;
 
 static void *lbound_all_heaps = 0;
 static void *ubound_all_heaps = 0;
@@ -291,13 +297,23 @@ void panic(const char *fmt, ...) {
     exit(1);
 }
 
+static int test_counter = 0;
+static int test_failures = 0;
+
 void test_assert(value result) {
-    static int test_counter = 0;
     test_counter++;
     if (result == TRUE) {
         printf(".");
     } else {
+        ++test_failures;
         printf("F(%d)", test_counter);
+    }
+}
+
+void test_finish(void) {
+    printf("\n");
+    if (test_failures > 0) {
+        exit(1);
     }
 }
 
@@ -665,8 +681,11 @@ static void init_memory(void) {
     closure2s_heap = create_heap(sizeof(struct closure2), CLOSURE_TAG);
     closure3s_heap = create_heap(sizeof(struct closure3), CLOSURE_TAG);
     closures_heap = create_heap(sizeof(struct closure), CLOSURE_TAG);
+    boxes_heap = create_heap(OBJECT_SIZE(box), OBJECT_TAG);
+    vectors_heap = create_heap(OBJECT_SIZE(vector), OBJECT_TAG);
+    wrapped_heap = create_heap(OBJECT_SIZE(wrapped), OBJECT_TAG);
 
-    n_heaps = 9;
+    n_heaps = 12;
     heaps = malloc(n_heaps * sizeof(struct pool *));
     heaps[0] = symbols_heap;
     heaps[1] = pairs_heap;
@@ -677,6 +696,9 @@ static void init_memory(void) {
     heaps[6] = closure2s_heap;
     heaps[7] = closure3s_heap;
     heaps[8] = closures_heap;
+    heaps[9] = boxes_heap;
+    heaps[10] = vectors_heap;
+    heaps[11] = wrapped_heap;
 }
 
 static void gc_recurse(value v);
@@ -979,9 +1001,6 @@ static void gc_free_block(void *p, struct pool *heap) {
             free(obj->port.file_buf);
             free(obj->port.string);
             break;
-        case OBJ_VECTOR:
-            free(obj->vector.data);
-            break;
         case OBJ_BYTEVECTOR:
             free(obj->bytevector.data);
             break;
@@ -1007,6 +1026,9 @@ static void gc_free_block(void *p, struct pool *heap) {
             /* do nothing */
             break;
         }
+    } else if (heap == vectors_heap) {
+        struct object *obj = (struct object *) v;
+        free(obj->vector.data);
     }
 
     /* zero the data so stale pointers don't cause double-frees if the
@@ -1315,7 +1337,7 @@ value make_string(const char *s, size_t len) {
 }
 
 value make_vector(size_t len, value fill) {
-    struct object *obj = alloc_object();
+    struct object *obj = alloc_from_heap(vectors_heap);
     obj->type = OBJ_VECTOR;
     obj->vector.len = len;
     obj->vector.data = calloc(obj->vector.len, sizeof(value));
@@ -1331,6 +1353,13 @@ value make_bytevector(size_t len, uint8_t byte) {
     obj->bytevector.len = len;
     obj->bytevector.data = malloc(obj->bytevector.len);
     memset(obj->bytevector.data, byte, len);
+    return OBJECT(obj);
+}
+
+value make_box(value v) {
+    struct object *obj = alloc_from_heap(boxes_heap);
+    obj->type = OBJ_BOX;
+    obj->box.value = v;
     return OBJECT(obj);
 }
 
@@ -2248,10 +2277,7 @@ value primcall_box(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
     value v = next_arg();
     free_args();
-    struct object *box = alloc_object();
-    box->type = OBJ_BOX;
-    box->box.value = v;
-    return OBJECT(box);
+    return make_box(v);
 }
 
 value primcall_box_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -2766,8 +2792,24 @@ value primcall_cons(environment env, enum call_flags flags, int nargs, ...) {
     return make_pair(car, cdr);
 }
 
+value primcall_current_second(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("current-second takes no arguments"); }
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return FLONUM(ts.tv_sec + ts.tv_nsec / 1e9);
+}
+
+value primcall_current_jiffy(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("current-jiffy takes no arguments"); }
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return FIXNUM((int64_t) ts.tv_sec * 1000000000 + ts.tv_nsec);
+}
+
 value primcall_command_line(environment env, enum call_flags flags, int nargs, ...) {
-    if (nargs != 0) { raise_error("cons needs two arguments"); }
+    if (nargs != 0) { raise_error("command-line needs two arguments"); }
 
     value cmdline = NIL;
     for (int i = cmdline_argc - 1; i >= 0; --i) {
@@ -2847,6 +2889,21 @@ value primcall_exact(environment env, enum call_flags flags, int nargs, ...) {
     } else {
         raise_error("exact argument is not a number");
     }
+}
+
+value primcall_file_exists_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("file-exists? needs a single argument"); }
+    init_args();
+    value filename = next_arg();
+    free_args();
+
+    if (!IS_STRING(filename)) { raise_error("file-exists? argument is not a string"); }
+
+    char *filenamez = strz(filename);
+    int ret = access(filenamez, F_OK);
+    free(filenamez);
+
+    return BOOL(ret == 0);
 }
 
 value primcall_fixnum_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -2975,6 +3032,22 @@ value primcall_get_environment_variable(environment env, enum call_flags flags, 
     return OBJECT(v);
 }
 
+extern char **environ;
+value primcall_get_environment_variables(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("get-environment-variables takes no arguments"); }
+
+    value alist = NIL;
+    for (char **e = environ; *e; ++e) {
+        char *eq = strchr(*e, '=');
+        if (!eq) { continue; }
+        value name = make_string(*e, eq - *e);
+        value val = make_string(eq + 1, strlen(eq + 1));
+        alist = make_pair(make_pair(name, val), alist);
+    }
+
+    return alist;
+}
+
 value primcall_get_output_string(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("get-output-string needs a single argument"); }
     init_args();
@@ -3039,6 +3112,11 @@ value primcall_integer_to_char(environment env, enum call_flags flags, int nargs
     if (!IS_FIXNUM(n)) { raise_error("integer->char argument is not an integer"); }
     if (GET_FIXNUM(n) < 0 || GET_FIXNUM(n) > 255) { raise_error("integer->char argument is out of range"); }
     return CHAR((char) GET_FIXNUM(n));
+}
+
+value primcall_jiffies_per_second(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 0) { raise_error("jiffies-per-second takes no arguments"); }
+    return FIXNUM(1000000000);
 }
 
 value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
@@ -3864,9 +3942,21 @@ value primcall_system(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
     if (!IS_STRING(cmd)) { raise_error("system argument is not a string"); }
     char *cmdz = strz(cmd);
-    int ret = system(cmdz);
+    int status = system(cmdz);
     free(cmdz);
-    return FIXNUM(ret);
+
+    /* system returns a wait status, not an exit code. return the exit
+     * code, or 128 plus the signal number like the shell does when the
+     * command was killed by a signal. */
+    if (status == -1) {
+        return FIXNUM(-1);
+    } else if (WIFEXITED(status)) {
+        return FIXNUM(WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        return FIXNUM(128 + WTERMSIG(status));
+    } else {
+        return FIXNUM(status);
+    }
 }
 
 value primcall_textual_port_q(environment env, enum call_flags flags, int nargs, ...) {
@@ -4003,7 +4093,7 @@ value primcall_wrap(environment env, enum call_flags flags, int nargs, ...) {
     value kind = next_arg();
     free_args();
 
-    struct object *w = alloc_object();
+    struct object *w = alloc_from_heap(wrapped_heap);
     w->type = OBJ_WRAPPED;
     w->wrapped.value = v;
     w->wrapped.kind = kind;
@@ -4774,12 +4864,12 @@ value primcall_hash_table_copy(environment env, enum call_flags flags, int nargs
 
     struct object *new_ht = alloc_object();
     new_ht->type = OBJ_HASH_TABLE;
-    new_ht->hash_table.ht.user_hash_fn = GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
-    new_ht->hash_table.ht.user_eq_fn = GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
     hash_table_init(&new_ht->hash_table.ht,
                     GET_OBJECT(ht)->hash_table.ht.cap,
                     GET_OBJECT(ht)->hash_table.ht.hash_fn,
                     GET_OBJECT(ht)->hash_table.ht.eq_fn);
+    new_ht->hash_table.ht.user_hash_fn = GET_OBJECT(ht)->hash_table.ht.user_hash_fn;
+    new_ht->hash_table.ht.user_eq_fn = GET_OBJECT(ht)->hash_table.ht.user_eq_fn;
 
     hash_table_each(&GET_OBJECT(ht)->hash_table.ht, ht_copier, OBJECT(new_ht));
 
@@ -4852,18 +4942,31 @@ static uint64_t hash_vector_recursive(value *data, int len, int depth) {
     return h;
 }
 
-/* depth=8 covers typical nesting depth without risking stack overflow */
+/* must agree with equal?, which compares strings, bytevectors, pairs,
+ * and vectors by content and everything else with eqv?.
+ * depth=8 covers typical nesting depth without risking stack overflow */
 static uint64_t hash_equal_recursive(value v, int depth) {
     if (IS_STRING(v)) {
         struct string *s = GET_STRING(v);
         return hash_string_djb2(s->s, s->len);
     }
-    if (depth > 0 && IS_PAIR(v)) {
+    if (IS_BYTEVECTOR(v)) {
+        return hash_string_djb2((const char *) GET_OBJECT(v)->bytevector.data,
+                                GET_OBJECT(v)->bytevector.len);
+    }
+    if (IS_PAIR(v)) {
+        /* past the depth limit, contents no longer contribute to the
+         * hash. the address can't be used instead, since equal pairs
+         * live at different addresses. we simply return a hash of 1 for
+         * all such pairs. */
+        if (depth <= 0) { return 1; }
         uint64_t h = hash_equal_recursive(GET_PAIR(v)->car, depth - 1);
         h ^= hash_equal_recursive(GET_PAIR(v)->cdr, depth - 1) * 2654435761ULL; /* Knuth */
         return h;
     }
-    if (depth > 0 && IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR) {
+    if (IS_OBJECT(v) && GET_OBJECT(v)->type == OBJ_VECTOR) {
+        /* return a hash of 2 for all such deeply nested vectors */
+        if (depth <= 0) { return 2; }
         return hash_vector_recursive(GET_OBJECT(v)->vector.data,
                                      GET_OBJECT(v)->vector.len, depth);
     }
@@ -4925,6 +5028,15 @@ value primcall_string_ci_hash(environment env, enum call_flags flags, int nargs,
     return FIXNUM(hash_finalize(hash_string_ci_djb2(s->s, s->len), bound));
 }
 
+/* known issue: the following two functions return #f when the table was
+ * made with #f for that function, which %make-hash-table takes to mean
+ * the native address functions. that happens for the hash function of
+ * eq? and eqv? tables (see default-hash-function in stdlib.scm), and
+ * for both functions of make-eq-hash-table tables. srfi 69 expects real
+ * procedures. the problem is that #f means both "use the native
+ * functions" and "the table's function". fixing it properly probably
+ * means a separate native flag for %make-hash-table which we might do
+ * in the future. */
  value primcall_hash_table_equivalence_function(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("hash-table-equivalence-function needs a single argument"); }
     init_args();
