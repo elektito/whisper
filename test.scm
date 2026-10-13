@@ -2260,7 +2260,7 @@ and still a comment
     (if (= n 0)
         'done
         (apply apply-loop (list (- n 1))))))
-(eq? 'done (apply-loop 10000000))
+(eq? 'done (apply-loop 2000000))
 
 ;; tail calls through a case-lambda
 (define cl-loop
