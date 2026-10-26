@@ -2229,6 +2229,22 @@ value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
     return head;
 }
 
+/* most arguments a non-tail apply passes on the C stack. more than this
+ * go in a GC vector. */
+#define APPLY_STACK_MAX_ARGS 16
+
+/* copy apply's leading arguments, then the elements of its list, into
+ * dst. allocates nothing. */
+static void apply_fill_args(value *dst, value *pre, int n_pre, value list) {
+    for (int i = 0; i < n_pre; ++i) {
+        dst[i] = pre[i];
+    }
+    int i = n_pre;
+    for (value p = list; p != NIL; p = GET_PAIR(p)->cdr) {
+        dst[i++] = GET_PAIR(p)->car;
+    }
+}
+
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 2) { raise_error("apply needs a procedure and a list argument"); }
     init_args();
@@ -2253,28 +2269,44 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) { ++list_len; }
     int func_nargs = n_pre + list_len;
 
-    /* build the call's arguments in a GC vector. it is a normal heap object,
-       so nothing here mallocs or frees and a non-local exit leaks nothing. */
+    /* a small tail call needs no vector. the arguments go straight into
+       pending_tail_call, which the GC scans. every argument has already
+       been read, so this is safe even when our own arguments came from
+       pending_tail_call.args. */
+    if ((flags & IN_TAIL_POSITION) && func_nargs <= TAILCALL_MAX_INLINE) {
+        apply_fill_args(pending_tail_call.args, pre, n_pre, args_list);
+        pending_tail_call.closure = func;
+        pending_tail_call.accepts_mvalues = flags & ACCEPTS_MVALUES;
+        pending_tail_call.nargs = func_nargs;
+        pending_tail_call.overflow = VOID;
+
+        free_args();
+        return TAILCALL;
+    }
+
+    /* a small non-tail call keeps its arguments on the C stack, which the
+       conservative scan covers. */
+    if (!(flags & IN_TAIL_POSITION) && func_nargs <= APPLY_STACK_MAX_ARGS) {
+        value args[func_nargs > 0 ? func_nargs : 1];
+        apply_fill_args(args, pre, n_pre, args_list);
+        value ret = call_with_args(func, 0, func_nargs, args);
+
+        free_args();
+        return ret;
+    }
+
+    /* larger calls build their arguments in a GC vector. it is a normal
+       heap object, so nothing here mallocs or frees and a non-local exit
+       leaks nothing. */
     value argvec = make_vector(func_nargs, VOID);
     value *args = GET_OBJECT(argvec)->vector.data;
-    for (int i = 0; i < n_pre; ++i) {
-        args[i] = pre[i];
-    }
-    int i = n_pre;
-    for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) {
-        args[i++] = GET_PAIR(p)->car;
-    }
+    apply_fill_args(args, pre, n_pre, args_list);
 
     if (flags & IN_TAIL_POSITION) {
         pending_tail_call.closure = func;
         pending_tail_call.accepts_mvalues = flags & ACCEPTS_MVALUES;
         pending_tail_call.nargs = func_nargs;
-        pending_tail_call.overflow = func_nargs <= TAILCALL_MAX_INLINE ? VOID : argvec;
-        if (func_nargs <= TAILCALL_MAX_INLINE) {
-            for (int i = 0; i < func_nargs; ++i) {
-                pending_tail_call.args[i] = args[i];
-            }
-        }
+        pending_tail_call.overflow = argvec;
 
         free_args();
         return TAILCALL;
