@@ -136,6 +136,9 @@
                                ((#\|) (stateful-read-char port)
                                       (skip-block-comment port)
                                       (loop (peek-char port)))
+                               ((#\!) (stateful-read-char port)
+                                      (read-directive port)
+                                      (loop (peek-char port)))
                                ;; read the last character so we can
                                ;; unread the two in the right order.
                                ;; notice that two "unread" operations is
@@ -145,6 +148,16 @@
                                      (stateful-unread-char next-char port)
                                      (stateful-unread-char ch port)))))
           (else (void)))))
+
+(define (read-directive port)
+  ;; note: the #! is already read
+  (let ((ch (peek-char port)))
+    (when (or (eof-object? ch) (char-is-separator? ch))
+      (read-error "missing directive name after #!")))
+  (let ((name (read-until-delim port)))
+    (cond ((string=? name "fold-case") (port-fold-case-set! port #t))
+          ((string=? name "no-fold-case") (port-fold-case-set! port #f))
+          (else (read-error "unknown directive: #!~a" name)))))
 
 (define (skip-line-comment port)
   (stateful-read-char port) ; skip the semicolon character
@@ -316,11 +329,11 @@
                                  (read-error "bad hex code: ~a" s))))
           (else (read-error "bad character in hex escape code: ~a" ch)))))
 
-(define (sym-or-num s)
+(define (sym-or-num s port)
   (let ((n (string->number s)))
-    (if (not n)
-        (string->symbol s)
-        n)))
+    (cond (n n)
+          ((port-fold-case? port) (string->symbol (string-foldcase s)))
+          (else (string->symbol s)))))
 
 ;; whether ch ends a token. these are the delimiters from r7rs 7.1.1
 ;; plus the quote character.
@@ -340,7 +353,7 @@
   (let ((out (open-output-string)))
     (let loop ((first-iter #t) (ch first-char))
       (cond ((or (eof-object? ch) (char-is-separator? ch))
-             (sym-or-num (get-output-string out)))
+             (sym-or-num (get-output-string out) port))
             ((eq? #\\ ch)
              (unless first-iter (stateful-read-char port))
              (%write-char (read-escaped-char port) out)
@@ -438,7 +451,11 @@
   (when (eof-object? (peek-char port))
     (read-error "eof inside character literal"))
   (let ((s (read-until-delim port)))
-    (str->char s)))
+    ;; #\A is a character literal and must keep its case. only names like
+    ;; #\NEWLINE are folded.
+    (if (and (> (string-length s) 1) (port-fold-case? port))
+        (str->char (string-foldcase s))
+        (str->char s))))
 
 (define (read-until-delim port)
   (let ((s (make-string 1 (stateful-read-char port))))
