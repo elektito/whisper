@@ -322,11 +322,11 @@
         (string->symbol s)
         n)))
 
+;; whether ch ends a token. these are the delimiters from r7rs 7.1.1
+;; plus the quote character.
 (define (char-is-separator? ch)
   (or (char-whitespace? ch)
-      (char=? #\' ch)
-      (char=? #\( ch)
-      (char=? #\) ch)))
+      (memv ch '(#\( #\) #\" #\; #\| #\'))))
 
 (define (read-dot-or-identifier port)
   (stateful-read-char port) ; skip the dot
@@ -410,11 +410,7 @@
 (define (read-sharp-identifier port)
   (let loop ((ch (peek-char port))
              (s "#"))
-    (cond ((or (eof-object? ch)
-               (char-whitespace? ch)
-               (char=? #\( ch)
-               (char=? #\) ch)
-               (char=? #\' ch))
+    (cond ((or (eof-object? ch) (char-is-separator? ch))
            (cond ((member s '("#f" "#false")) #f)
                  ((member s '("#t" "#true")) #t)
                  (else (string->symbol s))))
@@ -448,11 +444,7 @@
   (let ((s (make-string 1 (stateful-read-char port))))
     (let loop ((ch (peek-char port))
                (s s))
-      (if (or (eof-object? ch)
-              (char-whitespace? ch)
-              (char=? #\( ch)
-              (char=? #\) ch)
-              (char=? #\' ch))
+      (if (or (eof-object? ch) (char-is-separator? ch))
           s
           (begin
             (stateful-read-char port)

@@ -2961,6 +2961,18 @@ and still a comment
 (equal? '(#t #f #t #f) '(#true #false #t #f))
 (equal? '(#t #f) (read (open-input-string "(#true #false)")))
 
+;; ", ; and | end a token like whitespace and parens do
+(equal? '(#t "x") (read (open-input-string "(#t\"x\")")))
+(equal? '(#true #f) (read (open-input-string "(#true;c\n#f)")))
+(equal? '(#f |a b|) (read (open-input-string "(#false|a b|)")))
+(equal? '(abc "x") (read (open-input-string "(abc\"x\")")))
+(equal? '(abc def) (read (open-input-string "(abc;c\ndef)")))
+(equal? '(abc |d e|) (read (open-input-string "(abc|d e|)")))
+(equal? '(12 "x") (read (open-input-string "(12\"x\")")))
+(equal? '(255 1) (read (open-input-string "(#xff;c\n1)")))
+(equal? '(#\a "x") (read (open-input-string "(#\\a\"x\")")))
+(equal? '(#\; #\" #\|) (read (open-input-string "(#\\; #\\\" #\\|)")))
+
 ;; non-cyclic sharing is not a cycle, so plain write prints it
 ;; redundantly rather than labeling it
 (let* ((x (list 1 2))
