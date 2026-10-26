@@ -9,7 +9,7 @@
 
 set -e
 
-CURRENT_V=38
+CURRENT_V=39
 LAST_V=$((CURRENT_V - 1))
 
 SCHEME=
