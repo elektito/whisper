@@ -208,8 +208,8 @@
 ;; closing over the resolved include search path (see
 ;; resolve-include-search-path).
 (define (make-read-included-file search-dirs)
-  (lambda (filename parent-filename)
-    (read-included-file filename parent-filename search-dirs)))
+  (lambda (filename parent-filename fold-case?)
+    (read-included-file filename parent-filename fold-case? search-dirs)))
 
 (define (init-read-included-file search-dirs)
   (set! *read-included-file* (make-read-included-file search-dirs)))
@@ -260,12 +260,15 @@
 
 ;; resolve filename against parent-filename and the include search path,
 ;; read all the forms in the file, and return a pair (resolved-filename
-;; . forms).
-(define (read-included-file filename parent-filename search-dirs)
+;; . forms). if fold-case? is true, the file is read as if it began with
+;; #!fold-case, as include-ci requires.
+(define (read-included-file filename parent-filename fold-case? search-dirs)
   (let ((path (find-include-file filename parent-filename search-dirs)))
     (unless path
       (compile-error "include file not found: ~a" filename))
     (let ((port (open-input-file path)))
+      (when fold-case?
+        (port-fold-case-set! port #t))
       (parameterize ((reader-state (new-reader-state filename))
                      (reader-wrapper wrap-read-item))
         (let loop ((form (read port))
@@ -1687,6 +1690,7 @@
                                  (identifier 'special 'define-syntax 'define-syntax)
                                  (identifier 'special 'if 'if)
                                  (identifier 'special 'include 'include)
+                                 (identifier 'special 'include-ci 'include-ci)
                                  (identifier 'special 'lambda 'lambda)
                                  (identifier 'special 'let 'let)
                                  (identifier 'special 'letrec 'letrec)
@@ -2177,14 +2181,14 @@
                (loop (cdr decls) imports export-names c-exports extra-archives extra-flags
                      (expand-and-prepend (map (lambda (f) (cons f filename)) (cdr decl))
                                          forms)))
-              ((include)
+              ((include include-ci)
                (loop (cdr decls) imports export-names c-exports extra-archives extra-flags
-                     (expand-and-prepend (read-include-form decl filename) forms)))
+                     (expand-and-prepend (read-include-form decl filename
+                                                            (eq? (car decl) 'include-ci))
+                                         forms)))
               ((include-library-declarations)
-               (loop (append (read-include-form decl filename) (cdr decls))
+               (loop (append (read-include-form decl filename #f) (cdr decls))
                      imports export-names c-exports extra-archives extra-flags forms))
-              ((include-ci)
-               (compile-error "include-ci is not yet supported in define-library"))
               ((cond-expand)
                (compile-error "cond-expand is not yet supported in define-library"))
               ((c-include)

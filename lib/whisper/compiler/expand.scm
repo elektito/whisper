@@ -174,9 +174,10 @@
 ;; returns a <library> record.
 (define *find-library*)
 
-;; this must be set to a function that receives a filename and a
-;; parent-filename, and resolves the filename against the parent, read
-;; the file, and returns a pair (resolved-filename . forms) where
+;; this must be set to a function that receives a filename, a
+;; parent-filename and a fold-case? flag, and resolves the filename
+;; against the parent, read the file (case folded if fold-case? is
+;; true, as include-ci does), and returns a pair (resolved-filename . forms) where
 ;; resolved-filename is the resolved absolute path of the file, and
 ;; forms the list of forms read from the file.
 ;;
@@ -309,6 +310,10 @@
 (define (binding-is-special binding meaning)
   (and (eq? 'special (binding-kind binding))
        (eq? meaning (binding-meaning binding))))
+
+(define (include-binding? binding)
+  (or (binding-is-special binding 'include)
+      (binding-is-special binding 'include-ci)))
 
 (define (identifier-is-special form meaning env)
   (cond ((identifier? form)
@@ -740,18 +745,19 @@
                      (apply append (map (lambda (form)
                                           (expand-top-level-form form env filename))
                                         (cdr form))))
-                    ((binding-is-special binding 'include)
-                     (expand-top-level-include form env filename))
+                    ((include-binding? binding)
+                     (expand-top-level-include form env filename
+                                               (binding-is-special binding 'include-ci)))
                     ((eq? 'macro (binding-kind binding))
                      (expand-top-level-form (expand-macro binding form env) env filename))
                     (else (list (expand-form form env filename)))))
             (list (expand-form form env filename))))))))
 
-(define (expand-top-level-include form env filename)
+(define (expand-top-level-include form env filename fold-case?)
   (apply append
          (map (lambda (form+filename)
                 (expand-top-level-form (car form+filename) env (cdr form+filename)))
-              (read-include-form form filename))))
+              (read-include-form form filename fold-case?))))
 
 (define (process-import form env filename)
   (let loop ((import-sets (cdr form)))
@@ -1149,8 +1155,9 @@
                                (expand-let-syntax head-binding form env filename))
                               ((binding-is-special head-binding 'letrec-syntax)
                                (expand-letrec-syntax head-binding form env filename))
-                              ((binding-is-special head-binding 'include)
-                               (expand-include form env filename))
+                              ((include-binding? head-binding)
+                               (expand-include form env filename
+                                               (binding-is-special head-binding 'include-ci)))
                               ((binding-is-special head-binding 'syntax-rules) form)
                               (else (expand-other form env filename)))))
            (replace-form form result)
@@ -1159,11 +1166,11 @@
 ;; expand non-top-level include form. an include is equivalent to a
 ;; begin around the contents of the files it names, so that is what we
 ;; expand to here.
-(define (expand-include form env filename)
+(define (expand-include form env filename fold-case?)
   `(,(identifier 'special 'begin 'begin)
     ,@(map (lambda (form+filename)
              (expand-form (car form+filename) env (cdr form+filename)))
-           (read-include-form form filename))))
+           (read-include-form form filename fold-case?))))
 
 ;; expands an if form, always returning a two-legged if.
 (define (expand-if form env filename)
@@ -1458,24 +1465,27 @@
                                   (cons form filename))
                                 (cdr form))
                            (cdr forms)) defines))
-            ((binding-is-special head-binding 'include)
-             (loop (append (read-include-form form filename) (cdr forms))
+            ((include-binding? head-binding)
+             (loop (append (read-include-form form filename
+                                              (binding-is-special head-binding 'include-ci))
+                           (cdr forms))
                    defines))
             (else ;; hit an expression
              (cons forms (reverse defines)))))))
 
-;; validate an (include <string> ...) form and read every file it names,
-;; resolving each against parent-filename. returns the concatenation of
+;; validate an (include <string> ...) or (include-ci <string> ...) form
+;; and read every file it names, resolving each against parent-filename
+;; and case folding them if fold-case? is true. returns the concatenation of
 ;; their forms, each paired with the resolved path of the file it was
 ;; read from, as (form . filename), so an include nested inside one of
 ;; them in turn resolves against that file.
-(define (read-include-form form parent-filename)
+(define (read-include-form form parent-filename fold-case?)
   (when (or (null? (cdr form))
             (not (all? (map string? (cdr form)))))
     (compile-error "invalid include form: ~a" form))
   (apply append
          (map (lambda (included-filename)
-                (let* ((resolved+forms (*read-included-file* included-filename parent-filename))
+                (let* ((resolved+forms (*read-included-file* included-filename parent-filename fold-case?))
                        (filename (car resolved+forms)))
                   (map (lambda (form)
                          (cons form filename))
