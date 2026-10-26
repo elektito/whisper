@@ -116,9 +116,19 @@ and still a comment
 
 (symbol=? 'foo 'foo)
 (not (symbol=? 'foo 'bar))
+(symbol=? 'a 'a 'a 'a)
+(not (symbol=? 'a 'a 'b))
+(guard (e (#t #t)) (symbol=? 1 1) #f)
+(guard (e (#t #t)) (symbol=? 'a 'a 5) #f)
+(guard (e (#t #t)) (symbol=? 'a 'b 5) #f)
 
 (boolean=? #t #t)
 (not (boolean=? #t #f))
+(boolean=? #f #f #f)
+(not (boolean=? #t #t #f))
+(guard (e (#t #t)) (boolean=? '() '()) #f)
+(guard (e (#t #t)) (boolean=? #t #t 1) #f)
+(guard (e (#t #t)) (boolean=? #t #f 1) #f)
 
 (string=? "foo" (symbol->string 'foo))
 (eq? 'bar (string->symbol "bar"))

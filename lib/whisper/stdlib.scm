@@ -214,11 +214,36 @@
     ((_ k body1 body2 ...)
      (call/cc (lambda (k) body1 body2 ...)))))
 
-(define (symbol=? x y)
-  (eq? x y))
+(define (%all-eq? x y r)
+  (and (eq? x y)
+       (or (null? r)
+           (%all-eq? y (car r) (cdr r)))))
 
-(define (boolean=? x y)
-  (eq? x y))
+(define symbol=?
+  (case-lambda
+   ((x y)
+    (unless (and (symbol? x) (symbol? y))
+      (error "symbol=? arguments are not all symbols"))
+    (eq? x y))
+   ((x y . r)
+    (unless (and (symbol? x)
+                 (symbol? y)
+                 (all? (map symbol? r)))
+      (error "symbol=? arguments are not all symbols"))
+    (%all-eq? x y r))))
+
+(define boolean=?
+  (case-lambda
+   ((x y)
+    (unless (and (boolean? x) (boolean? y))
+      (error "boolean=? arguments are not all booleans"))
+    (eq? x y))
+   ((x y . r)
+    (unless (and (boolean? x)
+                 (boolean? y)
+                 (all? (map boolean? r)))
+      (error "boolean=? arguments are not all booleans"))
+    (%all-eq? x y r))))
 
 (define (%equal? x y recursed)
   (cond ((eq? x y) #t)
