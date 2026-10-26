@@ -244,6 +244,7 @@ struct object {
             int file_buf_mode; /* enum file_buffer_mode, output ports only */
             int is_closed;
             int at_eof;
+            int fold_case; /* set by #!fold-case, cleared by #!no-fold-case */
             int fd;
             char *filename;
             char *file_buf;
@@ -634,6 +635,8 @@ extern value primcall_output_port_q(environment env, enum call_flags flags, int 
 extern value primcall_pair_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_peek_char(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_peek_u8(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_port_fold_case_q(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_port_fold_case_set_b(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_port_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_procedure_q(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_percent_read_bytevector(environment env, enum call_flags flags, int nargs, ...);

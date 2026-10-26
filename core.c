@@ -3533,6 +3533,26 @@ value primcall_percent_peek_char(environment env, enum call_flags flags, int nar
     return GET_OBJECT(port)->port.peek_char(port);
 }
 
+value primcall_port_fold_case_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("port-fold-case? needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("port-fold-case? argument is not an input port"); }
+    return BOOL(GET_OBJECT(port)->port.fold_case);
+}
+
+value primcall_port_fold_case_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("port-fold-case-set! needs two arguments"); }
+    init_args();
+    value port = next_arg();
+    value v = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("port-fold-case-set! first argument is not an input port"); }
+    GET_OBJECT(port)->port.fold_case = v != FALSE;
+    return VOID;
+}
+
 value primcall_port_q(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("port? needs a single argument"); }
     init_args();
