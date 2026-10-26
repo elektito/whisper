@@ -2237,7 +2237,7 @@
 (define (all-archive-flags archives)
   (if (null? archives)
       ""
-      (string-append "-Wl,--whole-archive " (string-join archives " ") " -Wl,--no-whole-archive")))
+      (string-append "-Wl,--whole-archive " (string-join (map shell-quote archives) " ") " -Wl,--no-whole-archive")))
 
 ;; the libraries imported by root-env's compilation unit, plus their
 ;; transitive dependencies, in dependency order.
@@ -2304,26 +2304,34 @@
       (realpath (string-append (path-dirname parent-filename) "/" filename))))
 
 (define (build-compile-cmd cc library-mode cflags c-file out-file core-path program)
+  ;; the command goes through sh, so every path in it is quoted. cc,
+  ;; cflags and the extra flags are left alone, since the shell is
+  ;; meant to split those into separate words.
   (let* ((archive-flags (all-archive-flags (program-import-archives program)))
          (so-extra-flags (string-join (program-so-extra-flags program) " "))
          (filename (program-filename program))
-         (out-dir (path-dirname out-file))
-         (here (if filename (path-dirname (realpath filename)) "."))
+         (out-dir (shell-quote (path-dirname out-file)))
+         (here (shell-quote (if filename (path-dirname (realpath filename)) ".")))
          (extra-archives (program-extra-archives program))
-         (extra-archives (string-join extra-archives " "))
-         (extra-flags (program-extra-flags program)))
+         (extra-archives (string-join (map shell-quote extra-archives) " "))
+         (extra-flags (program-extra-flags program))
+         (include-dir (shell-quote core-path))
+         (core-c (shell-quote (string-append core-path "/core.c")))
+         (c-file (shell-quote c-file)))
     ;; what's "here"? it's where the .sld file resides
     (case library-mode
       ((so)
-       (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc core-path cflags out-file c-file))
+       (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a" cc include-dir cflags (shell-quote out-file) c-file))
       ((library)
-       (let* ((obj (string-append (temp-filename) ".o"))
-              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a.so ~a -L~a -L~a ~a" cc core-path cflags out-file c-file here out-dir so-extra-flags))
-              (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc core-path cflags obj c-file))
-              (ar-cmd (format "rm -f ~a.a && ar rcs ~a.a ~a" out-file out-file obj)))
+       (let* ((obj (shell-quote (string-append (temp-filename) ".o")))
+              (so-file (shell-quote (string-append out-file ".so")))
+              (a-file (shell-quote (string-append out-file ".a")))
+              (so-cmd (format "~a -I~a ~a -DSO_MODE -fPIC -shared -o ~a ~a -L~a -L~a ~a" cc include-dir cflags so-file c-file here out-dir so-extra-flags))
+              (obj-cmd (format "~a -I~a ~a -fPIC -c -o ~a ~a" cc include-dir cflags obj c-file))
+              (ar-cmd (format "rm -f ~a && ar rcs ~a ~a" a-file a-file obj)))
          (string-join (list so-cmd obj-cmd ar-cmd) " && ")))
       (else
-       (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a/core.c ~a ~a" cc core-path cflags out-file c-file archive-flags core-path extra-archives extra-flags)))))
+       (format "~a -I~a -ldl ~a -Wl,--export-dynamic -o ~a ~a ~a ~a ~a ~a" cc include-dir cflags (shell-quote out-file) c-file archive-flags core-c extra-archives extra-flags)))))
 
 ;; the C compiler to run: CC env var if set, otherwise gcc
 (define (c-compiler)

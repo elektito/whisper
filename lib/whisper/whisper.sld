@@ -28,6 +28,7 @@
           !=
           string-join
           string-split
+          shell-quote
           string-suffix?
           string-append-char
           string<?

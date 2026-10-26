@@ -121,6 +121,16 @@
                     (else
                      (loop start (+ i 1) acc)))))))
 
+    ;; quotes str for sh, so it reaches the program as one argument no
+    ;; matter what characters it holds. inside single quotes nothing is
+    ;; special, not even a backslash, so a single quote can't appear
+    ;; there. each one is written as '\'' instead. the first ' closes the
+    ;; quotes, \' is an escaped quote outside them, and the last ' opens
+    ;; them again. sh joins the pieces into one word, so it's becomes
+    ;; 'it'\''s'.
+    (define (shell-quote str)
+      (string-append "'" (string-join (string-split str #\') "'\\''") "'"))
+
     (define (string-suffix? suffix str)
       (let ((suffix-len (string-length suffix))
             (str-len (string-length str)))
@@ -256,6 +266,7 @@
           sort
           string-join
           string-split
+          shell-quote
           string-suffix?
           format
 
