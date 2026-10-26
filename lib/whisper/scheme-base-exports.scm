@@ -91,6 +91,7 @@
         guard
         if
         include
+        include-ci
         inexact
         inexact?
         input-port-open?
