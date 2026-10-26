@@ -3161,14 +3161,21 @@ value primcall_jiffies_per_second(environment env, enum call_flags flags, int na
 
 value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
-    value result = NIL;
+    value head = NIL;
+    value tail = NIL;
     for (int i = 0; i < nargs; ++i) {
-        value v = next_arg();
-        result = make_pair(v, result);
+        value p = make_pair(next_arg(), NIL);
+        if (tail == NIL) {
+            head = p;
+        } else {
+            GET_PAIR(tail)->cdr = p;
+        }
+
+        tail = p;
     }
     free_args();
 
-    return reverse_list(result, NIL);
+    return head;
 }
 
 value primcall_list_star(environment env, enum call_flags flags, int nargs, ...) {
