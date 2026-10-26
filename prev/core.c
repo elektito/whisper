@@ -297,21 +297,61 @@ void panic(const char *fmt, ...) {
     exit(1);
 }
 
+static int try_flush_file_buffer(struct object *port);
+
 static int test_counter = 0;
 static int test_failures = 0;
 
-void test_assert(value result) {
+/* set by -v on the test suite's command line. prints each test before
+ * it runs and its result after, one test per line. */
+static int test_verbose = 0;
+
+void test_init(void) {
+    for (int i = 1; i < cmdline_argc; ++i) {
+        if (strcmp(cmdline_argv[i], "-v") == 0) {
+            test_verbose = 1;
+        } else {
+            fprintf(stderr, "unknown test suite option: %s\n", cmdline_argv[i]);
+            exit(1);
+        }
+    }
+}
+
+/* in verbose mode the test lines go through stdio, while output from
+ * the tests themselves goes through the scheme stdout port. flushing
+ * both keeps them in order. */
+static void test_flush_output(void) {
+    if (stdout_port) { try_flush_file_buffer(GET_OBJECT(stdout_port)); }
+    fflush(stdout);
+}
+
+void test_start(const char *location, const char *text) {
     test_counter++;
-    if (result == TRUE) {
+
+    if (test_verbose) {
+        test_flush_output();
+        printf("%d %s %s ... ", test_counter, location, text);
+        /* so a test that hangs or crashes is the last line printed */
+        fflush(stdout);
+    }
+}
+
+void test_assert(value result) {
+    if (result != TRUE) { ++test_failures; }
+
+    if (test_verbose) {
+        test_flush_output();
+        printf(result == TRUE ? "OK\n" : "FAILED\n");
+        fflush(stdout);
+    } else if (result == TRUE) {
         printf(".");
     } else {
-        ++test_failures;
         printf("F(%d)", test_counter);
     }
 }
 
 void test_finish(void) {
-    printf("\n");
+    if (!test_verbose) { printf("\n"); }
     if (test_failures > 0) {
         exit(1);
     }
@@ -2189,6 +2229,22 @@ value primcall_append(environment env, enum call_flags flags, int nargs, ...) {
     return head;
 }
 
+/* most arguments a non-tail apply passes on the C stack. more than this
+ * go in a GC vector. */
+#define APPLY_STACK_MAX_ARGS 16
+
+/* copy apply's leading arguments, then the elements of its list, into
+ * dst. allocates nothing. */
+static void apply_fill_args(value *dst, value *pre, int n_pre, value list) {
+    for (int i = 0; i < n_pre; ++i) {
+        dst[i] = pre[i];
+    }
+    int i = n_pre;
+    for (value p = list; p != NIL; p = GET_PAIR(p)->cdr) {
+        dst[i++] = GET_PAIR(p)->car;
+    }
+}
+
 value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs < 2) { raise_error("apply needs a procedure and a list argument"); }
     init_args();
@@ -2213,28 +2269,44 @@ value primcall_apply(environment env, enum call_flags flags, int nargs, ...) {
     for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) { ++list_len; }
     int func_nargs = n_pre + list_len;
 
-    /* build the call's arguments in a GC vector. it is a normal heap object,
-       so nothing here mallocs or frees and a non-local exit leaks nothing. */
+    /* a small tail call needs no vector. the arguments go straight into
+       pending_tail_call, which the GC scans. every argument has already
+       been read, so this is safe even when our own arguments came from
+       pending_tail_call.args. */
+    if ((flags & IN_TAIL_POSITION) && func_nargs <= TAILCALL_MAX_INLINE) {
+        apply_fill_args(pending_tail_call.args, pre, n_pre, args_list);
+        pending_tail_call.closure = func;
+        pending_tail_call.accepts_mvalues = flags & ACCEPTS_MVALUES;
+        pending_tail_call.nargs = func_nargs;
+        pending_tail_call.overflow = VOID;
+
+        free_args();
+        return TAILCALL;
+    }
+
+    /* a small non-tail call keeps its arguments on the C stack, which the
+       conservative scan covers. */
+    if (!(flags & IN_TAIL_POSITION) && func_nargs <= APPLY_STACK_MAX_ARGS) {
+        value args[func_nargs > 0 ? func_nargs : 1];
+        apply_fill_args(args, pre, n_pre, args_list);
+        value ret = call_with_args(func, 0, func_nargs, args);
+
+        free_args();
+        return ret;
+    }
+
+    /* larger calls build their arguments in a GC vector. it is a normal
+       heap object, so nothing here mallocs or frees and a non-local exit
+       leaks nothing. */
     value argvec = make_vector(func_nargs, VOID);
     value *args = GET_OBJECT(argvec)->vector.data;
-    for (int i = 0; i < n_pre; ++i) {
-        args[i] = pre[i];
-    }
-    int i = n_pre;
-    for (value p = args_list; p != NIL; p = GET_PAIR(p)->cdr) {
-        args[i++] = GET_PAIR(p)->car;
-    }
+    apply_fill_args(args, pre, n_pre, args_list);
 
     if (flags & IN_TAIL_POSITION) {
         pending_tail_call.closure = func;
         pending_tail_call.accepts_mvalues = flags & ACCEPTS_MVALUES;
         pending_tail_call.nargs = func_nargs;
-        pending_tail_call.overflow = func_nargs <= TAILCALL_MAX_INLINE ? VOID : argvec;
-        if (func_nargs <= TAILCALL_MAX_INLINE) {
-            for (int i = 0; i < func_nargs; ++i) {
-                pending_tail_call.args[i] = args[i];
-            }
-        }
+        pending_tail_call.overflow = argvec;
 
         free_args();
         return TAILCALL;
@@ -3121,14 +3193,21 @@ value primcall_jiffies_per_second(environment env, enum call_flags flags, int na
 
 value primcall_list(environment env, enum call_flags flags, int nargs, ...) {
     init_args();
-    value result = NIL;
+    value head = NIL;
+    value tail = NIL;
     for (int i = 0; i < nargs; ++i) {
-        value v = next_arg();
-        result = make_pair(v, result);
+        value p = make_pair(next_arg(), NIL);
+        if (tail == NIL) {
+            head = p;
+        } else {
+            GET_PAIR(tail)->cdr = p;
+        }
+
+        tail = p;
     }
     free_args();
 
-    return reverse_list(result, NIL);
+    return head;
 }
 
 value primcall_list_star(environment env, enum call_flags flags, int nargs, ...) {
@@ -3452,6 +3531,26 @@ value primcall_percent_peek_char(environment env, enum call_flags flags, int nar
     free_args();
     if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("%%peek-char argument is not an input port"); }
     return GET_OBJECT(port)->port.peek_char(port);
+}
+
+value primcall_port_fold_case_q(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("port-fold-case? needs a single argument"); }
+    init_args();
+    value port = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("port-fold-case? argument is not an input port"); }
+    return BOOL(GET_OBJECT(port)->port.fold_case);
+}
+
+value primcall_port_fold_case_set_b(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("port-fold-case-set! needs two arguments"); }
+    init_args();
+    value port = next_arg();
+    value v = next_arg();
+    free_args();
+    if (!IS_PORT(port) || !GET_OBJECT(port)->port.is_input) { raise_error("port-fold-case-set! first argument is not an input port"); }
+    GET_OBJECT(port)->port.fold_case = v != FALSE;
+    return VOID;
 }
 
 value primcall_port_q(environment env, enum call_flags flags, int nargs, ...) {
