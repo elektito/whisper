@@ -2956,6 +2956,11 @@ and still a comment
   (equal? "|1| |-2.5| |+inf.0| |.| |#foo| |,x| |`x| |a(b| |a;b| |a\"b| |a'b| ... + - a.b ->x "
           (get-output-string out)))
 
+(eq? #true #t)
+(eq? #false #f)
+(equal? '(#t #f #t #f) '(#true #false #t #f))
+(equal? '(#t #f) (read (open-input-string "(#true #false)")))
+
 ;; non-cyclic sharing is not a cycle, so plain write prints it
 ;; redundantly rather than labeling it
 (let* ((x (list 1 2))
