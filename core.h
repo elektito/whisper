@@ -366,12 +366,25 @@ static inline float get_flonum(void *v) {
 __attribute__((noreturn, cold)) void raise_error(const char *fmt, ...);
 __attribute__((noreturn, cold)) void panic(const char *fmt, ...);
 
-/* used by -t test-suite mode: prints "." if result is TRUE, otherwise
- * "F(n)" where n is a 1-based count of assertions seen so far. */
+/* used by -t test-suite mode: called once before the first test.
+ * parses the test suite's own command line options. */
+void test_init(void);
+
+/* used by -t test-suite mode: called before each test runs, with its
+ * location ("file:line") and source text. counts the tests, so the
+ * first test is test 1. with -v, prints the test's number, location
+ * and text, followed by "... ". */
+void test_start(const char *location, const char *text);
+
+/* used by -t test-suite mode: reports the result of the current test.
+ * prints "." if result is TRUE, otherwise "F(n)" where n is the test's
+ * number. with -v, prints "OK" or "FAILED" and a newline instead,
+ * completing the line test_start began. */
 void test_assert(value result);
 
 /* called at the end of a -t test suite: prints a newline to end the
- * line of results and exits with status 1 if any assertion failed. */
+ * line of results (unless -v, where every line already ends in one)
+ * and exits with status 1 if any test failed. */
 void test_finish(void);
 
 #define init_args() va_list argsx; va_start(argsx, nargs); value *arg_arr_base = flags & CALL_HAS_ARG_ARRAY ? va_arg(argsx, value *) : NULL; value *arg_arr = arg_arr_base

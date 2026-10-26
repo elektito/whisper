@@ -297,21 +297,61 @@ void panic(const char *fmt, ...) {
     exit(1);
 }
 
+static int try_flush_file_buffer(struct object *port);
+
 static int test_counter = 0;
 static int test_failures = 0;
 
-void test_assert(value result) {
+/* set by -v on the test suite's command line. prints each test before
+ * it runs and its result after, one test per line. */
+static int test_verbose = 0;
+
+void test_init(void) {
+    for (int i = 1; i < cmdline_argc; ++i) {
+        if (strcmp(cmdline_argv[i], "-v") == 0) {
+            test_verbose = 1;
+        } else {
+            fprintf(stderr, "unknown test suite option: %s\n", cmdline_argv[i]);
+            exit(1);
+        }
+    }
+}
+
+/* in verbose mode the test lines go through stdio, while output from
+ * the tests themselves goes through the scheme stdout port. flushing
+ * both keeps them in order. */
+static void test_flush_output(void) {
+    if (stdout_port) { try_flush_file_buffer(GET_OBJECT(stdout_port)); }
+    fflush(stdout);
+}
+
+void test_start(const char *location, const char *text) {
     test_counter++;
-    if (result == TRUE) {
+
+    if (test_verbose) {
+        test_flush_output();
+        printf("%d %s %s ... ", test_counter, location, text);
+        /* so a test that hangs or crashes is the last line printed */
+        fflush(stdout);
+    }
+}
+
+void test_assert(value result) {
+    if (result != TRUE) { ++test_failures; }
+
+    if (test_verbose) {
+        test_flush_output();
+        printf(result == TRUE ? "OK\n" : "FAILED\n");
+        fflush(stdout);
+    } else if (result == TRUE) {
         printf(".");
     } else {
-        ++test_failures;
         printf("F(%d)", test_counter);
     }
 }
 
 void test_finish(void) {
-    printf("\n");
+    if (!test_verbose) { printf("\n"); }
     if (test_failures > 0) {
         exit(1);
     }

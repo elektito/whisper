@@ -1914,6 +1914,49 @@
 ;; copies the whole stack, including the top-level frame.
 (define *top-level-chunk-size* 300)
 
+;; in a test suite, every group of expanded top-level forms that is a
+;; test starts with a marker (*test-start-marker* source-form), where
+;; source-form is the form as read. the runtime numbers the tests, so
+;; the marker does not carry a number. markers are only ever placed at the top level, and compile-top-level-chunks
+;; handles them without going through compile-form. the marker is a
+;; fresh list so no user form can be eq? to it.
+(define *test-start-marker* (list 'test-start))
+
+(define (make-test-start-marker source-form)
+  (list *test-start-marker* source-form))
+
+(define (test-start-marker? form)
+  (and (pair? form) (eq? (car form) *test-start-marker*)))
+
+(define (define-form? form)
+  (and (pair? form) (identifier-is-special (car form) 'define #f)))
+
+;; whether a group of expanded top-level forms is a test. only the
+;; last form's value is asserted, and a define has no value
+;; (compile-define returns -1). an empty group, as from import or
+;; define-syntax, has nothing to assert.
+(define (test-group? forms)
+  (and (not (null? forms))
+       (not (define-form? (last forms)))))
+
+;; emits the test_start call for a test start marker, passing the
+;; test's location as "file:line" and its source text.
+(define (compile-test-start program func marker)
+  (let ((source-form (cadr marker)))
+    (let-values (((found filename start-line start-col end-line end-col)
+                  (lookup-form-span source-form)))
+      (gen-code func 1 "test_start(~s, ~s);\n"
+                (if found
+                    (format "~a:~a" filename start-line)
+                    (program-filename program))
+                (test-source-text source-form)))))
+
+;; the written form of a test
+(define (test-source-text form)
+  (let ((port (open-output-string)))
+    (write form port)
+    (get-output-string port)))
+
 ;; flattens groups of expanded top-level forms (one group per source
 ;; form) into (form . last?) pairs, where last? marks the last form of
 ;; its group. only that form's value is used, and in a test suite it
@@ -1933,11 +1976,23 @@
 ;; spliced into separate forms by the expander, and that matters for a
 ;; file that is mostly one big include.
 (define (compile-top-level-chunks program init-func groups)
+  ;; set by a test start marker and cleared by the test_assert of the
+  ;; same group, to check that the two agree on which groups are tests
+  (define in-test? #f)
   (define (compile-item chunk item)
-    (let* ((last? (cdr item))
-           (varnum (compile-form chunk 1 (car item) #f (not last?))))
-      (when (and last? (!= varnum -1) (program-is-test-suite program))
-        (gen-code chunk 1 "test_assert(x~a);\n" varnum))))
+    (if (test-start-marker? (car item))
+        (begin
+          (compile-test-start program chunk (car item))
+          (set! in-test? #t))
+        (let* ((last? (cdr item))
+               (varnum (compile-form chunk 1 (car item) #f (not last?))))
+          (when (and last? (program-is-test-suite program))
+            (unless (eq? in-test? (!= varnum -1))
+              (compile-error "internal error: test start marker does not match a test: ~s"
+                             (de-identifier (car item))))
+            (when in-test?
+              (gen-code chunk 1 "test_assert(x~a);\n" varnum)
+              (set! in-test? #f))))))
   (define (finish-chunk chunk)
     (when (program-debug program)
       (gen-code chunk 1 "leave_proc();\n"))
@@ -1985,12 +2040,18 @@
         (if (eof-object? form)
             (begin
               (mark-sealed-globals! program (expand-root-env-compilation-unit env))
+              (when (program-is-test-suite program)
+                (gen-code func 1 "test_init();\n"))
               (compile-top-level-chunks program func (reverse groups))
               (when (program-is-test-suite program)
                 (gen-code func 1 "test_finish();\n"))
               (gen-code func 1 "return VOID;\n"))
-            (loop (read (program-port program))
-                  (cons (expand-top-level-form form env filename) groups)))))))
+            (let ((expanded (expand-top-level-form form env filename)))
+              (loop (read (program-port program))
+                    (cons (if (and (program-is-test-suite program) (test-group? expanded))
+                              (cons (make-test-start-marker form) expanded)
+                              expanded)
+                          groups))))))))
 
 (define (compile-library program)
   (parameterize ((reader-state (new-reader-state (program-filename program)))

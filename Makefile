@@ -60,8 +60,11 @@ $(CURRENT): stage1 stage2-lib/compiler.manifest core.h core.c main.scm
 	./stage1 main.scm -o $(CURRENT) -f "-Wl,-s $(CFLAGS)" -L stage2-lib
 	diff stage1 $(CURRENT)
 
+# extra arguments for the test suite, e.g. make test ARGS=-v
+ARGS ?=
+
 test: $(CURRENT) libs
-	WHISPER_LIBRARY_PATH=lib ./$(CURRENT) test.scm -t -r -L lib
+	WHISPER_LIBRARY_PATH=lib ./$(CURRENT) test.scm -t -r -L lib -- $(ARGS)
 
 time: $(CURRENT) lib/whisper.manifest
 	bash -c 'time (./$(CURRENT) lib/whisper/whisper.sld -l -c -o /tmp/time-whisper.c \

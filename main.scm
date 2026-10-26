@@ -5,7 +5,7 @@
 ;;;;;; command-line parsing ;;;;;;
 
 (define-record-type <cmdline>
-  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode library-paths include-paths core-path expand-form)
+  (make-cmdline just-compile run output-file input-file test c-file executable-file delete-executable debug cflags library-mode library-paths include-paths core-path expand-form run-args)
   cmdline?
   (just-compile cmdline-just-compile cmdline-just-compile-set!)
   (run cmdline-run cmdline-run-set!)
@@ -21,7 +21,8 @@
   (library-paths cmdline-library-paths cmdline-library-paths-set!)
   (include-paths cmdline-include-paths cmdline-include-paths-set!)
   (core-path cmdline-core-path cmdline-core-path-set!)
-  (expand-form cmdline-expand-form cmdline-expand-form-set!))
+  (expand-form cmdline-expand-form cmdline-expand-form-set!)
+  (run-args cmdline-run-args cmdline-run-args-set!))
 
 (define (create-cmdline-args)
   (make-cmdline #f  ; just compile
@@ -39,6 +40,7 @@
                 '() ; include paths
                 "." ; core path
                 #f  ; expand form
+                '() ; run args (arguments after --)
                 ))
 
 (define (command-line-error fmt . args)
@@ -99,6 +101,9 @@
                  (begin
                    (cmdline-output-file-set! args (cadr cl))
                    (loop (cddr cl)))))
+            ((string=? (car cl) "--")
+             (cmdline-run-args-set! args (cdr cl))
+             args)
             ((string=? (car cl) "-e")
              (if (null? (cdr cl))
                  (command-line-error "missing argument to -e")
@@ -118,6 +123,8 @@
     (command-line-error "-l and -r are mutually exclusive"))
   (when (and (cmdline-library-mode args) (cmdline-test args))
     (command-line-error "-l and -t are mutually exclusive"))
+  (when (and (not (null? (cmdline-run-args args))) (not (cmdline-run args)))
+    (command-line-error "arguments after -- need -r"))
   (unless (cmdline-output-file args)
     (cmdline-delete-executable-set! args #t)
     (if (cmdline-just-compile args)
@@ -134,7 +141,7 @@
       (cmdline-executable-file-set! args (cmdline-output-file args))))
 
 (define (print-usage)
-  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g] [-e expr]
+  (format (current-error-port) "usage: ~a [input-file] [-r] [-c] [-l] [-L library-path] [-I include-path] [-C core-path] [-o output-file] [-f cflags] [-g] [-e expr] [-- program-args]
 
  -r\tcompile and run the program
  -c\tonly compile to a c file
@@ -151,6 +158,7 @@
  -t\tcompile the program as a test suite
  -g\tadd debug instrumentation
  -e\texpand the given expression and print the expanded form.
+ --\tpass the remaining arguments to the program run by -r
  if no input file is given, a repl is started.
 " (car (command-line)))
   (exit 0)
@@ -190,7 +198,11 @@
       (exit ret)))
 
   (when (cmdline-run args)
-    (let ((cmd (format "$(realpath ~a)" (cmdline-executable-file args))))
+    ;; the double quotes keep the shell from splitting the path that
+    ;; realpath prints
+    (let ((cmd (string-join (cons (format "\"$(realpath ~a)\"" (shell-quote (cmdline-executable-file args)))
+                                  (map shell-quote (cmdline-run-args args)))
+                            " ")))
       (let ((ret (system cmd)))
         (when (cmdline-delete-executable args)
           (delete-file (cmdline-executable-file args)))
