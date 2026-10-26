@@ -93,14 +93,22 @@
               (string-append "\\x" (number->string code 16) ";"))
              (else #f))))))
 
-;; whether a symbol's name needs |...| around it when written.
+;; whether a symbol's name needs |...| around it when written, which
+;; is when reading it back bare would not give the same symbol. that
+;; covers names that are empty, read as a number or as the dot of a
+;; dotted pair, start with a character that begins some other datum, or
+;; contain a delimiter or a character that needs escaping.
 (define (needs-quoting? str quote-char)
-  (let loop ((i 0))
-    (and (< i (string-length str))
-         (let ((ch (string-ref str i)))
-           (or (char-escape ch quote-char)
-               (eqv? ch #\space)
-               (loop (+ i 1)))))))
+  (or (= (string-length str) 0)
+      (string=? str ".")
+      (string->number str)
+      (memv (string-ref str 0) '(#\# #\` #\,))
+      (let loop ((i 0))
+        (and (< i (string-length str))
+             (let ((ch (string-ref str i)))
+               (or (char-escape ch quote-char)
+                   (memv ch '(#\space #\( #\) #\" #\; #\'))
+                   (loop (+ i 1))))))))
 
 ;; writes str to port, escaped and delimited by quote-char. with
 ;; optional-quotes, the delimiters (and so any escaping) are only used

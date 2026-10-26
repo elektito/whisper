@@ -2946,6 +2946,16 @@ and still a comment
     (write v out)
     (equal? "#0=#(1 2 #0#)" (get-output-string out))))
 
+(let ((out (open-output-string)))
+  (write (string->symbol "") out)
+  (equal? "||" (get-output-string out)))
+
+(let ((out (open-output-string)))
+  (for-each (lambda (name) (write (string->symbol name) out) (write-char #\space out))
+            '("1" "-2.5" "+inf.0" "." "#foo" ",x" "`x" "a(b" "a;b" "a\"b" "a'b" "..." "+" "-" "a.b" "->x"))
+  (equal? "|1| |-2.5| |+inf.0| |.| |#foo| |,x| |`x| |a(b| |a;b| |a\"b| |a'b| ... + - a.b ->x "
+          (get-output-string out)))
+
 ;; non-cyclic sharing is not a cycle, so plain write prints it
 ;; redundantly rather than labeling it
 (let* ((x (list 1 2))
