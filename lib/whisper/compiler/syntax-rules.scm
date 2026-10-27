@@ -497,16 +497,19 @@
                                ellipsis-aux
                                (expand-env-lookup def-env '...)))
          (wildcard-binding (expand-env-lookup def-env '_))
-         (_ (unless ellipsis-binding
-              (compile-error "internal error: no ellipsis (...) in definition environment")))
-         (_ (unless wildcard-binding
-              (compile-error "internal error: no wildcard (_) in definition environment")))
+         ;; ... or _ can be missing from the definition environment, as
+         ;; in (scheme r5rs), which has no _. then nothing is an ellipsis
+         ;; or a wildcard, and they are ordinary pattern variables.
          (is-ellipsis? (lambda (x)
                          (let ((b (resolve-head x def-env)))
-                           (and b (binding-denotes-same? b ellipsis-binding)))))
+                           (and b
+                                ellipsis-binding
+                                (binding-denotes-same? b ellipsis-binding)))))
          (is-wildcard? (lambda (x)
                          (let ((b (resolve-head x def-env)))
-                           (and b (binding-denotes-same? b wildcard-binding)))))
+                           (and b
+                                wildcard-binding
+                                (binding-denotes-same? b wildcard-binding)))))
          (literals (if custom-ellipsis (caddr form) (cadr form)))
          (literal-bindings (map (lambda (x) ;; build an alist (symbol . binding-or-#f)
                                   (if (identifier? x)

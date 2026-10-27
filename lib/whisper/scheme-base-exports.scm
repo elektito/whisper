@@ -52,6 +52,7 @@
         close-input-port
         close-output-port
         close-port
+        complex?
         cond
         cons
         current-error-port
@@ -61,6 +62,7 @@
         define-record-type
         define-syntax
         define-values
+        denominator
         do
         dynamic-wind
         else
@@ -136,6 +138,7 @@
         null?
         number->string
         number?
+        numerator
         open-input-bytevector
         open-input-string
         open-output-bytevector
@@ -156,6 +159,7 @@
         quote
         raise
         raise-continuable
+        rational?
         read-bytevector
         read-bytevector!
         read-char
@@ -163,6 +167,7 @@
         read-line
         read-string
         read-u8
+        real?
         reverse
         (rename truncate-remainder remainder)
         round

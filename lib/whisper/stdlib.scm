@@ -326,6 +326,44 @@
     (error "not a number"))
   (= 0 (- z z)))
 
+;; there are no complex numbers, so every number is complex and real.
+(define (complex? obj)
+  (number? obj))
+
+(define (real? obj)
+  (number? obj))
+
+;; every finite flonum is a fraction with a power of two as its
+;; denominator, so only the infinities and nan are not rational.
+(define (rational? obj)
+  (and (number? obj)
+       (finite? obj)))
+
+;; returns the numerator and denominator of q in lowest terms. exact
+;; numbers are integers, so their denominator is 1. a flonum is doubled
+;; until it is an integer, which is exact for floats. stopping at the
+;; first integer gives lowest terms, since the numerator is then odd.
+(define (%rational-parts who q)
+  (unless (rational? q)
+    (error (string-append who " argument is not a rational number") q))
+  (if (exact? q)
+      (values q 1)
+      (let loop ((n q) (d 1.0))
+        (cond ((= n (floor n)) (values n d))
+              ;; the denominator of a very small float can be larger
+              ;; than the largest float
+              ((infinite? (* d 2))
+               (error (string-append who " result is too large") q))
+              (else (loop (* n 2) (* d 2)))))))
+
+(define (numerator q)
+  (let-values (((n d) (%rational-parts "numerator" q)))
+    n))
+
+(define (denominator q)
+  (let-values (((n d) (%rational-parts "denominator" q)))
+    d))
+
 (define (positive? n)
   (> n 0))
 
