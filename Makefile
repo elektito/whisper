@@ -14,6 +14,7 @@ LIB_EXPORT_FILES = lib/whisper/scheme-base-exports.scm \
                    lib/whisper/scheme-char-exports.scm \
                    lib/whisper/scheme-case-lambda-exports.scm \
                    lib/whisper/scheme-file-exports.scm \
+                   lib/whisper/scheme-inexact-exports.scm \
                    lib/whisper/scheme-lazy-exports.scm \
                    lib/whisper/scheme-process-context-exports.scm \
                    lib/whisper/scheme-read-exports.scm \

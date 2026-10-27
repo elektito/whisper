@@ -18,6 +18,10 @@
   (import (whisper))
   (include-library-declarations "scheme-file-exports.scm"))
 
+(define-library (scheme inexact)
+  (import (whisper))
+  (include-library-declarations "scheme-inexact-exports.scm"))
+
 (define-library (scheme lazy)
   (import (whisper))
   (include-library-declarations "scheme-lazy-exports.scm"))

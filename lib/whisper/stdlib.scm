@@ -308,6 +308,24 @@
     (error "not a number"))
   (flonum? n))
 
+;; nan is the only number not equal to itself, and for the infinities
+;; z - z is nan
+(define (nan? z)
+  (unless (number? z)
+    (error "not a number"))
+  (not (= z z)))
+
+(define (infinite? z)
+  (unless (number? z)
+    (error "not a number"))
+  (and (= z z)
+       (not (= 0 (- z z)))))
+
+(define (finite? z)
+  (unless (number? z)
+    (error "not a number"))
+  (= 0 (- z z)))
+
 (define (positive? n)
   (> n 0))
 
@@ -326,15 +344,6 @@
 
 (define (!= m n)
   (not (= m n)))
-
-(define (expt base power)
-  (cond ((< power 0) (error "expt: negative exponent not supported"))
-        ((= power 0) 1)
-        (else
-         (let loop ((b base) (p power) (acc 1))
-           (cond ((= p 0) acc)
-                 ((even? p) (loop (* b b) (%truncate-quotient p 2) acc))
-                 (else (loop (* b b) (%truncate-quotient p 2) (* acc b))))))))
 
 (define (abs x)
   ;; the eqv? check catches -0.0, which is not less than zero

@@ -77,6 +77,7 @@
         exact
         exact?
         exact-integer?
+        exact-integer-sqrt
         expt
         file-error?
         floor
