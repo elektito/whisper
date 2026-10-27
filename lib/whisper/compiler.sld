@@ -12,7 +12,10 @@
   (export environment
           eval
           interaction-environment
+          load
+          null-environment
           run-repl
+          scheme-report-environment
 
           ;; used by main.scm
           init-compiler

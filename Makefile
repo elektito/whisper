@@ -98,6 +98,9 @@ lib/eval.manifest lib/eval.so lib/eval.a &: $(CURRENT) lib/whisper/scheme-eval.s
 lib/scheme-repl.manifest lib/scheme-repl.so lib/scheme-repl.a &: $(CURRENT) lib/whisper/scheme-repl.sld lib/compiler.manifest
 	./$(CURRENT) lib/whisper/scheme-repl.sld -l -o lib/scheme-repl -L lib -f "$(CFLAGS)"
 
+lib/scheme-load.manifest lib/scheme-load.so lib/scheme-load.a &: $(CURRENT) lib/whisper/scheme-load.sld lib/compiler.manifest
+	./$(CURRENT) lib/whisper/scheme-load.sld -l -o lib/scheme-load -L lib -f "$(CFLAGS)"
+
 lib/whisper-repl.manifest lib/whisper-repl.so lib/whisper-repl.a &: $(CURRENT) lib/whisper/whisper-repl.sld lib/compiler.manifest
 	./$(CURRENT) lib/whisper/whisper-repl.sld -l -o lib/whisper-repl -L lib -f "$(CFLAGS)"
 
@@ -133,7 +136,7 @@ lib/srfi-133.manifest lib/srfi-133.so lib/srfi-133.a &: $(CURRENT) lib/whisper.m
 lib/srfi-151.manifest lib/srfi-151.so lib/srfi-151.a &: $(CURRENT) lib/srfi-151-bitwise/srfi-151.sld lib/srfi-151-bitwise/bitwise.c lib/srfi-151-bitwise/bitwise-33.scm lib/srfi-151-bitwise/bitwise-60.scm lib/srfi-151-bitwise/bitwise-other.scm
 	./$(CURRENT) lib/srfi-151-bitwise/srfi-151.sld -l -o lib/srfi-151 -L lib -f '-I lib $(CFLAGS)'
 
-libs: lib/whisper.manifest lib/scheme.manifest lib/compiler.manifest lib/eval.manifest lib/scheme-repl.manifest lib/whisper-repl.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-48.manifest lib/srfi-69.manifest lib/srfi-111.manifest lib/srfi-133.manifest lib/srfi-151.manifest
+libs: lib/whisper.manifest lib/scheme.manifest lib/compiler.manifest lib/eval.manifest lib/scheme-repl.manifest lib/scheme-load.manifest lib/whisper-repl.manifest lib/raylib.manifest lib/srfi-1.manifest lib/srfi-8.manifest lib/srfi-48.manifest lib/srfi-69.manifest lib/srfi-111.manifest lib/srfi-133.manifest lib/srfi-151.manifest
 
 clean:
 	rm -rf $(CURRENT) stage0 stage1 stage0-lib stage1-lib stage2-lib
@@ -142,6 +145,7 @@ clean:
 	rm -f lib/compiler.manifest lib/compiler.so lib/compiler.a
 	rm -f lib/eval.manifest lib/eval.so lib/eval.a
 	rm -f lib/scheme-repl.manifest lib/scheme-repl.so lib/scheme-repl.a
+	rm -f lib/scheme-load.manifest lib/scheme-load.so lib/scheme-load.a
 	rm -f lib/whisper-repl.manifest lib/whisper-repl.so lib/whisper-repl.a
 	rm -f lib/raylib.manifest lib/raylib.so lib/raylib.a
 	rm -f lib/srfi-48.manifest lib/srfi-48.so lib/srfi-48.a

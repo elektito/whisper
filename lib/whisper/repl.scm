@@ -1,5 +1,6 @@
-;; the repl and interaction-environment. included by (whisper compiler)
-;; and re-exported by (whisper repl) and (scheme repl).
+;; the repl, interaction-environment, load, and the R5RS environment
+;; procedures. included by (whisper compiler) and re-exported by
+;; (whisper repl), (scheme repl), (scheme load), and (scheme r5rs).
 
 (define *interaction-environment* #f)
 
@@ -10,6 +11,39 @@
     (set! *interaction-environment*
           (environment '(whisper) '(scheme eval) '(scheme repl))))
   *interaction-environment*)
+
+(define (check-r5rs-version who version)
+  (unless (eqv? version 5)
+    (error (string-append who " only supports version 5") version)))
+
+(define (scheme-report-environment version)
+  (check-r5rs-version "scheme-report-environment" version)
+  (environment '(scheme r5rs)))
+
+;; only the syntactic keywords of r5rs
+(define (null-environment version)
+  (check-r5rs-version "null-environment" version)
+  (environment '(only (scheme r5rs)
+                      quote lambda if set! cond case and or let let* letrec
+                      begin do delay quasiquote unquote unquote-splicing
+                      define define-syntax let-syntax letrec-syntax
+                      syntax-rules else => ...)))
+
+;; reads the expressions in filename and evaluates them in order. each
+;; one is compiled separately, so this is slow for long files.
+(define load
+  (case-lambda
+   ((filename)
+    (load filename (interaction-environment)))
+   ((filename env)
+    (call-with-input-file filename
+      (lambda (port)
+        (parameterize ((reader-state (new-reader-state filename)))
+          (let loop ()
+            (let ((expr (read port)))
+              (unless (eof-object? expr)
+                (eval expr env)
+                (loop))))))))))
 
 (define (report-repl-error e)
   (display "error: " (current-error-port))

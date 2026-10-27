@@ -18,7 +18,10 @@
   (export environment
           eval
           interaction-environment
+          load
+          null-environment
           run-repl
+          scheme-report-environment
           init-compiler
           compile-file
           expand-for-display))
