@@ -569,7 +569,34 @@ and still a comment
 (eqv? 4.0 (round 4.5))
 (eqv? 4.0 (round 3.5))
 
+;; large flonums and the infinities. 3e9 does not fit in a 32-bit
+;; integer and 1e20 does not fit in a 64-bit one.
+(eqv? 3e9 (truncate 3e9))
+(eqv? 1e20 (floor 1e20))
+(eqv? 1e20 (ceiling 1e20))
+(eqv? 1e20 (round 1e20))
+(eqv? -1e20 (truncate -1e20))
+(eqv? +inf.0 (floor +inf.0))
+(eqv? -inf.0 (ceiling -inf.0))
+(eqv? +inf.0 (round +inf.0))
+(let ((x (truncate +nan.0)))
+  (not (= x x)))
+(integer? 3e9)
+(integer? 1e20)
+
 (eqv? 1 (exact 1.0))
+(eqv? -3 (exact -3.0))
+(eqv? 3000000000 (exact 3e9))
+
+;; without rationals, exact has nothing to return for non-integers, and
+;; 1e20 does not fit in a fixnum
+(guard (e (#t #t)) (exact 2.5) #f)
+(guard (e (#t #t)) (exact -0.5) #f)
+(guard (e (#t #t)) (exact +inf.0) #f)
+(guard (e (#t #t)) (exact -inf.0) #f)
+(guard (e (#t #t)) (exact +nan.0) #f)
+(guard (e (#t #t)) (exact 1e20) #f)
+(guard (e (#t #t)) (exact -1e20) #f)
 (eqv? 1.0 (inexact 1))
 
 ;; inexact numbers with no fractional part are integers too, but the

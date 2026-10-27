@@ -1789,11 +1789,7 @@ static void _write(value v, value port) {
 static void snprintf_flonum(char *buf, size_t buf_size, float f) {
     /* this function is much more complicated than it should be because
      * we want 1.0 to be printed as 1.0, not as 1.000000 (as %f would
-     * do) and not as 1 (as %g would do).
-     *
-     * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
-     * against libm for now. isnan and isinf are macros, so they do not
-     * need libm. */
+     * do) and not as 1 (as %g would do). */
 
     if (isnan(f)) {
         snprintf(buf, buf_size, "+nan.0");
@@ -2674,15 +2670,7 @@ value primcall_ceiling(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        float f = GET_FLONUM(n);
-        int64_t i = (int64_t) f;
-
-        /* if x is positive and has a non-zero fractional part, add 1 */
-        if (f > 0.0f && f != (float) i) {
-            return FLONUM((float)(i + 1));
-        }
-
-        return FLONUM((float) i);
+        return FLONUM(ceilf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -3010,15 +2998,7 @@ value primcall_floor(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        float f = GET_FLONUM(n);
-        int64_t i = (int64_t) f;
-
-        /* if x is negative and has a non-zero fractional part, subtract 1 */
-        if (f < 0.0f && f != (float) i) {
-            return FLONUM((float)(i - 1));
-        }
-
-        return FLONUM((float) i);
+        return FLONUM(floorf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -3666,31 +3646,9 @@ value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        float f = GET_FLONUM(n);
-        int64_t i = (int64_t) f;
-        float diff = f - (float) i;
-
-        if (diff < 0.0f) {
-            diff = -diff;
-        }
-
-        /* 1. if fractional part is strictly greater than 0.5, round away from zero */
-        if (diff > 0.5f) {
-            return FLONUM((f > 0.0f) ? (float)(i + 1) : (float)(i - 1));
-        }
-
-        /* 2. if fractional part is strictly less than 0.5, truncate toward zero */
-        if (diff < 0.5f) {
-            return FLONUM((float) i);
-        }
-
-        /* 3. exact tie (diff == 0.5): round to nearest even integer */
-        if (i % 2 != 0) {
-            return FLONUM((f > 0.0f) ? (float)(i + 1) : (float)(i - 1));
-        }
-
-        /* if currently even, keep it */
-        return FLONUM((float) i);
+        /* rintf rounds in the current rounding mode, which we never
+         * change from the default round-half-to-even that R7RS wants */
+        return FLONUM(rintf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -4080,7 +4038,7 @@ value primcall_truncate(environment env, enum call_flags flags, int nargs, ...) 
     free_args();
 
     if (IS_FLONUM(n)) {
-        return FLONUM((int) GET_FLONUM(n));
+        return FLONUM(truncf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
