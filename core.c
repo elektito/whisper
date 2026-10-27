@@ -2955,7 +2955,14 @@ value primcall_exact(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        return FIXNUM((int64_t) GET_FLONUM(n));
+        /* without rationals there is no exact version of a non-integer.
+         * nan fails the first check and the infinities the second. */
+        float f = GET_FLONUM(n);
+        if (f != truncf(f)) { raise_error("exact argument is not an integer"); }
+        if (f < (float) FIXNUM_MIN || f >= -(float) FIXNUM_MIN) {
+            raise_error("exact argument is too large to be a fixnum");
+        }
+        return FIXNUM((int64_t) f);
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
