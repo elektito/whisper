@@ -5492,6 +5492,17 @@ value primcall_atan(environment env, enum call_flags flags, int nargs, ...) {
     return FLONUM(atan2f(float_arg(y, "atan"), float_arg(x, "atan")));
 }
 
+/* returns the integer square root of k, the largest s with s * s <= k.
+ * for large k the double result can be slightly off, so the truncated
+ * s can be 1 more than the integer root. it is never further off than
+ * that. */
+static int64_t integer_sqrt(int64_t k) {
+    int64_t s = (int64_t) sqrt((double) k);
+    if (s * s > k) { s--; }
+    if ((s + 1) * (s + 1) <= k) { s++; }
+    return s;
+}
+
 value primcall_sqrt(environment env, enum call_flags flags, int nargs, ...) {
     if (nargs != 1) { raise_error("sqrt needs a single argument"); }
     init_args();
@@ -5502,23 +5513,90 @@ value primcall_sqrt(environment env, enum call_flags flags, int nargs, ...) {
         int64_t k = GET_FIXNUM(n);
         if (k < 0) { raise_error("sqrt argument is negative"); }
 
-        /* the root of an exact perfect square is exact. for large
-         * fixnums the double result can be slightly off, so the
-         * truncated s can be 1 more than the integer root. it is never
-         * further off than that. being 1 less does not happen either,
-         * but checking for it is cheap. */
-        double d = sqrt((double) k);
-        int64_t s = (int64_t) d;
-        if (s * s > k) { s--; }
-        if ((s + 1) * (s + 1) <= k) { s++; }
+        /* the root of an exact perfect square is exact */
+        int64_t s = integer_sqrt(k);
         if (s * s == k) {
             return FIXNUM(s);
         }
 
-        return FLONUM((float) d);
+        return FLONUM((float) sqrt((double) k));
     }
 
     float f = float_arg(n, "sqrt");
     if (f < 0.0f) { raise_error("sqrt argument is negative"); }
     return FLONUM(sqrtf(f));
+}
+
+value primcall_exact_integer_sqrt(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("exact-integer-sqrt needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    if (!IS_FIXNUM(n)) { raise_error("exact-integer-sqrt argument is not an exact integer"); }
+    if (GET_FIXNUM(n) < 0) { raise_error("exact-integer-sqrt argument is negative"); }
+    if (!(flags & ACCEPTS_MVALUES)) {
+        raise_error("return context does not support multiple values");
+    }
+
+    int64_t k = GET_FIXNUM(n);
+    int64_t s = integer_sqrt(k);
+
+    value vec = make_vector(2, VOID);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_MVALUES;
+    obj->mvalues.vec = vec;
+    GET_OBJECT(vec)->vector.data[0] = FIXNUM(s);
+    GET_OBJECT(vec)->vector.data[1] = FIXNUM(k - s * s);
+    return OBJECT(obj);
+}
+
+/* multiplies two fixnum values, raising an error if the result does not
+ * fit in a fixnum */
+static int64_t expt_mul(int64_t a, int64_t b) {
+    int64_t r;
+    if (__builtin_mul_overflow(a, b, &r) || r < FIXNUM_MIN || r > FIXNUM_MAX) {
+        raise_error("expt result is too large to be a fixnum");
+    }
+
+    return r;
+}
+
+value primcall_expt(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("expt needs two arguments"); }
+    init_args();
+    value base = next_arg();
+    value power = next_arg();
+    free_args();
+
+    /* an exact base to a non-negative exact power is exact. this is
+     * exponentiation by squaring. b runs through base^1, base^2,
+     * base^4 and so on, and is multiplied into acc for each 1 bit of
+     * the power. for example 3^13 = 3^8 * 3^4 * 3^1, since 13 is 1101
+     * in binary. the last squaring is skipped because it would be
+     * thrown away and could overflow when the result does not. */
+    if (IS_FIXNUM(base) && IS_FIXNUM(power) && GET_FIXNUM(power) >= 0) {
+        int64_t b = GET_FIXNUM(base);
+        int64_t p = GET_FIXNUM(power);
+        int64_t acc = 1;
+        while (p > 0) {
+            if (p & 1) { acc = expt_mul(acc, b); }
+            p >>= 1;
+            if (p > 0) { b = expt_mul(b, b); }
+        }
+        return FIXNUM(acc);
+    }
+
+    /* everything else is inexact. without rationals, this includes an
+     * exact base to a negative exact power. */
+    float b = float_arg(base, "expt");
+    float p = float_arg(power, "expt");
+
+    /* R7RS makes 0 to a negative power an error, and a negative base
+     * to a non-integer power would need a complex result */
+    if (b == 0.0f && p < 0.0f) { raise_error("expt of zero to a negative power"); }
+    if (b < 0.0f && p != truncf(p) && !isnan(p)) {
+        raise_error("expt of a negative number to a non-integer power");
+    }
+
+    return FLONUM(powf(b, p));
 }
