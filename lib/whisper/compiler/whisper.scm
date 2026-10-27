@@ -613,12 +613,14 @@
 
 (define (flonum->c f)
   ;; the special values are written as +inf.0 and so on in scheme, which
-  ;; is not valid c
+  ;; is not valid c. the f suffix makes c read the others directly as a
+  ;; float. without it they are read as a double and then rounded again
+  ;; to a float, which can give a different float.
   (let ((s (number->string f)))
     (cond ((string=? s "+inf.0") "INFINITY")
           ((string=? s "-inf.0") "-INFINITY")
           ((string=? s "+nan.0") "NAN")
-          (else s))))
+          (else (string-append s "f")))))
 
 (define (compile-number func indent form)
   (let ((varnum (func-next-varnum func)))

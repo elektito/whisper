@@ -187,6 +187,29 @@ and still a comment
 (equal? "7d0" (number->string 2000 16))
 (equal? "1.25" (number->string 1.25))
 
+;; floats print with the fewest digits that read back as the same float
+(equal? "100.0" (number->string 100.0))
+(equal? "0.1" (number->string 0.1))
+(equal? "16777216.0" (number->string 16777216.0))
+(equal? "3.1415927" (number->string 3.1415927))
+(equal? "0.33333334" (number->string (/ 1.0 3)))
+(equal? "1.0e+20" (number->string 1e20))
+(equal? "-0.0" (number->string -0.0))
+(let ((x (/ 1.0 3)))
+  (eqv? x (string->number (number->string x))))
+(let ((x (* 16777216.0 3.0)))
+  (eqv? x (string->number (number->string x))))
+
+;; float literals keep all their digits when compiled
+(eqv? 134217728 (exact 134217728.0))
+(not (eqv? 16777216.0 16777218.0))
+
+;; denormals underflow strtof, but are still the closest float
+(eqv? (* 1e-30 1e-15) (string->number "1.0e-45"))
+(equal? "3.0e-39" (number->string 3e-39))
+(eqv? 0.0 (string->number "1e-50"))
+(not (string->number "1e40"))
+
 ;; infinities and nans are written the standard way. the multiplication
 ;; overflows to infinity.
 (equal? "+inf.0" (number->string (* 1.0e30 1.0e30)))

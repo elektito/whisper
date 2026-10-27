@@ -1801,8 +1801,22 @@ static void snprintf_flonum(char *buf, size_t buf_size, float f) {
         return;
     }
 
-    /* format using %g into a buffer */
-    snprintf(buf, buf_size, "%g", f);
+    /* use the fewest significant digits that read back as the same
+     * float. 9 is always enough, but always using 9 would show digits
+     * that only come from the binary representation, like 0.100000001
+     * for 0.1. so try more digits only until the result reads back.
+     *
+     * a normal float holds at least 6 digits, so when 6 work there is
+     * no shorter string that %g would miss, since %g drops trailing
+     * zeros. starting at 6 also keeps 100.0 from becoming 1.0e+02,
+     * which is what %.1g gives. denormals hold fewer digits, so they
+     * start at 1. they are printed with an exponent either way. */
+    for (int digits = isnormal(f) ? 6 : 1; digits <= 9; digits++) {
+        snprintf(buf, buf_size, "%.*g", digits, f);
+        if (strtof(buf, NULL) == f) {
+            break;
+        }
+    }
 
     /* check for missing decimal point on numeric values */
     if (!strchr(buf, '.') && !strchr(buf, ',') &&
@@ -3823,9 +3837,12 @@ value primcall_string_to_number(environment env, enum call_flags flags, int narg
     char *endptr;
 
     if (is_decimal) {
+        /* strtof also reports ERANGE on underflow, where the result is
+         * a denormal or zero. that is still the closest float, so only
+         * an overflow to infinity is rejected. */
         errno = 0;
         float result_f = strtof(start, &endptr);
-        if (errno == 0 && endptr == start + len) {
+        if ((errno == 0 || (errno == ERANGE && !isinf(result_f))) && endptr == start + len) {
             free(str);
             if (exact) {
                 return FIXNUM((int64_t) result_f);
