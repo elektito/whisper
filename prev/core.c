@@ -1789,11 +1789,7 @@ static void _write(value v, value port) {
 static void snprintf_flonum(char *buf, size_t buf_size, float f) {
     /* this function is much more complicated than it should be because
      * we want 1.0 to be printed as 1.0, not as 1.000000 (as %f would
-     * do) and not as 1 (as %g would do).
-     *
-     * we could use `fmod(f, 1.0) == 0.0` but we don't want to link
-     * against libm for now. isnan and isinf are macros, so they do not
-     * need libm. */
+     * do) and not as 1 (as %g would do). */
 
     if (isnan(f)) {
         snprintf(buf, buf_size, "+nan.0");
@@ -2674,15 +2670,7 @@ value primcall_ceiling(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        float f = GET_FLONUM(n);
-        int64_t i = (int64_t) f;
-
-        /* if x is positive and has a non-zero fractional part, add 1 */
-        if (f > 0.0f && f != (float) i) {
-            return FLONUM((float)(i + 1));
-        }
-
-        return FLONUM((float) i);
+        return FLONUM(ceilf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -2955,7 +2943,14 @@ value primcall_exact(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        return FIXNUM((int64_t) GET_FLONUM(n));
+        /* without rationals there is no exact version of a non-integer.
+         * nan fails the first check and the infinities the second. */
+        float f = GET_FLONUM(n);
+        if (f != truncf(f)) { raise_error("exact argument is not an integer"); }
+        if (f < (float) FIXNUM_MIN || f >= -(float) FIXNUM_MIN) {
+            raise_error("exact argument is too large to be a fixnum");
+        }
+        return FIXNUM((int64_t) f);
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -3003,15 +2998,7 @@ value primcall_floor(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        float f = GET_FLONUM(n);
-        int64_t i = (int64_t) f;
-
-        /* if x is negative and has a non-zero fractional part, subtract 1 */
-        if (f < 0.0f && f != (float) i) {
-            return FLONUM((float)(i - 1));
-        }
-
-        return FLONUM((float) i);
+        return FLONUM(floorf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -3659,31 +3646,9 @@ value primcall_round(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
 
     if (IS_FLONUM(n)) {
-        float f = GET_FLONUM(n);
-        int64_t i = (int64_t) f;
-        float diff = f - (float) i;
-
-        if (diff < 0.0f) {
-            diff = -diff;
-        }
-
-        /* 1. if fractional part is strictly greater than 0.5, round away from zero */
-        if (diff > 0.5f) {
-            return FLONUM((f > 0.0f) ? (float)(i + 1) : (float)(i - 1));
-        }
-
-        /* 2. if fractional part is strictly less than 0.5, truncate toward zero */
-        if (diff < 0.5f) {
-            return FLONUM((float) i);
-        }
-
-        /* 3. exact tie (diff == 0.5): round to nearest even integer */
-        if (i % 2 != 0) {
-            return FLONUM((f > 0.0f) ? (float)(i + 1) : (float)(i - 1));
-        }
-
-        /* if currently even, keep it */
-        return FLONUM((float) i);
+        /* rintf rounds in the current rounding mode, which we never
+         * change from the default round-half-to-even that R7RS wants */
+        return FLONUM(rintf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -4073,7 +4038,7 @@ value primcall_truncate(environment env, enum call_flags flags, int nargs, ...) 
     free_args();
 
     if (IS_FLONUM(n)) {
-        return FLONUM((int) GET_FLONUM(n));
+        return FLONUM(truncf(GET_FLONUM(n)));
     } else if (IS_FIXNUM(n)) {
         return n;
     } else {
@@ -5425,4 +5390,213 @@ value primcall_values(environment env, enum call_flags flags, int nargs, ...) {
 
     free_args();
     return OBJECT(obj);
+}
+
+static float float_arg(value v, const char *name) {
+    if (IS_FLONUM(v)) {
+        return GET_FLONUM(v);
+    } else if (IS_FIXNUM(v)) {
+        return (float) GET_FIXNUM(v);
+    } else {
+        raise_error("%s argument is not a number", name);
+    }
+}
+
+value primcall_exp(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("exp needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(expf(float_arg(n, "exp")));
+}
+
+value primcall_log(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { raise_error("log needs one or two arguments"); }
+    init_args();
+    value n = next_arg();
+    value base = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    /* a negative argument would need a complex result */
+    float f = float_arg(n, "log");
+    if (f < 0.0f) { raise_error("log argument is negative"); }
+    if (nargs == 1) {
+        return FLONUM(logf(f));
+    }
+
+    float b = float_arg(base, "log");
+    if (b < 0.0f) { raise_error("log base is negative"); }
+    return FLONUM(logf(f) / logf(b));
+}
+
+value primcall_sin(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("sin needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(sinf(float_arg(n, "sin")));
+}
+
+value primcall_cos(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("cos needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(cosf(float_arg(n, "cos")));
+}
+
+value primcall_tan(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("tan needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(tanf(float_arg(n, "tan")));
+}
+
+value primcall_asin(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("asin needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    /* outside [-1, 1] the result would be complex */
+    float f = float_arg(n, "asin");
+    if (f < -1.0f || f > 1.0f) { raise_error("asin argument is out of range"); }
+    return FLONUM(asinf(f));
+}
+
+value primcall_acos(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("acos needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    /* outside [-1, 1] the result would be complex */
+    float f = float_arg(n, "acos");
+    if (f < -1.0f || f > 1.0f) { raise_error("acos argument is out of range"); }
+    return FLONUM(acosf(f));
+}
+
+value primcall_atan(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { raise_error("atan needs one or two arguments"); }
+    init_args();
+    value y = next_arg();
+    value x = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    if (nargs == 1) {
+        return FLONUM(atanf(float_arg(y, "atan")));
+    }
+
+    /* R7RS leaves (atan 0 0) undefined. atan2f gives 0.0 or pi. */
+    return FLONUM(atan2f(float_arg(y, "atan"), float_arg(x, "atan")));
+}
+
+/* returns the integer square root of k, the largest s with s * s <= k.
+ * for large k the double result can be slightly off, so the truncated
+ * s can be 1 more than the integer root. it is never further off than
+ * that. */
+static int64_t integer_sqrt(int64_t k) {
+    int64_t s = (int64_t) sqrt((double) k);
+    if (s * s > k) { s--; }
+    if ((s + 1) * (s + 1) <= k) { s++; }
+    return s;
+}
+
+value primcall_sqrt(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("sqrt needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FIXNUM(n)) {
+        int64_t k = GET_FIXNUM(n);
+        if (k < 0) { raise_error("sqrt argument is negative"); }
+
+        /* the root of an exact perfect square is exact */
+        int64_t s = integer_sqrt(k);
+        if (s * s == k) {
+            return FIXNUM(s);
+        }
+
+        return FLONUM((float) sqrt((double) k));
+    }
+
+    float f = float_arg(n, "sqrt");
+    if (f < 0.0f) { raise_error("sqrt argument is negative"); }
+    return FLONUM(sqrtf(f));
+}
+
+value primcall_exact_integer_sqrt(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("exact-integer-sqrt needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    if (!IS_FIXNUM(n)) { raise_error("exact-integer-sqrt argument is not an exact integer"); }
+    if (GET_FIXNUM(n) < 0) { raise_error("exact-integer-sqrt argument is negative"); }
+    if (!(flags & ACCEPTS_MVALUES)) {
+        raise_error("return context does not support multiple values");
+    }
+
+    int64_t k = GET_FIXNUM(n);
+    int64_t s = integer_sqrt(k);
+
+    value vec = make_vector(2, VOID);
+    struct object *obj = alloc_object();
+    obj->type = OBJ_MVALUES;
+    obj->mvalues.vec = vec;
+    GET_OBJECT(vec)->vector.data[0] = FIXNUM(s);
+    GET_OBJECT(vec)->vector.data[1] = FIXNUM(k - s * s);
+    return OBJECT(obj);
+}
+
+/* multiplies two fixnum values, raising an error if the result does not
+ * fit in a fixnum */
+static int64_t expt_mul(int64_t a, int64_t b) {
+    int64_t r;
+    if (__builtin_mul_overflow(a, b, &r) || r < FIXNUM_MIN || r > FIXNUM_MAX) {
+        raise_error("expt result is too large to be a fixnum");
+    }
+
+    return r;
+}
+
+value primcall_expt(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 2) { raise_error("expt needs two arguments"); }
+    init_args();
+    value base = next_arg();
+    value power = next_arg();
+    free_args();
+
+    /* an exact base to a non-negative exact power is exact. this is
+     * exponentiation by squaring. b runs through base^1, base^2,
+     * base^4 and so on, and is multiplied into acc for each 1 bit of
+     * the power. for example 3^13 = 3^8 * 3^4 * 3^1, since 13 is 1101
+     * in binary. the last squaring is skipped because it would be
+     * thrown away and could overflow when the result does not. */
+    if (IS_FIXNUM(base) && IS_FIXNUM(power) && GET_FIXNUM(power) >= 0) {
+        int64_t b = GET_FIXNUM(base);
+        int64_t p = GET_FIXNUM(power);
+        int64_t acc = 1;
+        while (p > 0) {
+            if (p & 1) { acc = expt_mul(acc, b); }
+            p >>= 1;
+            if (p > 0) { b = expt_mul(b, b); }
+        }
+        return FIXNUM(acc);
+    }
+
+    /* everything else is inexact. without rationals, this includes an
+     * exact base to a negative exact power. */
+    float b = float_arg(base, "expt");
+    float p = float_arg(power, "expt");
+
+    /* R7RS makes 0 to a negative power an error, and a negative base
+     * to a non-integer power would need a complex result */
+    if (b == 0.0f && p < 0.0f) { raise_error("expt of zero to a negative power"); }
+    if (b < 0.0f && p != truncf(p) && !isnan(p)) {
+        raise_error("expt of a negative number to a non-integer power");
+    }
+
+    return FLONUM(powf(b, p));
 }

@@ -697,6 +697,17 @@ extern value primcall_num_lt(environment env, enum call_flags flags, int nargs, 
 extern value primcall_num_gt(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_num_le(environment env, enum call_flags flags, int nargs, ...);
 extern value primcall_num_ge(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_exp(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_log(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_sin(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_cos(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_tan(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_asin(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_acos(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_atan(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_sqrt(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_exact_integer_sqrt(environment env, enum call_flags flags, int nargs, ...);
+extern value primcall_expt(environment env, enum call_flags flags, int nargs, ...);
 
 /* two-argument arithmetic and comparisons, inlined by the compiler. the
  * fast path handles two fixnums. fixnums have a zero tag, so the tagged
