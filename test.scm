@@ -25,6 +25,7 @@ and still a comment
 ;; needed for the environment/eval tests below
 (import (scheme eval))
 (import (scheme repl))
+(import (only (scheme r5rs) scheme-report-environment null-environment))
 
 ;; needed for the srfi 151 tests below
 (import (srfi 151))
@@ -503,6 +504,33 @@ and still a comment
 (not (nan? 3.5))
 (not (nan? +inf.0))
 (guard (e (#t #t)) (nan? 'a) #f)
+
+;; there are no complex numbers, so every number is real, and every
+;; finite one is rational
+(complex? 1)
+(real? 1.5)
+(rational? 3)
+(rational? 1.5)
+(not (rational? +inf.0))
+(not (rational? +nan.0))
+(not (real? 'a))
+(not (rational? "1"))
+
+(eqv? 6 (numerator 6))
+(eqv? 1 (denominator 6))
+(eqv? 3.0 (numerator 0.75))
+(eqv? 4.0 (denominator 0.75))
+(eqv? -5.0 (numerator -2.5))
+(eqv? 2.0 (denominator -2.5))
+(eqv? 1.0 (denominator 0.0))
+(eqv? 1e20 (numerator 1e20))
+;; 0.1 is not exactly a tenth as a 32-bit float. this compares exact
+;; values because a float literal this long loses digits when compiled.
+(eqv? 134217728 (exact (denominator 0.1)))
+(eqv? 13421773 (exact (numerator 0.1)))
+(guard (e (#t #t)) (numerator +inf.0) #f)
+(guard (e (#t #t)) (denominator +nan.0) #f)
+(guard (e (#t #t)) (numerator 'a) #f)
 
 (eq? #f (not #t))
 (eq? #t (not #f))
@@ -1843,6 +1871,21 @@ and still a comment
 ;; eval should pass on multiple values
 (call-with-values (lambda () (eval '(values 1 2) (environment '(scheme base))))
                   (lambda (a b) (and (equal? 1 a) (equal? 2 b))))
+
+;; the r5rs environments only take version 5. the null environment has
+;; the syntax but none of the procedures.
+(= 42 (eval '(* 6 7) (scheme-report-environment 5)))
+(eq? 'yes (eval '(if #t 'yes 'no) (null-environment 5)))
+(guard (e (#t #t)) (eval '(car '(1 2)) (null-environment 5)) #f)
+(guard (e (#t #t)) (scheme-report-environment 7) #f)
+(guard (e (#t #t)) (null-environment 7) #f)
+
+;; r5rs has no _, so it is an ordinary pattern variable there, which can
+;; be used in the template.
+(equal? '(1 2)
+        (eval '(let-syntax ((swap (syntax-rules () ((swap _ b) (list b _)))))
+                 (swap 2 1))
+              (scheme-report-environment 5)))
 
 ;; eval should pass on multiple values, this time created by a captured
 ;; continuation
