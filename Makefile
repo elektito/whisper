@@ -77,7 +77,7 @@ matrix: $(CURRENT) libs
 		mkdir -p /tmp/matrix-lib.$$o \
 		&& ./$(CURRENT) lib/whisper/whisper.sld -l -o /tmp/matrix-lib.$$o/whisper -f -O$$o \
 		&& ./$(CURRENT) lib/whisper/compiler.sld -l -o /tmp/matrix-lib.$$o/compiler -L /tmp/matrix-lib.$$o -f -O$$o \
-		&& gcc -O$$o -Wl,-s -I. -ldl -Wl,--export-dynamic -o /tmp/b.$$o /tmp/b.c -Wl,--whole-archive /tmp/matrix-lib.$$o/whisper.a /tmp/matrix-lib.$$o/compiler.a -Wl,--no-whole-archive core.c \
+		&& gcc -O$$o -Wl,-s -I. -ldl -Wl,--export-dynamic -o /tmp/b.$$o /tmp/b.c -Wl,--whole-archive /tmp/matrix-lib.$$o/whisper.a /tmp/matrix-lib.$$o/compiler.a -Wl,--no-whole-archive core.c -lm \
 		&& /tmp/b.$$o main.scm -o /tmp/out.$$o -L lib \
 		&& WHISPER_LIBRARY_PATH=lib /tmp/b.$$o test.scm -t -r -L lib || exit 1; \
 	done

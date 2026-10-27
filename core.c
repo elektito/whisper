@@ -5426,3 +5426,134 @@ value primcall_values(environment env, enum call_flags flags, int nargs, ...) {
     free_args();
     return OBJECT(obj);
 }
+
+static float float_arg(value v, const char *name) {
+    if (IS_FLONUM(v)) {
+        return GET_FLONUM(v);
+    } else if (IS_FIXNUM(v)) {
+        return (float) GET_FIXNUM(v);
+    } else {
+        raise_error("%s argument is not a number", name);
+    }
+}
+
+value primcall_exp(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("exp needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(expf(float_arg(n, "exp")));
+}
+
+value primcall_log(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { raise_error("log needs one or two arguments"); }
+    init_args();
+    value n = next_arg();
+    value base = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    /* a negative argument would need a complex result */
+    float f = float_arg(n, "log");
+    if (f < 0.0f) { raise_error("log argument is negative"); }
+    if (nargs == 1) {
+        return FLONUM(logf(f));
+    }
+
+    float b = float_arg(base, "log");
+    if (b < 0.0f) { raise_error("log base is negative"); }
+    return FLONUM(logf(f) / logf(b));
+}
+
+value primcall_sin(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("sin needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(sinf(float_arg(n, "sin")));
+}
+
+value primcall_cos(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("cos needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(cosf(float_arg(n, "cos")));
+}
+
+value primcall_tan(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("tan needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+    return FLONUM(tanf(float_arg(n, "tan")));
+}
+
+value primcall_asin(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("asin needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    /* outside [-1, 1] the result would be complex */
+    float f = float_arg(n, "asin");
+    if (f < -1.0f || f > 1.0f) { raise_error("asin argument is out of range"); }
+    return FLONUM(asinf(f));
+}
+
+value primcall_acos(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("acos needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    /* outside [-1, 1] the result would be complex */
+    float f = float_arg(n, "acos");
+    if (f < -1.0f || f > 1.0f) { raise_error("acos argument is out of range"); }
+    return FLONUM(acosf(f));
+}
+
+value primcall_atan(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1 && nargs != 2) { raise_error("atan needs one or two arguments"); }
+    init_args();
+    value y = next_arg();
+    value x = nargs == 2 ? next_arg() : FALSE;
+    free_args();
+
+    if (nargs == 1) {
+        return FLONUM(atanf(float_arg(y, "atan")));
+    }
+
+    /* R7RS leaves (atan 0 0) undefined. atan2f gives 0.0 or pi. */
+    return FLONUM(atan2f(float_arg(y, "atan"), float_arg(x, "atan")));
+}
+
+value primcall_sqrt(environment env, enum call_flags flags, int nargs, ...) {
+    if (nargs != 1) { raise_error("sqrt needs a single argument"); }
+    init_args();
+    value n = next_arg();
+    free_args();
+
+    if (IS_FIXNUM(n)) {
+        int64_t k = GET_FIXNUM(n);
+        if (k < 0) { raise_error("sqrt argument is negative"); }
+
+        /* the root of an exact perfect square is exact. for large
+         * fixnums the double result can be slightly off, so the
+         * truncated s can be 1 more than the integer root. it is never
+         * further off than that. being 1 less does not happen either,
+         * but checking for it is cheap. */
+        double d = sqrt((double) k);
+        int64_t s = (int64_t) d;
+        if (s * s > k) { s--; }
+        if ((s + 1) * (s + 1) <= k) { s++; }
+        if (s * s == k) {
+            return FIXNUM(s);
+        }
+
+        return FLONUM((float) d);
+    }
+
+    float f = float_arg(n, "sqrt");
+    if (f < 0.0f) { raise_error("sqrt argument is negative"); }
+    return FLONUM(sqrtf(f));
+}
